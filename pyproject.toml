@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfyui-diffusiongemma"
+version = "0.0.0"
+description = "ComfyUI node pack for DiffusionGemma — uniform-state discrete diffusion text generation, made instrumentable."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Shane V Cantwell" }]
+keywords = ["comfyui", "diffusiongemma", "discrete-diffusion", "text-diffusion"]
+
+# Access path per ADR-CDG-002 (transformers + TextDiffusionStreamer). Left
+# unpinned and unlisted-as-hard-dep while design-only: ComfyUI supplies torch,
+# and DiffusionGemma transformers support is still stabilizing. Pin in Phase 1
+# when the vertical slice fixes a working version.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+# ComfyUI Registry metadata (comfy-cli / registry.comfy.org). Populated toward
+# Phase 6; PublisherId is a placeholder until registration.
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-DiffusionGemma"
+Icon = ""
+
+[tool.setuptools]
+# No importable package to install yet — ComfyUI loads this pack by directory,
+# not by pip install. Kept minimal until the node modules exist.
+py-modules = []
