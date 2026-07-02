@@ -12,3 +12,4 @@ in [`../plan.md`](../plan.md).
 |-------------|----------------------------------------------------------|----------|------------|
 | ADR-CDG-001 | [Native socket types instead of reusing SIGMAS/LATENT](adr-cdg-001-native-socket-types.md) | accepted | 2026-06-30 |
 | ADR-CDG-002 | [transformers + TextDiffusionStreamer as access path](adr-cdg-002-transformers-streamer-access-path.md) | accepted | 2026-06-30 |
+| ADR-CDG-003 | [Split thin node adapters from a ComfyUI-agnostic engine](adr-cdg-003-node-engine-seam.md) | accepted | 2026-06-30 |
