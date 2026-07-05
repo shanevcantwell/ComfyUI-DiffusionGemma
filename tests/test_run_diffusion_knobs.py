@@ -11,7 +11,13 @@ from __future__ import annotations
 import pytest
 import torch
 
-from dgemma.loop import THINK_TOKEN, THOUGHT_CHANNEL_END_ID, THOUGHT_CHANNEL_START_ID, run_diffusion
+from dgemma.loop import (
+    THINK_TOKEN,
+    THOUGHT_CHANNEL_END_ID,
+    THOUGHT_CHANNEL_START_ID,
+    _decode_ids,
+    run_diffusion,
+)
 from dgemma.types import DGemmaModel
 
 
@@ -59,6 +65,27 @@ def _fake_model() -> DGemmaModel:
     return DGemmaModel(
         model=object(), processor=FakeProcessor(), device="cpu", dtype="bfloat16", repo_id="fake/repo", quant="none"
     )
+
+
+class TestDecodeIds:
+    """`_decode_ids` (test-coverage-plan.md Phase 2, `dgemma/loop.py:361`):
+    plain-input unit test, no monkeypatching needed — `_decode_ids` only
+    needs a processor/tokenizer fake and a plain `ids` list."""
+
+    def test_no_eos_token_id_leaves_ids_untrimmed(self):
+        assert _decode_ids(FakeProcessor(), [1, 2, 3], eos_token_id=None) == "TEXT:1,2,3"
+
+    def test_eos_token_id_absent_from_ids_leaves_ids_untrimmed(self):
+        assert _decode_ids(FakeProcessor(), [1, 2, 3], eos_token_id=999) == "TEXT:1,2,3"
+
+    def test_eos_token_id_present_trims_inclusive_of_eos(self):
+        """The line this test exists for (`loop.py:361`): post-EOS
+        canvas-fill/renoise-garbage tokens must not leak into the decode."""
+        ids = [1, 2, 999, 3, 4]
+        assert _decode_ids(FakeProcessor(), ids, eos_token_id=999) == "TEXT:1,2,999"
+
+    def test_eos_token_id_as_first_id_trims_to_just_eos(self):
+        assert _decode_ids(FakeProcessor(), [999, 1, 2], eos_token_id=999) == "TEXT:999"
 
 
 def _install_fakes(monkeypatch, captured: dict, sequence: list[int]):
