@@ -129,6 +129,15 @@ confidence early-stop at 13/48 steps, coherent answer on the `STRING` socket).
 Known cosmetic carry-over to P2: leaked `thought\n` reasoning preamble on the
 `STRING` payload (both runs) — the thinking toggle below now has runtime
 evidence; payload-contamination concern per ADR-CDG-001.
+Live-GUI addendum (2026-07-05, post-handoff, operator-driven browser
+session): PASS — nodes register and wire in the frontend; trivial prompt →
+`Pong!` with `converged=True committed_fraction=1.0 steps_used=3/48` (EB
+early-stop visible in one number); `thought\n` leak reproduced in-GUI (third
+witness); raw `CanvasState` repr dumped onto the preview socket — live
+demonstration of *why* ADR-CDG-005 splits display from save-state. Loader
+widget default `quant="nf4"` OOMs structurally on this box (all-on-GPU
+device map + bnb-unquantizable MoE experts) — runtime evidence and the
+default-flip obligation banked on issue #4.
 
 ### Phase 2 — Expose the knobs
 Promote EB params to widgets, defaults from the live run: `max_steps=48`,

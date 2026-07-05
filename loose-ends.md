@@ -275,3 +275,33 @@ production failure verbatim (`ModuleNotFoundError: No module named 'dgemma'`).
 ### Implementation Notes
 - `dgemma/` itself needed no change (all-relative internally) — the seam
   held; only the adapter layer's imports were context-fragile.
+
+## 2026-07-05 — Dead frontend interactivity on this box: pre-reboot Ubuntu/browser state (unexplained, cleared by reboot)
+
+### Context
+First live-GUI session: canvas rendered but right-click/add-node was dead,
+with **no UI error surfaced** — only console noise (userdata 404s, legacy-menu
+warning, `graph accessed before initialization`). An A/B ladder exonerated
+everything we control: server healthy (`/object_info` 793 nodes), pack schema
+clean (tuple/mapping/case audit), stock-only instance on a virgin origin
+(port 8189) **still broken** → not the pack, not client site-state, not the
+install. A host reboot cleared it completely; same instance then ran the P1
+graph to PASS.
+
+### Decision
+Recorded as environment caution, not repaired: root cause unknown
+(browser-process or Ubuntu session state predating the reboot). If a future
+GUI session on this box shows silent dead interactivity with a healthy
+backend, **reboot first** before re-running the diagnostic ladder.
+
+### Why Not an ADR?
+No design decision — a host-environment anomaly with an unexplained root
+cause. Belongs in the log precisely so the next session doesn't re-derive
+the (expensive) exoneration chain.
+
+### Implementation Notes
+- Diagnostic ladder that produced the exoneration, for reuse: backend
+  `/object_info` count → schema audit (string-vs-tuple, mappings, case) →
+  `localStorage.clear()` → userdata-dir 200s → stock-only on fresh port/origin.
+- The `nf4` OOM found the same session is **not** this — that one is
+  explained and banked on issue #4.
