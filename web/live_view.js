@@ -22,59 +22,60 @@
 // CLAUDE.md's grounded facts / this repo's loose-ends.md for the full
 // grounding session.
 //
-// Rendering approach (implementer's call, per plan.md step 7 — not further
-// specified there): a litegraph `onDrawForeground` overlay + `setDirtyCanvas`
-// rather than a DOM overlay. This is the idiom `loose-ends.md`'s own
-// graduation-trigger note anticipates ("addEventListener + setDirtyCanvas"),
-// and it needs no extra widget wiring on the node — the state to render is
-// small (a handful of numeric fields per step), so a text line drawn
-// directly on the node body is the cheapest correct rendering, matching the
-// same "cheapest correct" discipline `nodes/trace.py`'s STRING summary uses.
+// Rendering approach — ROUND 2 (operator regression finding, 2026-07-05):
+// the readout is a LAYOUT-PARTICIPATING CUSTOM WIDGET in `node.widgets`, not
+// `onDrawForeground` paint. Two earlier attempts failed the same way:
+// foreground paint at a fixed offset collided with the widget stack, and
+// growing the node didn't help because ComfyUI's widget layout hands ALL
+// surplus node height to resizable widgets — the multiline `prompt`
+// textarea absorbed the added space and the paint stayed buried.
 //
-// Placement (operator finding, 2026-07-05, live-GUI session): the first cut
-// drew at a fixed offset from the node's bottom edge, which landed under the
-// node box and collided with the `thinking` widget. Fixed: the y-start is
-// computed from the ACTUAL widget stack — litegraph records `widget.last_y`
-// on each widget as it draws (the standard extension idiom for "where do the
-// widgets end"), so the overlay starts below the deepest widget. The event
-// handler also grows the node once per live run when there is no reserved
-// space below the widgets (growth target = `computeSize()` height — the
-// minimal size that fits inputs + widgets — plus the fixed live area; that
-// sum is also the cap, and an already-larger node is left alone). The label
-// word-wraps to the node's width and clips to the node body, so the readout
-// sits inside the box, below the last widget, at any node width.
+// Grounded against the installed frontend bundle
+// (`comfyui_frontend_package==1.45.20`, `static/assets/api-DzWNw5Ki.js`),
+// the same way the addEventListener idiom was grounded:
+// - Layout: the widget-arrange pass does
+//   `if (e.computeSize) { t = e.computeSize()[1] + 4; e.computedHeight = t }
+//    else if (e.computeLayoutSize) { a.push({minHeight, prefHeight, w: e}) }`
+//   and then distributes ONLY the remaining space among the
+//   `computeLayoutSize` (resizable, e.g. textarea) widgets via
+//   `distributeSpace(Math.max(0, r), s)`. A widget exposing `computeSize`
+//   therefore has fixed, reserved height the textarea structurally cannot
+//   swallow — the exact fix for the regression.
+// - Draw: `drawWidgets` does `typeof s.draw === "function" ?
+//   s.draw(e, this, l, i, a, t)` — i.e. custom widgets are drawn via
+//   `draw(ctx, node, widgetWidth, y, H, lowQuality)` with `y` assigned by
+//   the layout pass (`for (let e of o) e.y = l, l += e.computedHeight`).
+// - Inclusion: `getLayoutWidgets()` filters only `hidden` widgets;
+//   `isWidgetVisible` only excludes `hidden`/`advanced` — a plain object
+//   widget participates.
+// - Registration: `node.addCustomWidget(w)` exists
+//   (`addCustomWidget(e){this.widgets||=[]; ...; this.widgets.push(t)}`).
+// - Serialization safety: save does `if (r.serialize === false) continue`
+//   and restore does `if (n.serialize !== false)` — `serialize: false`
+//   keeps this widget out of `widgets_values` in BOTH directions, so it
+//   can never shift the real widgets' saved values by index.
 
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 const DGEMMA_STEP_EVENT = "dgemma.sampler.step";
 const DGEMMA_SAMPLER_NODE_TYPE = "DGemmaSampler";
+const LIVE_WIDGET_NAME = "dgemma_live_view";
 
 const LIVE_LINE_HEIGHT = 14; // px per wrapped text line (12px monospace + leading)
-const LIVE_MAX_LINES = 4; // sane cap — wrapped lines beyond this are dropped
-const LIVE_AREA_HEIGHT = LIVE_MAX_LINES * LIVE_LINE_HEIGHT + 12; // reserved space below widgets
+const LIVE_MAX_LINES = 4; // reserved lines; wrapped overflow beyond this is dropped
+const LIVE_AREA_HEIGHT = LIVE_MAX_LINES * LIVE_LINE_HEIGHT + 4; // = 60px reserved by layout
 const LIVE_PAD_X = 8;
-const LIVE_PAD_Y = 6;
 
-// Bottom of the widget stack, from litegraph's own per-widget draw
-// bookkeeping (`widget.last_y`, set on each widget as it is drawn). Falls
-// back to the node's minimal computed height minus the reserved live area
-// when widgets haven't drawn yet (a frame arriving before the first paint).
-function widgetStackBottom(node) {
-    const widgetHeight = (window.LiteGraph && window.LiteGraph.NODE_WIDGET_HEIGHT) || 20;
-    let bottom = 0;
-    for (const w of node.widgets || []) {
-        if (typeof w.last_y === "number") {
-            bottom = Math.max(bottom, w.last_y + (w.computedHeight || widgetHeight));
-        }
-    }
-    if (!bottom) {
-        bottom = Math.max(0, node.computeSize()[1] - LIVE_AREA_HEIGHT);
-    }
-    return bottom;
+function formatLabel(live) {
+    return (
+        `canvas ${live.canvas_idx} · step ${live.step_idx} · ` +
+        `t=${Number(live.t).toFixed(3)} · temp=${Number(live.temperature).toFixed(3)} · ` +
+        `committed=${(Number(live.committed_fraction) * 100).toFixed(1)}%`
+    );
 }
 
-// Greedy word-wrap against the node's inner width, capped at LIVE_MAX_LINES.
+// Greedy word-wrap against the widget's inner width, capped at LIVE_MAX_LINES.
 function wrapLabel(ctx, text, maxWidth) {
     const words = text.split(" ");
     const lines = [];
@@ -98,51 +99,70 @@ function wrapLabel(ctx, text, maxWidth) {
     return lines;
 }
 
+// A read-only, layout-participating widget owning the live readout's lines.
+// `computeSize` (fixed height) is what makes the reservation real — see the
+// bundle grounding in the header comment. `serialize: false` keeps it out of
+// `widgets_values` on both save and restore.
+function createLiveWidget() {
+    return {
+        type: LIVE_WIDGET_NAME,
+        name: LIVE_WIDGET_NAME,
+        value: null, // latest per-step payload; null = idle
+        serialize: false,
+        options: {},
+        computeSize(width) {
+            return [width ?? 0, LIVE_AREA_HEIGHT];
+        },
+        draw(ctx, node, widgetWidth, y) {
+            const label = this.value ? formatLabel(this.value) : "live: (idle)";
+            const maxWidth = widgetWidth - 2 * LIVE_PAD_X;
+
+            ctx.save();
+            // Clip to this widget's own reserved rect — wrapped text can
+            // never paint over neighboring widgets or outside the node.
+            ctx.beginPath();
+            ctx.rect(0, y, widgetWidth, LIVE_AREA_HEIGHT);
+            ctx.clip();
+
+            ctx.font = "12px monospace";
+            ctx.fillStyle = "#0f0"; // keep the green — it's the spot-it-live cue
+            ctx.textAlign = "left";
+            const lines = wrapLabel(ctx, label, maxWidth);
+            for (let i = 0; i < lines.length; i++) {
+                ctx.fillText(lines[i], LIVE_PAD_X, y + (i + 1) * LIVE_LINE_HEIGHT - 3);
+            }
+            ctx.restore();
+        },
+    };
+}
+
+function findLiveWidget(node) {
+    return (node.widgets || []).find((w) => w.name === LIVE_WIDGET_NAME);
+}
+
 app.registerExtension({
     name: "DiffusionGemma.LiveView",
 
-    // Attach the per-step overlay renderer to every `DGemmaSampler` node
-    // instance's prototype. This runs once per node *type* registration,
-    // not per node instance — cheap, and independent of how many
-    // DGemmaSampler nodes exist on the graph.
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== DGEMMA_SAMPLER_NODE_TYPE) {
+    // Append the live widget to every DGemmaSampler instance as it is
+    // created — it lands after the node-def widgets (prompt, seed, ...,
+    // thinking), i.e. at the bottom of the widget stack, with its own
+    // layout-reserved lines ("explicitly add an empty line to the bottom",
+    // as a widget that owns those lines). The idle text makes the reserved
+    // space visibly intentional rather than a mystery gap.
+    nodeCreated(node) {
+        if (node.comfyClass !== DGEMMA_SAMPLER_NODE_TYPE) {
             return;
         }
-
-        const onDrawForeground = nodeType.prototype.onDrawForeground;
-        nodeType.prototype.onDrawForeground = function (ctx) {
-            const result = onDrawForeground?.apply(this, arguments);
-
-            const live = this._dgemmaLiveState;
-            if (live && !(this.flags && this.flags.collapsed)) {
-                const label =
-                    `canvas ${live.canvas_idx} · step ${live.step_idx} · ` +
-                    `t=${Number(live.t).toFixed(3)} · temp=${Number(live.temperature).toFixed(3)} · ` +
-                    `committed=${(Number(live.committed_fraction) * 100).toFixed(1)}%`;
-
-                const yStart = widgetStackBottom(this) + LIVE_PAD_Y;
-                const maxWidth = this.size[0] - 2 * LIVE_PAD_X;
-
-                ctx.save();
-                // Clip to the node body so wrapped text can never paint
-                // outside the box or over neighboring canvas content.
-                ctx.beginPath();
-                ctx.rect(0, 0, this.size[0], this.size[1]);
-                ctx.clip();
-
-                ctx.font = "12px monospace";
-                ctx.fillStyle = "#0f0"; // keep the green — it's the spot-it-live cue
-                ctx.textAlign = "left";
-                const lines = wrapLabel(ctx, label, maxWidth);
-                for (let i = 0; i < lines.length; i++) {
-                    ctx.fillText(lines[i], LIVE_PAD_X, yStart + (i + 1) * LIVE_LINE_HEIGHT);
-                }
-                ctx.restore();
-            }
-
-            return result;
-        };
+        if (findLiveWidget(node)) {
+            return; // already attached (defensive: configure/reload paths)
+        }
+        const widget = createLiveWidget();
+        if (typeof node.addCustomWidget === "function") {
+            node.addCustomWidget(widget);
+        } else {
+            node.widgets ||= [];
+            node.widgets.push(widget);
+        }
     },
 
     async setup() {
@@ -158,17 +178,11 @@ app.registerExtension({
                 return; // Not on this client's graph (e.g. a different tab/session watching the queue).
             }
 
-            node._dgemmaLiveState = payload;
-
-            // Reserve space below the widget stack while a run is live:
-            // computeSize() is the minimal height fitting inputs + widgets,
-            // so minimal + LIVE_AREA_HEIGHT is both the growth target and
-            // its own cap — an already-larger node is left alone.
-            const needed = node.computeSize()[1] + LIVE_AREA_HEIGHT;
-            if (node.size[1] < needed) {
-                node.setSize([node.size[0], needed]);
+            const widget = findLiveWidget(node);
+            if (!widget) {
+                return;
             }
-
+            widget.value = payload;
             node.setDirtyCanvas(true, false);
         });
     },
