@@ -38,3 +38,12 @@ Derived mechanically from the running instance's `/object_info` after the P2 com
 thought-leak repro ("Why do birds suddenly appear?"), seed=7. Verifier PASS same day:
 STRING clean of the thought frame, validity readout intact. The entropy_bound sweep is
 this graph with only `entropy_bound` varied.
+
+## p3-trace-smoke.api.json (+ -thinking variant) (2026-07-05, P3)
+
+Derived from the live `/object_info` after the P3 commit (`eabc13f`). Full instrumentation
+chain: `DGemmaLoader → DGemmaSampler → DGemmaTrace` with previews on text, canvas_state,
+heatmap, and summary. Verifier PASS same day: 15/15 ws `dgemma.sampler.step` events vs
+steps_used, heatmap IMAGE in history, `turn_closed=True answer_tokens=64` on a 43-word
+answer. The `-thinking` variant reproduces the issue #9 empty-answer signature legibly
+(`turn_closed=False answer_tokens=0`, unclosed thought span).
