@@ -116,10 +116,39 @@ class CanvasState:
     Scope: single-example. P1's `run_diffusion` drives one prompt (batch 1);
     deriving a `CanvasState` from a batched frame raises via
     `DiffusionFrame.committed_fraction` rather than blending examples.
+
+    `canvas_ids`/`text` are post thought-channel-excision (P2, issue #8): the
+    model emits an id-100/id-101 `<|channel>...<channel|>` frame at turn
+    start (empty when `thinking=False`, possibly non-empty when
+    `thinking=True`) that upstream `skip_special_tokens=True` decode does not
+    fully strip — `dgemma.loop.excise_thought_channel` removes every
+    well-formed span from the canvas ids before either field is derived, so
+    neither payload can leak a frame (ADR-CDG-001 payload-contamination
+    discipline).
     """
 
     text: str
-    canvas_ids: Any  # torch.LongTensor, final canvas token ids (prompt stripped)
+    canvas_ids: Any  # torch.LongTensor, final canvas token ids (prompt stripped, thought-channel excised)
     converged: bool
     committed_fraction: float
     steps_used: int
+    thought: str | None = None
+    """Decoded content of the excised thought channel(s), or `None` when the
+    channel was empty (the `thinking=False` common case — the model card
+    notes an empty channel "might still be emitted" even with thinking off)
+    or absent entirely; multiple non-empty channels are joined with a blank
+    line. Not surfaced on the `STRING` payload (ADR-CDG-001: payloads mean
+    what they say — the answer text is the answer text); this is the
+    "natural slot" decision for issue #8's optional thought-surfacing ask,
+    landing on `CanvasState` since it already carries validity/diagnostic
+    readouts alongside the answer."""
+
+    stray_thought_delimiter: bool = False
+    """`True` iff the canvas held an unmatched `<|channel>` start delimiter
+    past the head of the generated region — a malformed frame
+    `excise_thought_channel` deliberately did NOT excise, because
+    excise-to-end there would silently destroy answer text (review finding,
+    2026-07-05). The answer `STRING` keeps all surrounding text (the
+    delimiter itself vanishes in `skip_special_tokens=True` decode); this
+    flag is the validity-side signal that an anomalous frame remnant exists
+    rather than letting the condition vanish."""

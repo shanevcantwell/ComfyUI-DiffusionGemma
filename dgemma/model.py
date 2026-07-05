@@ -5,10 +5,16 @@ only amends the *drive* seam, see `dgemma/loop.py`):
 `DiffusionGemmaForBlockDiffusion.from_pretrained()` +
 `AutoProcessor.from_pretrained()`, both transformers-side.
 
-Quantized by default: the 26B model needs ~53.6GB in bf16 (model card), and
-the 48GB RTX-8000 dev box (Turing, sm_75 — no native bf16 tensor cores) can't
-hold that plus a KV cache. NF4 4-bit with a float16 compute dtype is the
-grounded default (CLAUDE.md).
+The 26B model needs ~53.6GB in bf16 (model card); bitsandbytes quantization
+was the original plan for the 48GB RTX-8000 dev box (Turing, sm_75 — no
+native bf16 tensor cores) but does not fit here in practice: bnb only
+quantizes `nn.Linear`/`Conv1D` modules, and DiffusionGemma's ~42.5GiB of
+fused 3D MoE expert params are neither, so NF4 still needs ~46GiB on a
+single card (`loose-ends.md`, 2026-07-05 bnb-MoE entry — issue #4). The
+grounded default is therefore `quant="none"` (full-precision bf16,
+`device_map="auto"` CPU-spill), verified with two integration PASSes on this
+box; `"nf4"`/`"int8"` remain available for hardware where the quantized
+footprint fits.
 """
 from __future__ import annotations
 
@@ -21,6 +27,17 @@ DEFAULT_REPO_ID = "google/diffusiongemma-26B-A4B-it"
 
 _QUANT_CHOICES = ("nf4", "int8", "none")
 _QUANT_DTYPE_LABELS = {"nf4": "float16", "int8": "int8", "none": "bfloat16"}
+
+# ONE-MINT: the widget default (nodes/loader.py) and this function's own
+# default both source from here, so there is exactly one place that decides
+# what a fresh graph starts with. Flipped from "nf4" (2026-07-05, issue #4):
+# "nf4" OOMs structurally on this 48GB box — bitsandbytes only quantizes
+# `nn.Linear`/`Conv1D` modules, and DiffusionGemma's fused 3D MoE expert
+# weights are neither, so NF4 only shrinks ~1B of the model's 26B params and
+# the quantized load still needs ~46GiB on a single card (`loose-ends.md`'s
+# 2026-07-05 bnb-MoE entry). "none" (bf16, `device_map="auto"` CPU-spill) has
+# two verified PASSes on this box instead.
+DEFAULT_QUANT = "none"
 
 
 def _quantization_config(quant: str) -> BitsAndBytesConfig | None:
@@ -83,13 +100,22 @@ def _resolve_device(model) -> str:
     return str(next(model.parameters()).device)
 
 
-def load_model(repo_id: str = DEFAULT_REPO_ID, quant: str = "nf4") -> DGemmaModel:
+def load_model(repo_id: str = DEFAULT_REPO_ID, quant: str = DEFAULT_QUANT) -> DGemmaModel:
     """Load `DiffusionGemmaForBlockDiffusion` + its processor onto `DGemmaModel`.
 
-    `quant` accepts `"nf4"` (default — 4-bit NF4, float16 compute dtype) |
-    `"int8"` | `"none"` (full-precision load — needs >=60GB GPU memory per the
-    model card, not viable on the 48GB dev box; kept for flexibility on larger
-    hardware).
+    `quant` accepts `"nf4"` | `"int8"` | `"none"` (default — full-precision
+    bf16 load, `device_map="auto"`, CPU-spills the ~42.5GiB of unquantizable
+    MoE expert params bitsandbytes can't touch). Grounded truth on this 48GB
+    dev box (`loose-ends.md`, 2026-07-05 bnb-MoE entry), corrected from an
+    earlier ungrounded claim that `"none"` was "not viable" here: `"none"` is
+    the one that actually works, with two verified integration PASSes
+    (bf16 CPU-spill); `"nf4"` is the one that OOMs structurally, because
+    bitsandbytes only replaces `nn.Linear`/`Conv1D` modules and
+    DiffusionGemma's fused 3D MoE expert weights
+    (`DiffusionGemmaTextExperts`) are neither — NF4 only shrinks ~1B of the
+    model's 26B params, so the quantized load still tries to allocate
+    ~46GiB on a single card. `"nf4"`/`"int8"` are kept for hardware where the
+    quantized footprint does fit.
     """
     if quant not in _QUANT_CHOICES:
         raise ValueError(f"quant must be one of {_QUANT_CHOICES}, got {quant!r}.")
