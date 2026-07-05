@@ -1,8 +1,8 @@
 # ADR-CDG-002 — Use transformers DiffusionGemmaForBlockDiffusion + TextDiffusionStreamer as the inference access path
 
-**Status**: accepted (implementation pending)
+**Status**: superseded by ADR-CDG-004 (partial — drive seam only; see Supersession Relationships)
 **Date**: 2026-06-30
-**Related**: ADR-CDG-001 (socket types)
+**Related**: ADR-CDG-001 (socket types), ADR-CDG-004 (amends the drive seam and resolves the open question below, 2026-07-05)
 
 ---
 
@@ -62,19 +62,41 @@ production throughput, revisit.
 
 ## Open Questions
 
-- [ ] **`mask_token=4` vs. pure uniform-state.** The `llama-diffusion-cli` EB run
-      prints `algorithm=4 ... mask_token=4`, which sits oddly against the
+- [x] **`mask_token=4` vs. pure uniform-state.** ~~The `llama-diffusion-cli` EB
+      run prints `algorithm=4 ... mask_token=4`, which sits oddly against the
       "uniform-state, renoise to *random vocabulary*, no `[MASK]`"
       characterization we've been working from. Is `mask_token` a generic field
       shared with the masked-diffusion models llama.cpp also runs (LLaDA, Dream)
       and used only vestigially / as a renoise-or-pad target, or does
-      `algorithm=4` lean on an absorbing mask in earnest?
-      **Resolution trigger:** investigate when instrumenting the loop in Phase 3
-      (and/or read the PR #24423 sampler source). If it genuinely uses an
-      absorbing mask, the "pure uniform-state" claim needs a footnote and
-      `CANVAS_STATE` (ADR-CDG-001) may need a mask sentinel value.
+      `algorithm=4` lean on an absorbing mask in earnest?~~
+      **Resolved 2026-07-05 (documentary; banked in `#2`):** pure uniform-state
+      renoise, **no absorbing mask**. Grounding:
+      - Diffusers' `DiffusionGemmaPipeline` doc runs `BlockRefinementScheduler`
+        in "uniform corruption mode, `mask_token_id=None`"
+        (https://huggingface.co/docs/diffusers/api/pipelines/diffusion_gemma).
+      - The scheduler's `step()` docstring states it renoises uncommitted
+        positions "with uniformly random tokens, matching DiffusionGemma's
+        block refinement sampler"
+        (https://huggingface.co/docs/diffusers/v0.39.0/en/api/schedulers/entropy_bound).
+      - The default `EntropyBoundScheduler` config has no `mask_token_id`
+        concept at all.
+      - A source search of `generation_diffusion_gemma.py` (v5.13.0) for
+        `mask_token` / `algorithm` / `absorb` returns zero hits
+        (https://github.com/huggingface/transformers/blob/v5.13.0/src/transformers/models/diffusion_gemma/generation_diffusion_gemma.py).
+      - `mask_token_id` exists on `BlockRefinementScheduler` only because that
+        scheduler class is shared with `LLaDA2Pipeline`, which *does* use
+        absorbing masking — the field is vestigial for DiffusionGemma, not
+        evidence of one.
+      **Consequence:** confirms ADR-CDG-001's "no MASK" claim as-is — no
+      footnote, no `CANVAS_STATE` mask sentinel needed. This is a documentary
+      resolution; empirical corroboration still lands in Phase 3 per the
+      original trigger, but the type-design question is settled — build the
+      type layer accordingly.
 
 ## Supersession Relationships
 
 **Supersedes:** none
-**Superseded by:** TBD
+**Superseded by:** ADR-CDG-004 (partial — the *drive* seam: `diffusers`
+pipeline + scheduler replaces raw `.generate()` + `TextDiffusionStreamer`. The
+*load* seam, `DiffusionGemmaForBlockDiffusion.from_pretrained()`, and the
+rejection of vLLM/GGUF-as-primary both stand unchanged.)

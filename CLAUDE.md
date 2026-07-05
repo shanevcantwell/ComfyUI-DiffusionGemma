@@ -55,14 +55,23 @@ of a real trade-off — otherwise it's a [`loose-ends.md`](loose-ends.md) entry.
 
 ## Grounded facts (don't re-derive)
 
-- **Runtime access path:** HF transformers `DiffusionGemmaForBlockDiffusion` +
-  `TextDiffusionStreamer` (ADR-CDG-002). GGUF/llama.cpp is a graduation-triggered
+- **Runtime access path (hybrid — ADR-CDG-004 amends ADR-CDG-002):** **load**
+  via transformers `DiffusionGemmaForBlockDiffusion.from_pretrained()`
+  (unchanged); **drive** via `diffusers.DiffusionGemmaPipeline` + swappable
+  scheduler (default `EntropyBoundScheduler`) instead of raw `.generate()` +
+  `TextDiffusionStreamer` — needs `diffusers>=0.39.0` alongside
+  `transformers==5.13.0`. GGUF/llama.cpp is still a graduation-triggered
   *inference-only* backend, not the primary path.
-- **Open question that can move the type design:** `mask_token=4` / `algorithm=4`
-  (ADR-CDG-002) — whether DiffusionGemma leans on an absorbing `[MASK]` vs. pure
-  uniform-state renoise. Resolves in Phase 3. If it uses an absorbing mask,
-  ADR-CDG-001's "no MASK" claim needs a footnote and `CANVAS_STATE` may need a mask
-  sentinel. **Do not build the type layer as if this is settled.**
+- **Type-design question resolved:** pure uniform-state renoise, **no
+  absorbing mask** (`mask_token_id=None` for this model). ADR-CDG-001's
+  "no MASK" claim is confirmed — no `CANVAS_STATE` mask sentinel needed. The
+  type layer may be built as settled on this point; see ADR-CDG-002's
+  resolved open question and ADR-CDG-004 for sourcing.
+- **Weights:** `google/diffusiongemma-26B-A4B-it`
+  (https://huggingface.co/google/diffusiongemma-26B-A4B-it), ~53.6 GB
+  safetensors (bf16), ungated (Apache-2.0). Model card notes ≥60 GB GPU memory
+  for a bf16 load — the 48 GB RTX-8000 dev box needs quantized and/or
+  offloaded loading, not a full bf16 load.
 - **Local run defaults (Q4_K_M, first run):** `max_steps=48 t=[0.4,0.8]
   entropy_bound=0.1 confidence=0.005 canvas_length=256`. Pass `-ngl 99` (+
   `-cmoe`/`--n-cpu-moe` for overflow) or MoE experts spill to CPU (24 tok/s vs.

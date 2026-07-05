@@ -2,7 +2,9 @@
 
 **Status**: accepted (implementation pending)
 **Date**: 2026-06-30
-**Related**: ADR-CDG-002 (access path); supports the topology choice in `../loose-ends.md`
+**Related**: ADR-CDG-002 (access path), ADR-CDG-004 (drive-seam amendment;
+confirms the "no MASK" claim below, 2026-07-05); supports the topology choice
+in `../loose-ends.md`
 
 ---
 
@@ -69,6 +71,16 @@ every reader of every workflow. RES4LYF can honestly reuse these types because
 it *is* genuinely sigma/latent-based; this pack is not. Reusing them here would
 be a literal instance of the trap RES4LYF jokingly named ("lying sigmas"), but
 unintentional and load-bearing.
+
+## Resolution Note (2026-07-05)
+
+The "no MASK" characterization above — random-vocabulary renoise, not an
+absorbing `[MASK]` token — was carried as an assumption pending ADR-CDG-002's
+`mask_token=4` open question. That question is now resolved documentarily
+(ADR-CDG-002's Open Questions, corroborated in ADR-CDG-004): DiffusionGemma
+runs pure uniform-state renoise, `mask_token_id=None`. This confirms `CANVAS_STATE`
+needs no mask sentinel value. Empirical corroboration lands in Phase 3;
+until then this is a documentary confirmation, not yet a runtime observation.
 
 ## Open Questions
 

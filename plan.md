@@ -4,7 +4,7 @@ Working roadmap. Decisions referenced here are recorded in `decisions/`; this
 file is the *what-to-do-next*, not the *why* (the ADRs own the why).
 
 **Created:** 2026-06-30
-**Last updated:** 2026-06-30
+**Last updated:** 2026-07-05
 
 ## Shape (template stolen from RES4LYF, payloads from ADR-CDG-001)
 
@@ -68,15 +68,18 @@ Per-module notes:
   capture (P3). Everything else is roughly one-file-per-phase.
 - **`dgemma/types.py` grows monotonically:** `DGemmaModel` real + `CanvasState`
   stub (P1) → `CanvasTrace` (P3) → `EntropySchedule` (P4) → `Constraints` (P5).
-- **`dgemma/sampling.py` is the one fork (from ADR-CDG-002).** It only appears in
-  P3 *if* you reimplement the entropy-bound commit/renoise/stop rather than
-  hooking `TextDiffusionStreamer`. If the streamer exposes enough, this file
-  slips to P5 and P3 stays a pure capture task. Deciding this resolves the
-  `mask_token=4` open question on ADR-CDG-002.
+- **`dgemma/sampling.py` fork resolved (ADR-CDG-004).** The pack drives
+  DiffusionGemma via the Diffusers pipeline + scheduler, not raw `.generate()`
+  + `TextDiffusionStreamer` — the scheduler's `.step()` output natively carries
+  the commit mask, so there is no entropy-bound commit/renoise/stop to
+  reimplement. P3 is a pure capture task via `callback_on_step_end`; a custom
+  scheduler subclass (not a `LogitsProcessor`) is the P4 extension point for
+  curve swaps.
 - **`nodes/sampler.py` is the one node that keeps changing shape:** `STRING` out
   (P1) → +widgets (P2) → +`CANVAS_TRACE` out (P3) → consumes `ENTROPY_SCHEDULE`
   instead of raw widgets (P4) → consumes `CONSTRAINTS` + options (P5). Expect to
-  touch it every phase; keep it thin so that's cheap.
+  touch it every phase; keep it thin so that's cheap. It drives the Diffusers
+  pipeline (ADR-CDG-004), not `.generate()`.
 
 Dependency spine in one line: **model → loop → (knobs) → trace → schedule →
 constraints/options → publish.** Nothing downstream is buildable before the loop
@@ -88,8 +91,10 @@ runs, which is why P1 is the keystone.
 Access path locked (ADR-CDG-002). ADRs 001–003 + this plan written. **Done.**
 
 ### Phase 1 — Thin vertical slice *(the reverse-engineerable artifact)*
-`DGemmaLoader` + `DGemmaSampler` wrapping `.generate()`, EB defaults hardcoded,
-structured like ComfyUI-Llama. **Deliverable:** prompt in → text out, in the graph.
+`DGemmaLoader` + `DGemmaSampler` wrapping the Diffusers `DiffusionGemmaPipeline`
+(ADR-CDG-004; loads via transformers, drives via Diffusers), EB defaults
+hardcoded, structured like ComfyUI-Llama. **Deliverable:** prompt in → text
+out, in the graph.
 
 ### Phase 2 — Expose the knobs
 Promote EB params to widgets, defaults from the live run: `max_steps=48`,
@@ -97,10 +102,12 @@ Promote EB params to widgets, defaults from the live run: `max_steps=48`,
 plus seed and thinking toggle. **Deliverable:** entropy_bound sweep on a fixed prompt.
 
 ### Phase 3 — Instrumentation *(playground switches on)*
-Grow `dgemma/loop.py` to per-step capture; add `CanvasTrace`; build `DGemmaTrace`
-(entropy heatmap + commit-per-step avalanche curve + live denoise).
-**Deliverable:** watch the late-burst on your own runs; replicate the
-"Neither Parallel Nor Sequential" curve. **Resolve ADR-CDG-002 open question here.**
+Grow `dgemma/loop.py` to per-step capture via `callback_on_step_end`; add
+`CanvasTrace`; build `DGemmaTrace` (entropy heatmap + commit-per-step
+avalanche curve + live denoise). **Deliverable:** watch the late-burst on your
+own runs; replicate the "Neither Parallel Nor Sequential" curve. ADR-CDG-002's
+`mask_token` open question is already resolved documentarily (ADR-CDG-004,
+2026-07-05); this phase supplies the empirical corroboration.
 
 ### Phase 4 — Schedule node + curve zoo
 Split out `DGemmaEntropySchedule` with a curve selector (linear / linear-quadratic
