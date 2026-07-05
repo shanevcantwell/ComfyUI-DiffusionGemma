@@ -120,7 +120,15 @@ validity readout (`converged` / `committed_fraction` / `steps_used` on the
 still contain uncommitted renoise garbage sitting inside otherwise-plausible
 output, and a bare `STRING` has no way to say so (ADR-CDG-001 addendum,
 2026-07-05). **Deliverable:** prompt in → text out + validity readout, in the
-graph.
+graph. **Done (2026-07-05).** Evidence: real-weights integration PASS
+(`fe7eca7`: quant=none bf16 CPU-spill, 25.4s load, ~2.3s/step,
+`committed_fraction=0.9805 converged=False` at 8 steps — validity readout
+refusing to overclaim); headless-ComfyUI graph PASS post-`fcbeeec`
+(`DGemmaLoader → DGemmaSampler → PreviewAny`, history `success`, 51.65s wall,
+confidence early-stop at 13/48 steps, coherent answer on the `STRING` socket).
+Known cosmetic carry-over to P2: leaked `thought\n` reasoning preamble on the
+`STRING` payload (both runs) — the thinking toggle below now has runtime
+evidence; payload-contamination concern per ADR-CDG-001.
 
 ### Phase 2 — Expose the knobs
 Promote EB params to widgets, defaults from the live run: `max_steps=48`,
