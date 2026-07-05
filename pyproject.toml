@@ -11,11 +11,19 @@ requires-python = ">=3.10"
 authors = [{ name = "Shane V Cantwell" }]
 keywords = ["comfyui", "diffusiongemma", "discrete-diffusion", "text-diffusion"]
 
-# Access path per ADR-CDG-002 (transformers + TextDiffusionStreamer). Left
-# unpinned and unlisted-as-hard-dep while design-only: ComfyUI supplies torch,
-# and DiffusionGemma transformers support is still stabilizing. Pin in Phase 1
-# when the vertical slice fixes a working version.
-dependencies = []
+# Access path per ADR-CDG-004 (load via transformers, drive via the Diffusers
+# pipeline + scheduler). Pinned now that Phase 1 fixes a working version.
+# torchvision: required by the model's processor (`Gemma4Processor` →
+# `image_processing_gemma4.py:17` imports it unconditionally, transformers
+# 5.13.0) — a load-path dependency even for text-only use.
+dependencies = [
+    "transformers==5.13.0",
+    "diffusers>=0.39.0",
+    "torch",
+    "torchvision",
+    "accelerate",
+    "bitsandbytes",
+]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
@@ -31,3 +39,15 @@ Icon = ""
 # No importable package to install yet — ComfyUI loads this pack by directory,
 # not by pip install. Kept minimal until the node modules exist.
 py-modules = []
+
+[tool.pytest.ini_options]
+# `--import-mode=importlib`: the repo root's own `__init__.py` (the ComfyUI
+# pack entry point) makes pytest's default "prepend" mode try to resolve a
+# dotted package name by walking up through it, which fails — that
+# `__init__.py` only has a valid package context when ComfyUI's own loader
+# constructs one (see `nodes/__init__.py`'s naming note). `importlib` mode
+# imports each test file by its own file path instead, sidestepping that
+# entirely; `dgemma`/`nodes` are still found via `sys.path[0]` (the cwd
+# `python -m pytest` inserts).
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"

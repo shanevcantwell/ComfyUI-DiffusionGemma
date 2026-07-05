@@ -180,3 +180,56 @@ string payload throws there; it is not a generic preview channel.
 - [ ] Real trade-off? → None found; the ComfyUI execution model leaves only
       one mechanism for a live in-node view, so there was nothing to choose
       between.
+
+---
+
+## 2026-07-05 — bitsandbytes cannot quantize DiffusionGemma's MoE experts: NF4 load does NOT fit the 48GB box
+
+**Category:** grounded capability wall (blocks P1 integration test on this hardware)
+**Related ADR:** ADR-CDG-002/004 (load seam); CLAUDE.md grounded facts (the
+"quantized loading is identical on both paths" note still holds — the wall is
+bnb-vs-architecture, not transformers-vs-diffusers)
+**Graduation trigger:** choosing the replacement quantization/offload strategy
+is an ADR — it moves the load seam's dependency set and the P2+ performance
+envelope.
+
+### Context
+First real integration run (weights cached, `DGEMMA_INTEGRATION=1`,
+2026-07-05). The working assumption "NF4 of the 26B ≈ 14GB, fits 48GB with
+headroom" failed on grounding. Evidence chain, all against installed
+transformers 5.13.0 + bitsandbytes 0.49.2:
+
+- bnb module replacement only touches `Conv1D` / exactly-`nn.Linear`
+  (`transformers/integrations/bitsandbytes.py:189`).
+- DiffusionGemma's MoE expert weights are fused 3D `nn.Parameter`s on
+  `DiffusionGemmaTextExperts` (`modeling_diffusion_gemma.py:560-569`:
+  `gate_up_proj [128, 2*704, 2816]`, `down_proj [128, 2816, 704]`) — never
+  replaced, never quantized.
+- Config arithmetic: 128 experts x 30 layers → **22.84B expert params =
+  42.5 GiB at bf16, unquantized**, + ~1.4 GiB embeddings (also non-Linear,
+  262144 x 2816, tied lm_head) + vision tower. Only the attention/dense
+  `nn.Linear`s (~1B params) actually go NF4.
+- Observed: with `device_map={"": 0}` the load OOMs at
+  `caching_allocator_warmup` (`modeling_utils.py:5107`), trying to allocate
+  46.06 GiB against 45.05 GiB free — and that estimate is
+  quantization-aware (`param_element_size`, `quantizer_bnb_4bit.py:83-95`),
+  i.e. honest. With `device_map="auto"`, accelerate spills to CPU and the
+  bnb 4-bit guard rejects (`quantizer_bnb_4bit.py:70-81`). Neither path
+  loads; the model genuinely does not fit under bnb quantization.
+
+### Decision
+None yet — recorded as a wall, not routed around. Candidate directions for
+the follow-up decision (each has real trade-offs, none P1-unilateral):
+CPU-offload of experts via `llm_int8_enable_fp32_cpu_offload` + custom
+device_map (known-slow: the llama.cpp analogue measured 24 tok/s spilled vs.
+456 in-step); a quantization backend that handles fused 3D experts (survey
+needed — torchao/HQQ/GPTQ-class support for `nn.Parameter` experts is
+unverified); or accepting GGUF/llama.cpp graduation earlier than planned
+(ADR-CDG-002 gates this on need — this may be the need).
+
+### Implementation Notes
+- `dgemma/model.py` keeps `device_map={"": 0}` for quantized loads (pinning
+  is still correct for any checkpoint that fits; it skips accelerate's
+  conservative placement and the bnb CPU-spill rejection).
+- `tests/test_integration.py` stays as-is: it is the detector that caught
+  this, and goes green the moment a working load path exists.
