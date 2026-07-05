@@ -82,6 +82,36 @@ runs pure uniform-state renoise, `mask_token_id=None`. This confirms `CANVAS_STA
 needs no mask sentinel value. Empirical corroboration lands in Phase 3;
 until then this is a documentary confirmation, not yet a runtime observation.
 
+## Addendum (2026-07-05) — two more instances of the lying-payload principle
+
+Grounded against the installed diffusers 0.39.0 pipeline/scheduler source
+(ADR-CDG-004's grounding pass) and an operator design conversation on plan.md's
+P1/P3 grain. Both are the same "payloads mean what they say" principle this
+ADR already states, applied to axes this ADR didn't originally consider:
+
+- **Time-axis lying payload.** A bare `STRING` sampler output can lie the same
+  way a disguised `SIGMAS` tensor can: with wrong knobs (too few steps, too
+  wide an entropy bound), the final canvas can still contain uncommitted
+  renoise garbage sitting inside otherwise-plausible text — the payload says
+  "this is finished text" when it isn't. `CANVAS_STATE`'s validity fields
+  (`converged`, `committed_fraction`, `steps_used` — see `plan.md` P1) exist
+  to keep the `STRING` honest about its own completion state, not just to
+  report on it.
+- **Scheduler-relative commit semantics.** "Committed" is not one fixed
+  meaning across schedulers. Under `BlockRefinementScheduler` it is a ratchet:
+  persistent `self._committed` state that only accumulates
+  (`scheduling_block_refinement.py:81`, reset once at `step_index == 0` per
+  block, `:266`). Under `EntropyBoundScheduler` / `DiscreteDDIMScheduler` there
+  is no persistent commit state at all — "committed" is a per-step reading
+  recomputed from confidence each call. A `CANVAS_TRACE` that carries a commit
+  mask without also carrying the identity of the scheduler that minted that
+  mask's semantics is a lying payload — the same bit pattern means "locked in
+  forever" under one scheduler and "true as of this step only" under another.
+  `CANVAS_TRACE` therefore carries scheduler identity alongside the mask. This
+  is `ONE-MINT` applied to semantics rather than to names: the scheduler is
+  the mint of what the commit mask *means*, so the trace records which mint
+  produced it.
+
 ## Open Questions
 
 - [ ] Should we later ship an optional `CANVAS_STATE → IMAGE` adapter node so the

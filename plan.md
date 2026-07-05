@@ -63,11 +63,21 @@ touches," across a row for "how this module grows."
 
 Per-module notes:
 
-- **`dgemma/loop.py` is the spine.** It's the one file that grows across three
-  phases: `.generate()` wrapper (P1) → accepts the EB params (P2) → per-step
-  capture (P3). Everything else is roughly one-file-per-phase.
+- **`dgemma/loop.py` is the spine, and its contract is per-step frames from
+  day one**, not something Phase 3 invents. Via the one-line pipeline subclass
+  (ADR-CDG-004 open question (a), resolved) widening `_callback_tensor_inputs`
+  to include `"scheduler_output"`, it yields `(step, canvas, commit_mask,
+  entropy_stats)` every step across all three phases it touches: P1 keeps only
+  the last frame, P2 threads the EB params through the same per-step
+  generator, P3 is presentation over frames that were already flowing —
+  wiring the retained ones into `CanvasTrace`/`DGemmaTrace` instead of
+  discarding them.
 - **`dgemma/types.py` grows monotonically:** `DGemmaModel` real + `CanvasState`
-  stub (P1) → `CanvasTrace` (P3) → `EntropySchedule` (P4) → `Constraints` (P5).
+  stub (P1 — with real validity fields from the start: `converged`,
+  `committed_fraction`, `steps_used`, not just `STRING`; see Phase 1) →
+  `CanvasTrace` (P3 — frames keyed by absolute noise level `(t, temperature,
+  step_idx)`, never loop index alone) → `EntropySchedule` (P4) →
+  `Constraints` (P5).
 - **`dgemma/sampling.py` fork resolved (ADR-CDG-004).** The pack drives
   DiffusionGemma via the Diffusers pipeline + scheduler, not raw `.generate()`
   + `TextDiffusionStreamer` — the scheduler's `.step()` output natively carries
@@ -75,8 +85,9 @@ Per-module notes:
   reimplement. P3 is a pure capture task via `callback_on_step_end`; a custom
   scheduler subclass (not a `LogitsProcessor`) is the P4 extension point for
   curve swaps.
-- **`nodes/sampler.py` is the one node that keeps changing shape:** `STRING` out
-  (P1) → +widgets (P2) → +`CANVAS_TRACE` out (P3) → consumes `ENTROPY_SCHEDULE`
+- **`nodes/sampler.py` is the one node that keeps changing shape:** `STRING` +
+  validity readout out (P1) → +widgets (P2) → +`CANVAS_TRACE` out (P3) →
+  consumes `ENTROPY_SCHEDULE`
   instead of raw widgets (P4) → consumes `CONSTRAINTS` + options (P5). Expect to
   touch it every phase; keep it thin so that's cheap. It drives the Diffusers
   pipeline (ADR-CDG-004), not `.generate()`.
@@ -93,8 +104,16 @@ Access path locked (ADR-CDG-002). ADRs 001–003 + this plan written. **Done.**
 ### Phase 1 — Thin vertical slice *(the reverse-engineerable artifact)*
 `DGemmaLoader` + `DGemmaSampler` wrapping the Diffusers `DiffusionGemmaPipeline`
 (ADR-CDG-004; loads via transformers, drives via Diffusers), EB defaults
-hardcoded, structured like ComfyUI-Llama. **Deliverable:** prompt in → text
-out, in the graph.
+hardcoded, structured like ComfyUI-Llama. `dgemma/loop.py`'s contract is
+per-step frames from day one — `(step, canvas, commit_mask, entropy_stats)`
+via the one-line pipeline subclass (ADR-CDG-004 open question (a), resolved)
+— with P1 keeping only the last frame. The sampler emits `STRING` **plus** a
+validity readout (`converged` / `committed_fraction` / `steps_used` on the
+`CanvasState` stub), not a bare string: with wrong knobs the final text can
+still contain uncommitted renoise garbage sitting inside otherwise-plausible
+output, and a bare `STRING` has no way to say so (ADR-CDG-001 addendum,
+2026-07-05). **Deliverable:** prompt in → text out + validity readout, in the
+graph.
 
 ### Phase 2 — Expose the knobs
 Promote EB params to widgets, defaults from the live run: `max_steps=48`,
@@ -102,12 +121,17 @@ Promote EB params to widgets, defaults from the live run: `max_steps=48`,
 plus seed and thinking toggle. **Deliverable:** entropy_bound sweep on a fixed prompt.
 
 ### Phase 3 — Instrumentation *(playground switches on)*
-Grow `dgemma/loop.py` to per-step capture via `callback_on_step_end`; add
-`CanvasTrace`; build `DGemmaTrace` (entropy heatmap + commit-per-step
-avalanche curve + live denoise). **Deliverable:** watch the late-burst on your
-own runs; replicate the "Neither Parallel Nor Sequential" curve. ADR-CDG-002's
-`mask_token` open question is already resolved documentarily (ADR-CDG-004,
-2026-07-05); this phase supplies the empirical corroboration.
+`dgemma/loop.py` has yielded per-step frames since P1; this phase is
+presentation over data that's already flowing, not the phase the capture
+itself gets invented. Wire the retained frames into `CanvasTrace` — keyed by
+absolute noise level `(t, temperature, step_idx)`, never loop index alone,
+because variation runs (Renoise, `loose-ends.md`) start mid-schedule and
+loop-index keying would make cross-run traces silently incomparable — and
+build `DGemmaTrace` (entropy heatmap + commit-per-step avalanche curve + live
+denoise). **Deliverable:** watch the late-burst on your own runs; replicate
+the "Neither Parallel Nor Sequential" curve. ADR-CDG-002's `mask_token` open
+question is already resolved documentarily (ADR-CDG-004, 2026-07-05); this
+phase supplies the empirical corroboration.
 
 ### Phase 4 — Schedule node + curve zoo
 Split out `DGemmaEntropySchedule` with a curve selector (linear / linear-quadratic
@@ -117,7 +141,14 @@ Split out `DGemmaEntropySchedule` with a curve selector (linear / linear-quadrat
 ### Phase 5 — Constraints + options chain
 `DGemmaConstraints` (pin tokens at slots → bidirectional-ripple experiment) +
 first `DGemmaOptions_*` swapping commit policy (entropy / confidence / margin / KL).
-**Deliverable:** the experiments; the "insane combinations" surface.
+Hard pinning is grounded, not speculative: re-assert the pinned slots in
+`callback_on_step_end`'s canvas-overwrite return every step
+(`pipeline_diffusion_gemma.py:407`, fires after `scheduler.step`) — no
+diffusers internals touched. Candidate addition to the `DGemmaOptions_*`
+commit-policy family: `BlockRefinementScheduler`'s `editing_threshold` knob,
+an opt-in re-opening of already-committed tokens
+(`scheduling_block_refinement.py:280-287`). **Deliverable:** the experiments;
+the "insane combinations" surface.
 
 ### Phase 6 — The 🤪 phase *(maintenance)*
 ComfyUI Manager registration, README flip from "aspirational", **LICENSE file**

@@ -76,3 +76,9 @@ of a real trade-off — otherwise it's a [`loose-ends.md`](loose-ends.md) entry.
   entropy_bound=0.1 confidence=0.005 canvas_length=256`. Pass `-ngl 99` (+
   `-cmoe`/`--n-cpu-moe` for overflow) or MoE experts spill to CPU (24 tok/s vs.
   456 tok/s in-step parallel).
+- **Seeding/renoise:** the diffusers pipeline has no init-canvas param (canvas
+  is a hardcoded `torch.randint`); injected text is at best a soft prior, since
+  scheduler commit state resets or is absent at step 0. Hard pinning is a
+  per-step callback re-assertion, not a scheduler feature. transformers'
+  `.generate(decoder_input_ids=...)` seeds only the *first* canvas
+  (`generation_diffusion_gemma.py:987`). See `loose-ends.md` (DGemmaRenoise).

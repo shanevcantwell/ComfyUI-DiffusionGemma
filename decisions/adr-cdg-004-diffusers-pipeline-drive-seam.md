@@ -135,17 +135,39 @@ path and wrapping it in the pipeline for driving.
 
 ## Open Questions
 
-- [ ] **(a) Can `accepted_index` be threaded through
-      `callback_on_step_end_tensor_inputs`?** The documented tensor-input keys
+- [x] **(a) Can `accepted_index` be threaded through
+      `callback_on_step_end_tensor_inputs`?** ~~The documented tensor-input keys
       are `canvas`/`logits` only; `accepted_index` may need a thin
-      `DiffusionGemmaPipeline` subclass to surface.
-      **Resolution trigger:** read `pipeline_diffusion_gemma.py` in Phase 1
-      before committing `nodes/sampler.py`'s call shape.
-- [ ] **(b) Scheduler-subclass idiom for custom curves is inferred, not
-      documented with a worked example.**
-      **Resolution trigger:** Phase 4, when `DGemmaEntropySchedule` is built —
-      confirm the subclass contract against the actual `EntropyBoundScheduler`
-      base class at that diffusers version.
+      `DiffusionGemmaPipeline` subclass to surface.~~
+      **Resolved 2026-07-05 (source read, installed diffusers 0.39.0):** the
+      callback allowlist is the class attribute
+      `_callback_tensor_inputs = ["canvas", "logits"]`
+      (`pipeline_diffusion_gemma.py:76`), checked against
+      `callback_on_step_end_tensor_inputs` at call time, with generic
+      `callback_kwargs[k] = locals()[k]` extraction (`:404-405`) — not a
+      hardcoded two-key dispatch. A one-line subclass widening the allowlist to
+      include `"scheduler_output"` hands the callback the full scheduler
+      `.step()` output (`accepted_index`, `sampled_probs`, `pred_logits`)
+      directly, with no method override needed. Caveat: `"accepted_index"`
+      itself is not a valid key on its own — it is not a bound local in
+      `run()`'s scope, only the `scheduler_output` container is.
+      **Consequence:** Phase 1's loop contract can commit to the one-line
+      subclass now (see `plan.md`, P1's per-step loop contract); no
+      `nodes/sampler.py` call-shape risk remains.
+- [x] **(b) Scheduler-subclass idiom for custom curves is inferred, not
+      documented with a worked example.** ~~Resolution trigger: Phase 4, when
+      `DGemmaEntropySchedule` is built — confirm the subclass contract against
+      the actual `EntropyBoundScheduler` base class at that diffusers
+      version.~~
+      **Resolved-and-priced 2026-07-05 (source read, installed diffusers
+      0.39.0):** the linear anneal is inlined directly in
+      `EntropyBoundScheduler.step()` (`scheduling_entropy_bound.py:153-155`) —
+      there is no isolated hook a subclass could override in isolation. A
+      Phase 4 custom curve therefore overrides the entire ~65-line `step()`
+      method, not a small seam.
+      **Consequence:** the P4 custom-curve cost is now a known, priced cost
+      rather than an inferred one; accepted as-is (`plan.md` Phase 4 stands
+      unchanged).
 
 **Diffusers version grounding:** docs referenced at v0.39.0; verified
 installed in the repo venv alongside transformers 5.13.0.
