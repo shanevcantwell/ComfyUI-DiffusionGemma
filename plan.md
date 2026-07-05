@@ -143,6 +143,17 @@ default-flip obligation banked on issue #4.
 Promote EB params to widgets, defaults from the live run: `max_steps=48`,
 `t=[0.4, 0.8]`, `entropy_bound=0.1`, `confidence=0.005`, `canvas_length=256`,
 plus seed and thinking toggle. **Deliverable:** entropy_bound sweep on a fixed prompt.
+**Done (2026-07-05).** Evidence: `c10ced0` (widgets + thinking toggle + thought-channel
+excision + `DEFAULT_QUANT="none"` flip); live E2E verifier PASS against 8189 —
+schema-as-served matched every default via `/object_info`, leak-repro prompt clean in
+both thinking modes (#8 closed, `verified`); the deliverable sweep ran at
+`entropy_bound ∈ {0.02, 0.05, 0.1, 0.2, 0.4}` (seed=7, all converged, steps 14–19
+non-monotonic, text varying meaningfully with the bound); graph banked as
+`examples/p2-knobs-smoke.api.json`. Test coverage 87% → 100% (82 passed;
+`test-coverage-plan.md`). Known carry-over: `thinking=true` can spend the whole
+canvas thinking — empty answer with `converged=True` (#9, `auto:draft/pri:next`;
+continuation semantics + `answer_tokens`-style honesty readout are P3-adjacent
+design questions). The P1 `thought\n` leak carry-over is resolved by this phase.
 
 ### Phase 3 — Instrumentation *(playground switches on)*
 `dgemma/loop.py` has yielded per-step frames since P1; this phase is
