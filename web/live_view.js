@@ -30,12 +30,73 @@
 // small (a handful of numeric fields per step), so a text line drawn
 // directly on the node body is the cheapest correct rendering, matching the
 // same "cheapest correct" discipline `nodes/trace.py`'s STRING summary uses.
+//
+// Placement (operator finding, 2026-07-05, live-GUI session): the first cut
+// drew at a fixed offset from the node's bottom edge, which landed under the
+// node box and collided with the `thinking` widget. Fixed: the y-start is
+// computed from the ACTUAL widget stack — litegraph records `widget.last_y`
+// on each widget as it draws (the standard extension idiom for "where do the
+// widgets end"), so the overlay starts below the deepest widget. The event
+// handler also grows the node once per live run when there is no reserved
+// space below the widgets (growth target = `computeSize()` height — the
+// minimal size that fits inputs + widgets — plus the fixed live area; that
+// sum is also the cap, and an already-larger node is left alone). The label
+// word-wraps to the node's width and clips to the node body, so the readout
+// sits inside the box, below the last widget, at any node width.
 
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 const DGEMMA_STEP_EVENT = "dgemma.sampler.step";
 const DGEMMA_SAMPLER_NODE_TYPE = "DGemmaSampler";
+
+const LIVE_LINE_HEIGHT = 14; // px per wrapped text line (12px monospace + leading)
+const LIVE_MAX_LINES = 4; // sane cap — wrapped lines beyond this are dropped
+const LIVE_AREA_HEIGHT = LIVE_MAX_LINES * LIVE_LINE_HEIGHT + 12; // reserved space below widgets
+const LIVE_PAD_X = 8;
+const LIVE_PAD_Y = 6;
+
+// Bottom of the widget stack, from litegraph's own per-widget draw
+// bookkeeping (`widget.last_y`, set on each widget as it is drawn). Falls
+// back to the node's minimal computed height minus the reserved live area
+// when widgets haven't drawn yet (a frame arriving before the first paint).
+function widgetStackBottom(node) {
+    const widgetHeight = (window.LiteGraph && window.LiteGraph.NODE_WIDGET_HEIGHT) || 20;
+    let bottom = 0;
+    for (const w of node.widgets || []) {
+        if (typeof w.last_y === "number") {
+            bottom = Math.max(bottom, w.last_y + (w.computedHeight || widgetHeight));
+        }
+    }
+    if (!bottom) {
+        bottom = Math.max(0, node.computeSize()[1] - LIVE_AREA_HEIGHT);
+    }
+    return bottom;
+}
+
+// Greedy word-wrap against the node's inner width, capped at LIVE_MAX_LINES.
+function wrapLabel(ctx, text, maxWidth) {
+    const words = text.split(" ");
+    const lines = [];
+    let line = "";
+    for (const word of words) {
+        const candidate = line ? line + " " + word : word;
+        if (line && ctx.measureText(candidate).width > maxWidth) {
+            lines.push(line);
+            line = word;
+            if (lines.length >= LIVE_MAX_LINES) {
+                line = "";
+                break;
+            }
+        } else {
+            line = candidate;
+        }
+    }
+    if (line && lines.length < LIVE_MAX_LINES) {
+        lines.push(line);
+    }
+    return lines;
+}
 
 app.registerExtension({
     name: "DiffusionGemma.LiveView",
@@ -60,11 +121,23 @@ app.registerExtension({
                     `t=${Number(live.t).toFixed(3)} · temp=${Number(live.temperature).toFixed(3)} · ` +
                     `committed=${(Number(live.committed_fraction) * 100).toFixed(1)}%`;
 
+                const yStart = widgetStackBottom(this) + LIVE_PAD_Y;
+                const maxWidth = this.size[0] - 2 * LIVE_PAD_X;
+
                 ctx.save();
+                // Clip to the node body so wrapped text can never paint
+                // outside the box or over neighboring canvas content.
+                ctx.beginPath();
+                ctx.rect(0, 0, this.size[0], this.size[1]);
+                ctx.clip();
+
                 ctx.font = "12px monospace";
-                ctx.fillStyle = "#0f0";
+                ctx.fillStyle = "#0f0"; // keep the green — it's the spot-it-live cue
                 ctx.textAlign = "left";
-                ctx.fillText(label, 8, this.size[1] - 8);
+                const lines = wrapLabel(ctx, label, maxWidth);
+                for (let i = 0; i < lines.length; i++) {
+                    ctx.fillText(lines[i], LIVE_PAD_X, yStart + (i + 1) * LIVE_LINE_HEIGHT);
+                }
                 ctx.restore();
             }
 
@@ -86,6 +159,16 @@ app.registerExtension({
             }
 
             node._dgemmaLiveState = payload;
+
+            // Reserve space below the widget stack while a run is live:
+            // computeSize() is the minimal height fitting inputs + widgets,
+            // so minimal + LIVE_AREA_HEIGHT is both the growth target and
+            // its own cap — an already-larger node is left alone.
+            const needed = node.computeSize()[1] + LIVE_AREA_HEIGHT;
+            if (node.size[1] < needed) {
+                node.setSize([node.size[0], needed]);
+            }
+
             node.setDirtyCanvas(true, false);
         });
     },

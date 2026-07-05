@@ -75,15 +75,25 @@ class DGemmaTrace:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"canvas_trace": ("DGEMMA_CANVAS_TRACE",)}}
+        return {
+            "required": {
+                "canvas_trace": ("DGEMMA_CANVAS_TRACE",),
+                # Nearest-neighbor upscale factor (operator finding,
+                # 2026-07-05: a raw steps×positions map — 256×11 observed —
+                # is unreadably small). Threads straight through to
+                # `build_commit_heatmap(scale=...)`; the scaling math is
+                # engine-side (ADR-CDG-003), this widget is pure unpack.
+                "cell_px": ("INT", {"default": 6, "min": 1, "max": 32}),
+            }
+        }
 
     RETURN_TYPES = ("IMAGE", "STRING")
     RETURN_NAMES = ("heatmap", "summary")
     FUNCTION = "render"
     CATEGORY = "DiffusionGemma"
 
-    def render(self, canvas_trace):
-        heatmap = build_commit_heatmap(canvas_trace)
+    def render(self, canvas_trace, cell_px: int = 6):
+        heatmap = build_commit_heatmap(canvas_trace, scale=cell_px)
         curve = build_avalanche_curve(canvas_trace)
         corroboration = corroborate_no_mask_token(canvas_trace)
 

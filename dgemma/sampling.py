@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from .types import CanvasTrace
 
 
-def build_commit_heatmap(trace: CanvasTrace) -> list[list[int]]:
+def build_commit_heatmap(trace: CanvasTrace, scale: int = 1) -> list[list[int]]:
     """2D array, one row per frame in `trace.frames` order, one column per
     canvas position (batch index 0 — single-example scope, matching
     `DiffusionFrame.committed_fraction`'s own batch_size==1 convenience).
@@ -49,7 +49,19 @@ def build_commit_heatmap(trace: CanvasTrace) -> list[list[int]]:
     `DiffusionFrame.canvas_idx`'s docstring on block boundaries) reports
     every position as `1`: honestly, nothing has locked in yet at the start
     of a block.
+
+    `scale` (operator finding, 2026-07-05: a raw steps×positions map — e.g.
+    256×11 — is unreadably small as pixels) nearest-neighbor-upscales the
+    grid by an integer factor on BOTH axes: each cell becomes a
+    `scale`×`scale` block, so the output is `(steps*scale) x
+    (positions*scale)`. `scale=1` is the identity. Pure list math here —
+    the engine owns the scaling (ADR-CDG-003: `nodes/trace.py` stays a thin
+    adapter; its `cell_px` widget threads straight through to this
+    parameter). Raises `ValueError` for `scale < 1` (parse-at-the-door —
+    a zero/negative scale would silently emit an empty grid).
     """
+    if scale < 1:
+        raise ValueError(f"scale must be >= 1, got {scale!r}.")
     rows: list[list[int]] = []
     prev_positions: list[int] | None = None
     prev_canvas_idx: int | None = None
@@ -62,7 +74,13 @@ def build_commit_heatmap(trace: CanvasTrace) -> list[list[int]]:
         rows.append(row)
         prev_positions = positions
         prev_canvas_idx = frame.canvas_idx
-    return rows
+    if scale == 1:
+        return rows
+    return [
+        [cell for cell in row for _ in range(scale)]  # widen: each cell -> scale columns
+        for row in rows
+        for _ in range(scale)  # tallen: each row -> scale rows
+    ]
 
 
 def build_avalanche_curve(trace: CanvasTrace) -> list[float]:

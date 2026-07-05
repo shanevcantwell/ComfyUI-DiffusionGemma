@@ -4,6 +4,7 @@ everything here is hand-computable against small, explicit frames.
 """
 from __future__ import annotations
 
+import pytest
 import torch
 
 from dgemma.sampling import (
@@ -74,6 +75,45 @@ class TestBuildCommitHeatmap:
         assert heatmap[0] == [1, 1]
         assert heatmap[1] == [0, 0]
         assert heatmap[2] == [1, 1]  # block boundary, not a real "changed" reading
+
+    def test_scale_1_is_the_identity(self):
+        """`scale=1` (the default) must return the raw grid unchanged —
+        the upscale is opt-in, not a silent reshape of the base contract."""
+        frames = [
+            _frame(0, 0, [1, 2, 3], 0.0),
+            _frame(0, 1, [1, 5, 3], 0.5),
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        assert build_commit_heatmap(trace, scale=1) == build_commit_heatmap(trace)
+        assert build_commit_heatmap(trace, scale=1) == [[1, 1, 1], [0, 1, 0]]
+
+    def test_scale_upscales_nearest_neighbor_on_both_axes(self):
+        """Operator finding (2026-07-05): raw steps×positions pixels are
+        unreadably small (256×11 observed live). `scale=N` turns each cell
+        into an N×N block — hand-computed here for a 2×2 grid at scale=3."""
+        frames = [
+            _frame(0, 0, [1, 2], 0.0),
+            _frame(0, 1, [1, 5], 0.5),  # position 1 changed -> base row [0, 1]
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        heatmap = build_commit_heatmap(trace, scale=3)
+
+        assert len(heatmap) == 2 * 3
+        assert all(len(row) == 2 * 3 for row in heatmap)
+        # First base row [1, 1] -> three rows of [1,1,1,1,1,1].
+        assert heatmap[0] == heatmap[1] == heatmap[2] == [1, 1, 1, 1, 1, 1]
+        # Second base row [0, 1] -> three rows of [0,0,0,1,1,1].
+        assert heatmap[3] == heatmap[4] == heatmap[5] == [0, 0, 0, 1, 1, 1]
+
+    def test_scale_below_1_raises(self):
+        """Parse-at-the-door: scale=0 would silently emit an empty grid."""
+        trace = CanvasTrace(
+            frames=[_frame(0, 0, [1], 1.0)], scheduler_name="TestScheduler", scheduler_config={}
+        )
+        with pytest.raises(ValueError, match="scale must be >= 1"):
+            build_commit_heatmap(trace, scale=0)
 
 
 class TestBuildAvalancheCurve:
