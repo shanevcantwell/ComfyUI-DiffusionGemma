@@ -64,7 +64,7 @@ def test_load_and_generate_smoke():
     load_seconds = time.perf_counter() - t0
 
     t1 = time.perf_counter()
-    text, canvas_state = run_diffusion(
+    text, canvas_state, canvas_trace = run_diffusion(
         model,
         "Why is the sky blue?",
         seed=0,
@@ -87,11 +87,13 @@ def test_load_and_generate_smoke():
     assert isinstance(text, str) and text
     assert 0.0 <= canvas_state.committed_fraction <= 1.0
     assert canvas_state.steps_used > 0
+    assert canvas_trace.scheduler_name == "EntropyBoundScheduler"
+    assert len(canvas_trace.frames) == canvas_state.steps_used
 
     # Seed determinism (reviewer gap): same seed, same output. Affordable
     # here because the model is already resident and generation measured
     # ~2.6s/step on the first green run (2026-07-05) — one extra 8-step pass.
-    text_again, state_again = run_diffusion(
+    text_again, state_again, trace_again = run_diffusion(
         model,
         "Why is the sky blue?",
         seed=0,
@@ -100,3 +102,4 @@ def test_load_and_generate_smoke():
     )
     assert text_again == text
     assert state_again.committed_fraction == canvas_state.committed_fraction
+    assert len(trace_again.frames) == state_again.steps_used

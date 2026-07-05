@@ -64,7 +64,8 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
 
 
 def test_sampler_declarations():
-    assert DGemmaSampler.RETURN_TYPES == ("STRING", "DGEMMA_CANVAS_STATE")
+    assert DGemmaSampler.RETURN_TYPES == ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE")
+    assert DGemmaSampler.RETURN_NAMES == ("text", "canvas_state", "canvas_trace")
     assert DGemmaSampler.FUNCTION == "sample"
     assert DGemmaSampler.CATEGORY == "DiffusionGemma"
 
@@ -83,6 +84,9 @@ def test_sampler_input_types_declares_all_p2_widgets():
         "gen_length",
         "thinking",
     }
+    # P3: `unique_id` is a hidden input (standard ComfyUI idiom), not a widget —
+    # routes the live per-step push (plan.md Phase 3 (a)) to the right node.
+    assert spec["hidden"] == {"unique_id": "UNIQUE_ID"}
     assert spec["required"]["model"] == ("DGEMMA_MODEL",)
     assert spec["required"]["thinking"] == ("BOOLEAN", {"default": False})
     # Grounded defaults (plan.md Phase 2 / CLAUDE.md).
@@ -102,7 +106,7 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         captured["model"] = model
         captured["prompt"] = prompt
         captured["kwargs"] = kwargs
-        return ("decoded text", "canvas-state-stub")
+        return ("decoded text", "canvas-state-stub", "canvas-trace-stub")
 
     monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
@@ -120,7 +124,7 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         thinking=False,
     )
 
-    assert result == ("decoded text", "canvas-state-stub")
+    assert result == ("decoded text", "canvas-state-stub", "canvas-trace-stub")
     assert captured["model"] is sentinel_model
     assert captured["prompt"] == "hello"
     assert captured["kwargs"]["seed"] == 7
@@ -133,6 +137,10 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
     assert captured["kwargs"]["gen_length"] == 256
     assert captured["kwargs"]["confidence"] == pytest.approx(0.005)
     assert captured["kwargs"]["thinking"] is False
+    # P3: an `on_frame` callable is always forwarded (unconditionally built
+    # by the node, regardless of whether a live ComfyUI process exists to
+    # actually consume it — see the guarded-import tests below).
+    assert callable(captured["kwargs"]["on_frame"])
 
 
 def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
@@ -144,7 +152,7 @@ def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
 
     def fake_run_diffusion(model, prompt, **kwargs):
         captured["kwargs"] = kwargs
-        return ("text", "state")
+        return ("text", "state", "trace")
 
     monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
@@ -169,3 +177,186 @@ def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
     assert captured["kwargs"]["confidence"] == pytest.approx(0.9)
     assert captured["kwargs"]["gen_length"] == 64
     assert captured["kwargs"]["thinking"] is True
+
+
+class TestLiveFramePush:
+    """P3 step 5's own regression coverage: the `PromptServer` import surface
+    risk (plan.md Risks — first time `nodes/` imports live server
+    infrastructure). `server`/`comfy` are not installed in this venv at all
+    (`tests/test_seam.py`'s own grounding), so the "absent" branch below is
+    the actual condition every other test in this suite already runs under;
+    the "present" branch is exercised by injecting a fake `server` module
+    into `sys.modules` — no real ComfyUI process needed for either."""
+
+    def test_sample_succeeds_unchanged_when_promptserver_unavailable(self, monkeypatch):
+        """The concrete regression test for the guarded-import risk
+        (plan.md step 5's own Verifies): `PromptServer` absent (the normal
+        pytest condition) must not raise, and `text`/`canvas_state` must be
+        unaffected."""
+        monkeypatch.delitem(sys.modules, "server", raising=False)
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())  # the collector always calls on_frame per step
+            return ("text", "state", "trace")
+
+        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaSampler()
+        result = node.sample(
+            model=object(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            thinking=False,
+            unique_id="42",
+        )
+
+        assert result == ("text", "state", "trace")
+
+    def test_on_frame_pushes_via_send_sync_when_promptserver_available(self, monkeypatch):
+        """The "present" branch, exercised without a real ComfyUI process:
+        inject a fake `server` module carrying a fake `PromptServer.instance`
+        and assert the closure calls `send_sync` with the pack's own event
+        name and a payload keyed to the right node — never
+        `comfy.utils.ProgressBar`'s image-typed `preview=` slot (plan.md
+        Risks' named trap)."""
+        captured_calls = []
+
+        class FakeInstance:
+            def send_sync(self, event, data, sid=None):
+                captured_calls.append((event, data, sid))
+
+        class FakePromptServer:
+            instance = FakeInstance()
+
+        fake_server_module = type(sys)("server")
+        fake_server_module.PromptServer = FakePromptServer
+        monkeypatch.setitem(sys.modules, "server", fake_server_module)
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())
+            return ("text", "state", "trace")
+
+        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaSampler()
+        node.sample(
+            model=object(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            thinking=False,
+            unique_id="42",
+        )
+
+        assert len(captured_calls) == 1
+        event, data, sid = captured_calls[0]
+        assert event == "dgemma.sampler.step"
+        assert data["node"] == "42"
+        assert data["canvas_idx"] == 0
+        assert data["step_idx"] == 3
+        assert data["committed_fraction"] == pytest.approx(1.0)
+
+    def test_on_frame_is_a_no_op_when_promptserver_instance_is_none(self, monkeypatch):
+        """`PromptServer.instance` is `None` before the server has fully
+        started — the closure must degrade to a no-op here too, not just on
+        `ImportError`."""
+
+        class FakePromptServer:
+            instance = None
+
+        fake_server_module = type(sys)("server")
+        fake_server_module.PromptServer = FakePromptServer
+        monkeypatch.setitem(sys.modules, "server", fake_server_module)
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())  # must not raise
+            return ("text", "state", "trace")
+
+        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaSampler()
+        result = node.sample(
+            model=object(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            thinking=False,
+            unique_id="42",
+        )
+
+        assert result == ("text", "state", "trace")
+
+    def test_send_sync_failure_does_not_kill_the_run(self, monkeypatch, caplog):
+        """Display must never kill generation (review finding, 2026-07-05):
+        a `send_sync` failure (serialization error, dropped websocket) is
+        logged and swallowed by the closure — the run completes and the
+        outputs are intact. The guard lives in this node-layer closure by
+        deliberate choice; the engine's `on_frame` contract propagates
+        callback exceptions (`dgemma/loop.py`, `_FrameCollector`'s
+        docstring)."""
+
+        class ExplodingInstance:
+            def send_sync(self, event, data, sid=None):
+                raise RuntimeError("websocket dropped mid-run")
+
+        class FakePromptServer:
+            instance = ExplodingInstance()
+
+        fake_server_module = type(sys)("server")
+        fake_server_module.PromptServer = FakePromptServer
+        monkeypatch.setitem(sys.modules, "server", fake_server_module)
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            # The engine invokes the callback per step and does NOT guard it
+            # (engine contract) — if the closure's own guard were missing,
+            # this raise would propagate and abort the "run".
+            on_frame(_FakeFrame())
+            return ("text", "state", "trace")
+
+        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaSampler()
+        with caplog.at_level("WARNING"):
+            result = node.sample(
+                model=object(),
+                prompt="hi",
+                seed=1,
+                num_inference_steps=1,
+                t_min=0.1,
+                t_max=0.5,
+                entropy_bound=0.1,
+                confidence=0.1,
+                gen_length=8,
+                thinking=False,
+                unique_id="42",
+            )
+
+        assert result == ("text", "state", "trace")  # output intact, run completed
+        assert any("live push failed" in record.message for record in caplog.records)
+
+
+class _FakeFrame:
+    """Minimal stand-in for `dgemma.types.DiffusionFrame` — only the fields
+    `_build_on_frame`'s closure actually reads."""
+
+    canvas_idx = 0
+    step_idx = 3
+    t = 0.2
+    temperature = 0.5
+    committed_fraction = 1.0

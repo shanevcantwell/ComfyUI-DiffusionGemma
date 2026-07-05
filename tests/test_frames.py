@@ -155,6 +155,46 @@ class TestFrameCollector:
         assert len(collector.frames) == 4
         assert [f.step_idx for f in collector.frames] == [0, 1, 2, 3]
 
+    def test_on_frame_invoked_once_per_captured_step_with_right_frame(self):
+        """P3 step 2: `on_frame` is the seam that lets `nodes/sampler.py`
+        push a live view without `dgemma/loop.py` ever importing ComfyUI
+        (ADR-CDG-003) — this pins the pure-Python half of that contract:
+        invoked exactly once per step, with the same `DiffusionFrame` that
+        got appended to `collector.frames`."""
+        seen: list[DiffusionFrame] = []
+        collector = _FrameCollector(
+            num_inference_steps=3, t_min=0.4, t_max=0.8, keep_frames="all", on_frame=seen.append
+        )
+        for step_idx in range(3):
+            collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * 4]))
+
+        assert len(seen) == 3
+        assert seen == collector.frames
+
+    def test_on_frame_exception_propagates_engine_contract(self):
+        """Engine contract (review finding, 2026-07-05): the collector does
+        NOT swallow a caller's callback exception — silently eating a user's
+        analysis-callback error at the engine layer would be its own
+        dishonesty. Display-only callbacks guard themselves at their own
+        layer (`nodes/sampler.py`'s closure). The frame is still retained
+        before the callback runs, so nothing is lost by the raise."""
+        def exploding(frame):
+            raise RuntimeError("user callback bug")
+
+        collector = _FrameCollector(
+            num_inference_steps=1, t_min=0.4, t_max=0.8, keep_frames="all", on_frame=exploding
+        )
+        with pytest.raises(RuntimeError, match="user callback bug"):
+            collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))
+        assert len(collector.frames) == 1  # retention happened before the callback raised
+
+    def test_on_frame_none_is_a_silent_no_op(self):
+        """Default (`on_frame=None`): capture proceeds exactly as before —
+        no live-push consumer is required for the collector to work."""
+        collector = _FrameCollector(num_inference_steps=1, t_min=0.4, t_max=0.8)
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))  # must not raise
+        assert collector.steps_used == 1
+
     def test_on_step_end_is_pure_capture_no_canvas_override(self):
         """P1 is pure capture (ADR-CDG-004): the collector must return `{}` so
         `callback_outputs.pop("canvas", canvas)` at the pipeline call site
@@ -199,3 +239,59 @@ class TestDeriveCanvasState:
                 text="x", canvas_ids=None,
                 frames=[_frame(committed_fraction_per_example=(1.0, 0.0))], steps_used=1,
             )
+
+    def test_turn_closed_and_answer_tokens_default_when_omitted(self):
+        """[SEVERABLE RIDER — issue #9] Additive-only: existing call shape
+        (no `eos_token_id`, `canvas_ids=None`) must keep working, with the
+        new fields defaulting honestly (no evidence of EOS -> not closed;
+        no canvas -> 0 answer tokens) rather than requiring every existing
+        call site to be touched."""
+        state = derive_canvas_state(
+            text="hello", canvas_ids=None,
+            frames=[_frame(committed_fraction_per_example=(1.0,))], steps_used=4,
+        )
+
+        assert state.turn_closed is False
+        assert state.answer_tokens == 0
+
+    def test_turn_closed_true_when_eos_present_in_canvas_ids(self):
+        """`answer_tokens` counts pre-EOS content only (review finding,
+        2026-07-05): the EOS is the stop signal, not answer content, so
+        `[1, 2, 999, 3]` honestly counts 2 — never 4 (which would include
+        the EOS and the post-EOS fill)."""
+        state = derive_canvas_state(
+            text="hello", canvas_ids=[1, 2, 999, 3],
+            frames=[_frame(committed_fraction_per_example=(1.0,))], steps_used=4,
+            eos_token_id=999,
+        )
+
+        assert state.turn_closed is True
+        assert state.answer_tokens == 2
+
+    def test_answer_tokens_excludes_trailing_eos_fill_padding(self):
+        """The converged-run padding case at the unit level: content + EOS +
+        N×EOS fill (the live-observed ~30-token tail) counts only the
+        content, not the padding a bare `len()` would inflate by."""
+        state = derive_canvas_state(
+            text="hello", canvas_ids=[7, 8, 9, 999, 999, 999, 999],
+            frames=[_frame(committed_fraction_per_example=(1.0,))], steps_used=4,
+            eos_token_id=999,
+        )
+
+        assert state.turn_closed is True
+        assert state.answer_tokens == 3
+
+    def test_turn_closed_false_when_eos_absent_despite_full_commit(self):
+        """Specimen (ii)'s shape at the `derive_canvas_state` unit level:
+        `committed_fraction == 1.0` (full commit this step) does NOT imply
+        `turn_closed` — the canvas can be entirely full of plausible,
+        non-EOS filler."""
+        state = derive_canvas_state(
+            text="hello", canvas_ids=[1, 2, 3, 4],
+            frames=[_frame(committed_fraction_per_example=(1.0,))], steps_used=4,
+            eos_token_id=999,
+        )
+
+        assert state.converged is True
+        assert state.turn_closed is False
+        assert state.answer_tokens == 4

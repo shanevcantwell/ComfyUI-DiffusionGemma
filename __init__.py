@@ -1,11 +1,14 @@
 """ComfyUI-DiffusionGemma — node pack entry point.
 
-STATUS: Phase 1 (plan.md) — thin vertical slice. `DGemmaLoader` +
-`DGemmaSampler` land here; prompt in, text + validity readout out.
+STATUS: Phase 3 (plan.md) — instrumentation. `DGemmaLoader` + `DGemmaSampler`
+(P1) + `DGemmaTrace` (P3) land here; prompt in, text + validity readout +
+canvas trace out, plus a live per-step view via the `web/` extension.
 
 ComfyUI discovers a custom node pack by importing this module and reading
-NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS. Aggregated from `nodes/`
-(ADR-CDG-003) — nothing else lives here.
+NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS (+ `WEB_DIRECTORY`, checked
+by `nodes.py:2269-2272` and mounted into `EXTENSION_WEB_DIRS`, served at
+`/extensions/<pack-dir-basename>` per `server.py:1225-1226`). Aggregated
+from `nodes/` (ADR-CDG-003) — nothing else lives here.
 
 Import gate below (`__package__`, not try/except): ComfyUI's loader gives
 this file a real package context (verified manually via
@@ -24,17 +27,26 @@ empirically by the reviewer).
 if __package__:
     from .nodes.loader import DGemmaLoader
     from .nodes.sampler import DGemmaSampler
+    from .nodes.trace import DGemmaTrace
 else:
     from nodes.loader import DGemmaLoader
     from nodes.sampler import DGemmaSampler
+    from nodes.trace import DGemmaTrace
 
 NODE_CLASS_MAPPINGS: dict = {
     "DGemmaLoader": DGemmaLoader,
     "DGemmaSampler": DGemmaSampler,
+    "DGemmaTrace": DGemmaTrace,
 }
 NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaLoader": "DiffusionGemma Loader",
     "DGemmaSampler": "DiffusionGemma Sampler",
+    "DGemmaTrace": "DiffusionGemma Trace",
 }
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+# P3 (a): the live per-step view (`web/live_view.js`). Relative to this
+# file's own directory, per `nodes.py:2269-2272`'s
+# `os.path.join(module_dir, WEB_DIRECTORY)` resolution.
+WEB_DIRECTORY = "./web"
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

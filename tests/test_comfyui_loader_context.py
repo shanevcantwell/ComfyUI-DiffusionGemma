@@ -53,9 +53,15 @@ sys.modules[sys_module_name] = module
 spec.loader.exec_module(module)
 
 mappings = module.NODE_CLASS_MAPPINGS
-assert set(mappings) == {{"DGemmaLoader", "DGemmaSampler"}}, sorted(mappings)
+assert set(mappings) == {{"DGemmaLoader", "DGemmaSampler", "DGemmaTrace"}}, sorted(mappings)
 assert all(isinstance(cls, type) for cls in mappings.values())
 assert set(module.NODE_DISPLAY_NAME_MAPPINGS) == set(mappings)
+
+# P3 (a): WEB_DIRECTORY must be present and resolve to a real directory
+# relative to the pack's own root — `nodes.py:2269-2272`'s own check.
+assert isinstance(module.WEB_DIRECTORY, str)
+web_dir = os.path.join(module_path, module.WEB_DIRECTORY)
+assert os.path.isdir(web_dir), web_dir
 print("OK")
 """
 
