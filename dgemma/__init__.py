@@ -11,26 +11,31 @@ loop (`loop.py`). `schedule.py`/`sampling.py` land in later phases (plan.md).
 from __future__ import annotations
 
 from .loop import (
+    DEFAULT_CONFIDENCE,
     DEFAULT_ENTROPY_BOUND,
     DEFAULT_GEN_LENGTH,
     DEFAULT_NUM_INFERENCE_STEPS,
     DEFAULT_T_MAX,
     DEFAULT_T_MIN,
+    THINK_TOKEN,
     run_diffusion,
 )
-from .model import DEFAULT_REPO_ID, load_model
+from .model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
 from .types import CanvasState, DGemmaModel, DiffusionFrame
 
 __all__ = [
     "CanvasState",
     "DGemmaModel",
     "DiffusionFrame",
+    "DEFAULT_CONFIDENCE",
     "DEFAULT_ENTROPY_BOUND",
     "DEFAULT_GEN_LENGTH",
     "DEFAULT_NUM_INFERENCE_STEPS",
+    "DEFAULT_QUANT",
     "DEFAULT_T_MAX",
     "DEFAULT_T_MIN",
     "DEFAULT_REPO_ID",
+    "THINK_TOKEN",
     "load_model",
     "run_diffusion",
 ]

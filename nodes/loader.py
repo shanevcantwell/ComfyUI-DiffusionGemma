@@ -16,9 +16,9 @@ from __future__ import annotations
 # absolute form can resolve. Observed violation: graph smoke test 2026-07-05
 # (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py.
 if __package__ and "." in __package__:
-    from ..dgemma.model import DEFAULT_REPO_ID, load_model
+    from ..dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
 else:
-    from dgemma.model import DEFAULT_REPO_ID, load_model
+    from dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
 
 
 class DGemmaLoader:
@@ -29,7 +29,10 @@ class DGemmaLoader:
         return {
             "required": {
                 "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
-                "quant": (["nf4", "int8", "none"], {"default": "nf4"}),
+                # Default "none" (not "nf4"), issue #4: nf4 OOMs structurally
+                # on this box (bnb can't quantize the fused 3D MoE experts) —
+                # see dgemma/model.py's DEFAULT_QUANT provenance comment.
+                "quant": (["nf4", "int8", "none"], {"default": DEFAULT_QUANT}),
             }
         }
 

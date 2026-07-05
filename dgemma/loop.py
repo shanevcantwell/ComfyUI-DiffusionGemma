@@ -24,6 +24,39 @@ DEFAULT_T_MIN = 0.4
 DEFAULT_T_MAX = 0.8
 DEFAULT_ENTROPY_BOUND = 0.1
 DEFAULT_GEN_LENGTH = 256
+DEFAULT_CONFIDENCE = 0.005
+
+# ONE-MINT provenance (issue #8 / model-card "thinking" toggle): these
+# literal strings are the DiffusionGemma tokenizer's control tokens, sourced
+# from `google/diffusiongemma-26B-A4B-it`'s `tokenizer_config.json`
+# (`model_specific_special_tokens`: `think_token="<|think|>"`,
+# `soc_token="<|channel>"`, `eoc_token="<channel|>"`), cross-checked against
+# the cached `tokenizer.json` `added_tokens` table (2026-07-05): id 98
+# (`<|think|>`), id 100 (`<|channel>`), id 101 (`<channel|>`). The chat
+# template's `<|channel>thought\n...content...\n<channel|>` framing (see
+# `chat_template.jinja`) is what issue #8 excises. `THOUGHT_CHANNEL_START_ID`/
+# `THOUGHT_CHANNEL_END_ID` are the fallback only — `resolve_thought_channel_ids`
+# prefers reading them off the loaded processor's own tokenizer vocab, so a
+# checkpoint swap that renumbers ids can't silently desync from a hardcoded
+# pair.
+THINK_TOKEN = "<|think|>"
+THOUGHT_CHANNEL_START_TOKEN = "<|channel>"
+THOUGHT_CHANNEL_END_TOKEN = "<channel|>"
+THOUGHT_CHANNEL_START_ID = 100
+THOUGHT_CHANNEL_END_ID = 101
+
+# Provenance: `chat_template.jinja` always renders the channel as
+# `'<|channel>thought\n' + thinking_text + '\n<channel|>'` — "thought" is a
+# fixed channel-NAME label the template emits before any real content, not
+# part of the reasoning text itself. Verified against the installed
+# tokenizer (`AutoTokenizer.from_pretrained`, cached weights, 2026-07-05):
+# decoding ids `[45518, 107]` (the label's own ids) with
+# `skip_special_tokens=True` yields exactly `"thought\n"` — confirming the
+# canonical *empty* channel (issue #8's `[100, 45518, 107, 101, ...]`) is the
+# label with nothing after it. String-level label strip (not a special
+# token — ordinary vocab), applied only to the already id-isolated
+# between-delimiter span, never to the full decoded payload.
+THOUGHT_CHANNEL_LABEL = "thought"
 
 
 class DGemmaPipeline(DiffusionGemmaPipeline):
@@ -150,11 +183,22 @@ class _FrameCollector:
         return {}
 
 
-def derive_canvas_state(*, text: str, canvas_ids: Any, frames: list[DiffusionFrame], steps_used: int) -> CanvasState:
+def derive_canvas_state(
+    *,
+    text: str,
+    canvas_ids: Any,
+    frames: list[DiffusionFrame],
+    steps_used: int,
+    thought: str | None = None,
+    stray_thought_delimiter: bool = False,
+) -> CanvasState:
     """Derive `CanvasState`'s validity fields from the captured frames.
 
     See `CanvasState.converged`'s docstring for what "converged" honestly
-    does and does not claim.
+    does and does not claim. `thought` and `stray_thought_delimiter`
+    (issue #8) are passed through unmodified — the excised thought-channel
+    content (or `None`) and the stray-delimiter anomaly flag from
+    `excise_thought_channel`.
     """
     if not frames:
         raise RuntimeError("No frames captured — the denoising callback never fired.")
@@ -165,7 +209,174 @@ def derive_canvas_state(*, text: str, canvas_ids: Any, frames: list[DiffusionFra
         converged=last.committed_fraction >= 1.0,
         committed_fraction=last.committed_fraction,
         steps_used=steps_used,
+        thought=thought,
+        stray_thought_delimiter=stray_thought_delimiter,
     )
+
+
+def resolve_thought_channel_ids(processor: Any) -> tuple[int, int]:
+    """Resolve the (start, end) thought-channel delimiter ids from `processor`.
+
+    Prefers reading them off the tokenizer's own vocab
+    (`convert_tokens_to_ids`) so a checkpoint swap that renumbers special
+    tokens can't silently desync from a hardcoded pair; falls back to the
+    module-level `THOUGHT_CHANNEL_START_ID`/`THOUGHT_CHANNEL_END_ID`
+    constants (provenance: `tokenizer_config.json`, see the comment above
+    their definition) when `processor` doesn't expose a usable tokenizer —
+    e.g. a bare stub in a unit test, or an `unk_token` fallback signaling the
+    strings aren't in this vocab at all.
+    """
+    tokenizer = getattr(processor, "tokenizer", processor)
+    convert = getattr(tokenizer, "convert_tokens_to_ids", None)
+    if convert is None:
+        return THOUGHT_CHANNEL_START_ID, THOUGHT_CHANNEL_END_ID
+
+    start_id = convert(THOUGHT_CHANNEL_START_TOKEN)
+    end_id = convert(THOUGHT_CHANNEL_END_TOKEN)
+    unk_id = getattr(tokenizer, "unk_token_id", None)
+    if (
+        start_id is None
+        or end_id is None
+        or (unk_id is not None and (start_id == unk_id or end_id == unk_id))
+    ):
+        return THOUGHT_CHANNEL_START_ID, THOUGHT_CHANNEL_END_ID
+    return start_id, end_id
+
+
+@dataclass
+class ThoughtChannelExcision:
+    """Result of `excise_thought_channel` — named fields instead of a
+    positional tuple, because the excision reports three independent things
+    (the cleaned ids, zero-or-more excised spans, a stray-delimiter anomaly
+    flag) and a growing anonymous tuple is how call sites silently misread
+    which position means what."""
+
+    remaining_ids: list[int]
+    """Canvas ids with every well-formed thought-channel span (and, when
+    applicable, the truncated turn-start frame) removed. Feeds the answer
+    `STRING`."""
+
+    thought_spans: list[list[int]]
+    """Delimiter-exclusive content ids of each excised span, in canvas
+    order. Empty list when no channel was present; an individual span may
+    itself be `[]` (a zero-content frame)."""
+
+    stray_start_delimiter: bool = False
+    """`True` iff an unmatched `start_id` was found PAST the head of the
+    generated region and therefore left in place rather than excised
+    (excising it would silently destroy answer text — see
+    `excise_thought_channel`). Surfaced so `CanvasState` can report the
+    anomaly instead of the payload absorbing it invisibly."""
+
+
+def excise_thought_channel(
+    canvas_ids: Any,
+    start_id: int = THOUGHT_CHANNEL_START_ID,
+    end_id: int = THOUGHT_CHANNEL_END_ID,
+) -> ThoughtChannelExcision:
+    """Excise every thought-channel span from a canvas id sequence (issue #8).
+
+    Pure id-level operation (ADR-CDG-001 payload-contamination discipline:
+    id-span excision over decoded-string regex). The model emits
+    `<|channel>thought\\n<channel|>` (empty channel — expected even with
+    thinking off, per the model card) or `<|channel>...content...<channel|>`
+    (non-empty, thinking on) at turn start; upstream
+    `batch_decode(..., skip_special_tokens=True)` strips only the id-100/
+    id-101 delimiters themselves, leaving `thought`/`\\n`/content — ordinary
+    vocab tokens — to survive into the decoded string.
+
+    Accepts a `torch.LongTensor`, a `list[int]`, or any 1-D iterable of ids;
+    `remaining_ids`/`thought_spans` hold plain Python ints (never torch
+    scalars), so downstream `tokenizer.decode` calls get plain id lists.
+
+    Behavior, by case:
+    - No `start_id` anywhere -> nothing excised, `thought_spans == []` —
+      the false-strip guard: content that merely *mentions* "thought" as
+      ordinary vocab is left untouched.
+    - Each well-formed `start_id ... end_id` pair -> both delimiters and
+      everything between them are removed from `remaining_ids`; the
+      delimiter-exclusive content (possibly `[]`) is appended to
+      `thought_spans`. ALL well-formed spans are excised, not just the
+      first — a second leaked frame is the same ADR-CDG-001 breach as the
+      first (review finding, 2026-07-05).
+    - Unmatched `start_id` (no `end_id` anywhere after it) **at the head of
+      the generated region** (index 0 — the documented turn-start frame
+      position) -> treated as a truncated frame: excised through the end of
+      the sequence, the tail going to `thought_spans`. No answer text can
+      precede index 0, so nothing is lost but the broken frame.
+    - Unmatched `start_id` **past the head** -> left in place untouched,
+      along with everything after it — never silently truncate answer text.
+      The raw delimiter stays in `remaining_ids` (where a
+      `skip_special_tokens=True` decode drops the delimiter itself but keeps
+      all surrounding answer text), and `stray_start_delimiter=True` is set
+      so the anomaly surfaces on the `CanvasState` validity side rather
+      than vanishing.
+    """
+    ids = [int(x) for x in canvas_ids]
+    remaining: list[int] = []
+    thought_spans: list[list[int]] = []
+    stray_start_delimiter = False
+
+    i = 0
+    while i < len(ids):
+        if ids[i] != start_id:
+            remaining.append(ids[i])
+            i += 1
+            continue
+        try:
+            end = ids.index(end_id, i + 1)
+        except ValueError:
+            if i == 0:
+                # Truncated turn-start frame: excise-to-end loses nothing
+                # but the broken frame.
+                thought_spans.append(ids[1:])
+            else:
+                # Stray mid-canvas start delimiter: keep it and everything
+                # after it — answer text is never silently dropped.
+                stray_start_delimiter = True
+                remaining.extend(ids[i:])
+            break
+        thought_spans.append(ids[i + 1 : end])
+        i = end + 1
+
+    return ThoughtChannelExcision(
+        remaining_ids=remaining,
+        thought_spans=thought_spans,
+        stray_start_delimiter=stray_start_delimiter,
+    )
+
+
+def _decode_ids(processor: Any, ids: list[int], eos_token_id: int | None) -> str:
+    """Decode `ids` the way the pipeline decodes `texts[0]`
+    (`pipeline_diffusion_gemma.py:437-453`): trim at the first `eos_token_id`
+    (inclusive) so post-EOS canvas-fill/renoise-garbage tokens don't leak in,
+    then `skip_special_tokens=True`.
+
+    Duplicated here rather than trusting the pipeline's own `output.texts[0]`
+    because that value was decoded from the un-excised ids and still carries
+    the thought-channel leak `excise_thought_channel` exists to remove; this
+    re-derives the visible text from the corrected ids instead.
+    """
+    if eos_token_id is not None and eos_token_id in ids:
+        ids = ids[: ids.index(eos_token_id) + 1]
+    tokenizer = getattr(processor, "tokenizer", processor)
+    return tokenizer.decode(ids, skip_special_tokens=True)
+
+
+def _extract_thought_text(decoded_channel: str) -> str | None:
+    """Strip the chat template's fixed `"thought\\n"` channel-name label
+    (provenance: see `THOUGHT_CHANNEL_LABEL` above) from a decoded
+    between-delimiter span, returning `None` when nothing real remains.
+
+    The canonical empty channel decodes to exactly `"thought\\n"` — label,
+    no content — which must surface as "no thought", not as a `CanvasState`
+    field containing the literal word "thought".
+    """
+    stripped = decoded_channel
+    if stripped.startswith(THOUGHT_CHANNEL_LABEL):
+        stripped = stripped[len(THOUGHT_CHANNEL_LABEL) :]
+    stripped = stripped.strip()
+    return stripped or None
 
 
 def run_diffusion(
@@ -178,6 +389,8 @@ def run_diffusion(
     entropy_bound: float = DEFAULT_ENTROPY_BOUND,
     t_min: float = DEFAULT_T_MIN,
     t_max: float = DEFAULT_T_MAX,
+    confidence: float = DEFAULT_CONFIDENCE,
+    thinking: bool = False,
     keep_frames: Literal["last", "all"] = "last",
 ) -> tuple[str, CanvasState]:
     """Drive one prompt through the block-diffusion denoising loop.
@@ -192,13 +405,46 @@ def run_diffusion(
     `DGemmaPipeline` (direct-constructor idiom, not `.from_pretrained`, since
     the model is already loaded).
 
-    `confidence_threshold`/`stability_threshold`/`eos_early_stop` are left at
-    the pipeline's own defaults (0.005 / 1 / True — already the grounded
-    defaults, CLAUDE.md) rather than passed explicitly; P2 promotes them to
-    widgets.
+    `confidence` promotes the pipeline's `confidence_threshold` to a real
+    parameter (P2). `stability_threshold`/`eos_early_stop` stay at the
+    pipeline's own defaults (1 / True — already the grounded defaults,
+    CLAUDE.md); P2 only promoted the knobs plan.md names for Phase 2.
+
+    `thinking` (P2, model-card documented mechanism): when `True`, the
+    `<|think|>` control token is injected at the start of the (otherwise
+    empty) system turn by passing an explicit `messages=[{"role": "system",
+    "content": THINK_TOKEN}, {"role": "user", "content": prompt}]`. This is
+    the ONLY viable path here: the pipeline's `_prepare_inputs` never
+    forwards `enable_thinking` (or any extra kwargs) to
+    `apply_chat_template`, so the template's native toggle is unreachable
+    through `pipeline.__call__`. **Honest delta, pinned by
+    `tests/test_chat_template_thinking.py` against the real tokenizer
+    (2026-07-05):** the injected path is NOT token-identical to the native
+    `enable_thinking=True` render — the template emits system content
+    through `| trim`, which eats the newline the native path places after
+    `<|think|>`, so the injected render is exactly one token short (id 107,
+    `"\\n"`, between `<|think|>` and `<turn|>`). Token parity is
+    structurally unreachable via message content (any trailing whitespace is
+    trimmed). Behavioral impact of the missing newline is unverified pending
+    an E2E thinking-mode run; the `<|think|>` token itself (id 98) lands in
+    the documented position either way. When `False` (default), `prompt` is
+    passed bare — unchanged from P1, no system turn is added.
+
+    Regardless of `thinking`, the thought channel the model emits at turn
+    start (issue #8 — empty when off, per the model card's "an empty
+    thinking channel might still be emitted"; possibly non-empty when on) is
+    excised from the canvas ids via `excise_thought_channel` before `text`
+    is derived, so it never leaks onto the `STRING` payload in either mode.
 
     Returns `(text, CanvasState)` — never a bare string (ADR-CDG-001 Addendum).
+
+    Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
+    an inverted or degenerate anneal range would silently hand
+    `EntropyBoundScheduler` a nonsensical temperature trajectory).
     """
+    if t_min >= t_max:
+        raise ValueError(f"t_min must be < t_max, got t_min={t_min!r} t_max={t_max!r}.")
+
     scheduler = EntropyBoundScheduler(
         entropy_bound=entropy_bound, t_max=t_max, t_min=t_min, num_inference_steps=num_inference_steps
     )
@@ -212,18 +458,50 @@ def run_diffusion(
         num_inference_steps=num_inference_steps, t_min=t_min, t_max=t_max, keep_frames=keep_frames
     )
 
+    if thinking:
+        prompt_kwargs: dict = {
+            "messages": [
+                {"role": "system", "content": THINK_TOKEN},
+                {"role": "user", "content": prompt},
+            ]
+        }
+    else:
+        prompt_kwargs = {"prompt": prompt}
+
     output = pipeline(
-        prompt=prompt,
+        **prompt_kwargs,
         gen_length=gen_length,
         num_inference_steps=num_inference_steps,
+        confidence_threshold=confidence,
         generator=generator,
         callback_on_step_end=collector.on_step_end,
         callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
     )
 
-    text = output.texts[0]
-    canvas_ids = output.sequences[0]
+    start_id, end_id = resolve_thought_channel_ids(dgemma_model.processor)
+    excision = excise_thought_channel(output.sequences[0], start_id, end_id)
+
+    text = _decode_ids(dgemma_model.processor, excision.remaining_ids, pipeline.eos_token_id)
+    # Decode and label-strip each excised span independently (the "thought\n"
+    # channel-name label heads each frame, not just the first), keeping only
+    # spans with real content; multiple non-empty spans are joined visibly
+    # rather than jammed into one undelimited string.
+    thought_parts = [
+        part
+        for span in excision.thought_spans
+        if span
+        for part in [_extract_thought_text(_decode_ids(dgemma_model.processor, span, pipeline.eos_token_id))]
+        if part
+    ]
+    thought = "\n\n".join(thought_parts) if thought_parts else None
+    canvas_ids = torch.tensor(excision.remaining_ids, dtype=torch.long)
+
     canvas_state = derive_canvas_state(
-        text=text, canvas_ids=canvas_ids, frames=collector.frames, steps_used=collector.steps_used
+        text=text,
+        canvas_ids=canvas_ids,
+        frames=collector.frames,
+        steps_used=collector.steps_used,
+        thought=thought,
+        stray_thought_delimiter=excision.stray_start_delimiter,
     )
     return text, canvas_state
