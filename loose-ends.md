@@ -276,7 +276,12 @@ production failure verbatim (`ModuleNotFoundError: No module named 'dgemma'`).
 - `dgemma/` itself needed no change (all-relative internally) — the seam
   held; only the adapter layer's imports were context-fragile.
 
-## 2026-07-05 — Dead frontend interactivity on this box: pre-reboot Ubuntu/browser state (unexplained, cleared by reboot)
+## 2026-07-05 — Dead frontend interactivity in Ubuntu Chrome on this box (unexplained, STILL BROKEN — workaround: browse from another machine)
+
+*(Corrected same day: the first version of this entry claimed a reboot
+cleared it. Wrong — operator readback: the PASS session was browsed **from
+Windows on another machine** against the server bound `0.0.0.0`. Ubuntu
+Chrome on the workstation remains broken, reboot notwithstanding.)*
 
 ### Context
 First live-GUI session: canvas rendered but right-click/add-node was dead,
@@ -285,14 +290,16 @@ warning, `graph accessed before initialization`). An A/B ladder exonerated
 everything we control: server healthy (`/object_info` 793 nodes), pack schema
 clean (tuple/mapping/case audit), stock-only instance on a virgin origin
 (port 8189) **still broken** → not the pack, not client site-state, not the
-install. A host reboot cleared it completely; same instance then ran the P1
-graph to PASS.
+install. The same server then ran the P1 graph to PASS from a **Windows
+browser over LAN** — isolating the fault to Ubuntu Chrome (or its
+display-stack interaction) on this box specifically.
 
 ### Decision
-Recorded as environment caution, not repaired: root cause unknown
-(browser-process or Ubuntu session state predating the reboot). If a future
-GUI session on this box shows silent dead interactivity with a healthy
-backend, **reboot first** before re-running the diagnostic ladder.
+Recorded as environment caution, not repaired: root cause unknown, confined
+to Ubuntu Chrome on this workstation. Workaround for GUI sessions: bind the
+server to `0.0.0.0` and browse from another machine/browser. Do **not**
+burn session time re-running the diagnostic ladder against Ubuntu Chrome —
+it is already exonerated down to the browser/display layer.
 
 ### Why Not an ADR?
 No design decision — a host-environment anomaly with an unexplained root

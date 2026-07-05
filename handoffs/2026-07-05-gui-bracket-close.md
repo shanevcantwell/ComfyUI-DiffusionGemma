@@ -52,9 +52,10 @@ regression probe already in hand (`examples/README.md`).
   `examples/ping-smoke.api.json` to `/prompt`, poll `/history/<id>`, assert
   `success` + the `CanvasState` validity readout. Verified live this session.
   Use it before believing any ComfyUI-adapter change.
-- **Dead frontend with a healthy backend and no UI error → reboot first.**
-  Full exoneration ladder is in loose-ends.md (2026-07-05 entry); don't
-  re-derive it.
+- **Ubuntu Chrome on this box cannot drive the ComfyUI frontend** (dead
+  menus, healthy backend, no UI error — unexplained, NOT fixed by reboot).
+  GUI sessions: bind `0.0.0.0`, browse from another machine (the PASS came
+  from a Windows browser over LAN). Ladder + correction in loose-ends.md.
 - First model load after reboot is **cold**: minutes of NVMe reads, looks
   like pagefile thrash. Not a hang. Warm loads ~25s.
 - Operator's Ctrl-C copy reflex can kill background agents/harness — a
