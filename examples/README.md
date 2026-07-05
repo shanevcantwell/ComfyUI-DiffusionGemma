@@ -30,3 +30,11 @@ not just non-emptiness. Verified 2026-07-05 against a live instance:
 `success`, warm-load wall time well under the 40×5s poll budget. This is
 the regression probe for P2, where the sampler's input schema is exactly
 what changes.
+
+## p2-knobs-smoke.api.json (2026-07-05, P2)
+
+Derived mechanically from the running instance's `/object_info` after the P2 commit
+(`c10ced0`) — all eight sampler knobs present with served defaults, prompt is the
+thought-leak repro ("Why do birds suddenly appear?"), seed=7. Verifier PASS same day:
+STRING clean of the thought frame, validity readout intact. The entropy_bound sweep is
+this graph with only `entropy_bound` varied.
