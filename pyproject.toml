@@ -4,12 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-diffusiongemma"
-version = "0.0.0"
+version = "0.1.0"
 description = "ComfyUI node pack for DiffusionGemma — uniform-state discrete diffusion text generation, made instrumentable."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [{ name = "Shane V Cantwell" }]
 keywords = ["comfyui", "diffusiongemma", "discrete-diffusion", "text-diffusion"]
+
+[project.urls]
+Repository = "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma"
 
 # Access path per ADR-CDG-004 (load via transformers, drive via the Diffusers
 # pipeline + scheduler). Pinned now that Phase 1 fixes a working version.
@@ -28,10 +32,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
 
-# ComfyUI Registry metadata (comfy-cli / registry.comfy.org). Populated toward
-# Phase 6; PublisherId is a placeholder until registration.
+# ComfyUI Registry metadata (comfy-cli / registry.comfy.org).
+# PublisherId minted 2026-07-05 (operator, registry.comfy.org — immutable).
+# Publishing: .github/workflows/publish_action.yml auto-publishes on version
+# bump to main (secret REGISTRY_ACCESS_TOKEN, set operator-side).
 [tool.comfy]
-PublisherId = ""
+PublisherId = "reflectiveattention"
 DisplayName = "ComfyUI-DiffusionGemma"
 Icon = ""
 
