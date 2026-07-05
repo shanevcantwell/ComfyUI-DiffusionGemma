@@ -1,10 +1,11 @@
 # ComfyUI-DiffusionGemma — agent instructions
 
 A ComfyUI node pack exposing **DiffusionGemma** (uniform-state discrete diffusion
-text generation) as an instrumentable node graph. This repo is currently
-**design-only** — decision records + build plan, no working nodes yet. Start at
-[`README.md`](README.md) (what + status), [`plan.md`](plan.md) (what's next), and
-[`decisions/`](decisions/) (why).
+text generation) as an instrumentable node graph. **Working as of 2026-07-05**:
+phases P0–P3 closed (loader, sampler with full knob surface + thinking toggle,
+live per-step view, `DGemmaTrace` analysis) — each phase's evidence is recorded
+in `plan.md`. Start at [`README.md`](README.md) (what + status),
+[`plan.md`](plan.md) (what's next), and [`decisions/`](decisions/) (why).
 
 ## Canonical path
 

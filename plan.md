@@ -205,6 +205,23 @@ is no partial-return mechanism to hand them off mid-loop.
 replicate the "Neither Parallel Nor Sequential" curve from the complete trace
 after the fact (b).
 
+**Implemented + live-verified (2026-07-05), one check outstanding.** Evidence:
+`eabc13f` (CanvasTrace keyed `(t, temperature, step_idx)` carrying scheduler
+identity; `on_frame` hook — engine propagates callback exceptions, node closure
+guards the display push; `DGemmaTrace` heatmap+summary; `web/live_view.js`;
+`dgemma/sampling.py` analysis fns; #9 honesty rider `turn_closed`/
+`answer_tokens` with pre-EOS counting). Suite 111 passed, coverage 100%
+(343 stmts). Live verifier PASS against 8189: ws `dgemma.sampler.step` events
+1:1 with steps_used (15/15, 19/19), heatmap IMAGE in history,
+`turn_closed=True answer_tokens=64` on a 43-word answer; the #9 empty-answer
+signature reproduced **legibly** (`turn_closed=False answer_tokens=0`,
+determination: unclosed thought span, single canvas at gen_length=256).
+Graphs banked (`b4b629e`, examples/p3-trace-smoke*). Item (c) mask-token
+corroboration implemented as a sampling.py fn exercised in tests.
+**Outstanding:** operator browser eyeball of the live view (the one surface no
+headless check reaches); raw pre-excision token ids not exposed on any socket —
+banked as #11 (blocks the #9 EOS-guillotine question and #3 signal 2).
+
 **Beyond P3 — graph-driven stepping (deferred, envelope not yet built).** The
 engine's `step()` primitive is proven extractable: the loop body factors
 cleanly into KV populate → mask build → forward → `scheduler.step()`
