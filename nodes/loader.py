@@ -6,7 +6,19 @@ creeps into this file, it belongs in `dgemma/model.py`, not here.
 """
 from __future__ import annotations
 
-from dgemma.model import DEFAULT_REPO_ID, load_model
+# Dual-context import, explicit package-depth gate (same discipline as the
+# root __init__.py — no blanket try/except, which masks real failures).
+# ComfyUI loads the pack as a package named after its directory path
+# (`/srv/dev/ComfyUI/nodes.py:2233,2241`) and never puts the pack root on
+# sys.path, so this module's __package__ is "<pack>.nodes" (dotted) and only
+# the relative `..dgemma` can resolve. Under pytest/standalone the repo root
+# is on sys.path and this module is top-level "nodes" (no dot), so only the
+# absolute form can resolve. Observed violation: graph smoke test 2026-07-05
+# (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py.
+if __package__ and "." in __package__:
+    from ..dgemma.model import DEFAULT_REPO_ID, load_model
+else:
+    from dgemma.model import DEFAULT_REPO_ID, load_model
 
 
 class DGemmaLoader:

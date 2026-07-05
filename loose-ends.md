@@ -233,3 +233,45 @@ unverified); or accepting GGUF/llama.cpp graduation earlier than planned
   conservative placement and the bnb CPU-spill rejection).
 - `tests/test_integration.py` stays as-is: it is the detector that caught
   this, and goes green the moment a working load path exists.
+
+---
+
+## 2026-07-05 — ComfyUI loader context broke bare `dgemma` imports in nodes/ (observed violation)
+
+**Category:** observed violation (ComfyUI loader context) — upgrades
+ADR-CDG-003's greenfield anticipated-failure ("two import surfaces to keep
+coherent") to an observed one. Detector: the downstream **graph smoke test**
+against real ComfyUI (custom-node import failed; unit suite alone had never
+exercised the real loader context).
+**Related ADR:** ADR-CDG-003 (node/engine seam — the two import surfaces)
+**Graduation trigger:** none expected — the enforcement test now holds the
+line; graduate only if a third import context appears.
+
+### Context
+`nodes/loader.py`/`nodes/sampler.py` imported the engine as bare
+`from dgemma...`. Every in-repo test passed (pytest puts the repo root on
+sys.path), but ComfyUI's loader (`/srv/dev/ComfyUI/nodes.py:2226-2246`) puts
+`custom_nodes/` — never the pack root — on sys.path and loads the pack as a
+package named after its directory path (`:2233,2241`). Result in production:
+`ModuleNotFoundError: No module named 'dgemma'`, IMPORT FAILED for the whole
+pack.
+
+### Decision
+Dual-context imports via an **explicit package-depth gate** in each nodes/
+module (`if __package__ and "." in __package__:` → relative `..dgemma`,
+else absolute `dgemma`), matching the root `__init__.py`'s `__package__`
+gate discipline. Blanket `try/except ImportError` was rejected for the same
+reason it was killed in review at the root: it masks real dependency
+failures (and can shadow-import ComfyUI's own top-level `nodes.py`).
+
+### Enforcement surface
+`tests/test_comfyui_loader_context.py` — replays ComfyUI's exact load
+mechanics (path-derived module name, `spec_from_file_location` on the pack's
+`__init__.py`, sys.modules registration before exec) in a fresh interpreter
+with the repo root stripped from sys.path — the condition pytest's own
+environment always masked. Verified to bite: pre-fix it reproduced the
+production failure verbatim (`ModuleNotFoundError: No module named 'dgemma'`).
+
+### Implementation Notes
+- `dgemma/` itself needed no change (all-relative internally) — the seam
+  held; only the adapter layer's imports were context-fragile.

@@ -7,14 +7,27 @@ actually finished denoising (ADR-CDG-001 Addendum).
 """
 from __future__ import annotations
 
-from dgemma.loop import (
-    DEFAULT_ENTROPY_BOUND,
-    DEFAULT_GEN_LENGTH,
-    DEFAULT_NUM_INFERENCE_STEPS,
-    DEFAULT_T_MAX,
-    DEFAULT_T_MIN,
-    run_diffusion,
-)
+# Dual-context import, explicit package-depth gate — see nodes/loader.py for
+# the full rationale (ComfyUI loader context vs. pytest/standalone; observed
+# violation 2026-07-05, enforced by tests/test_comfyui_loader_context.py).
+if __package__ and "." in __package__:
+    from ..dgemma.loop import (
+        DEFAULT_ENTROPY_BOUND,
+        DEFAULT_GEN_LENGTH,
+        DEFAULT_NUM_INFERENCE_STEPS,
+        DEFAULT_T_MAX,
+        DEFAULT_T_MIN,
+        run_diffusion,
+    )
+else:
+    from dgemma.loop import (
+        DEFAULT_ENTROPY_BOUND,
+        DEFAULT_GEN_LENGTH,
+        DEFAULT_NUM_INFERENCE_STEPS,
+        DEFAULT_T_MAX,
+        DEFAULT_T_MIN,
+        run_diffusion,
+    )
 
 
 class DGemmaSampler:
