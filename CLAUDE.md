@@ -82,3 +82,13 @@ of a real trade-off — otherwise it's a [`loose-ends.md`](loose-ends.md) entry.
   per-step callback re-assertion, not a scheduler feature. transformers'
   `.generate(decoder_input_ids=...)` seeds only the *first* canvas
   (`generation_diffusion_gemma.py:987`). See `loose-ends.md` (DGemmaRenoise).
+- **Per-step LIVE display and node output are different mechanisms.**
+  ComfyUI node outputs exist only on return, so live per-step frames ride
+  `PromptServer.instance.send_sync` custom events (thread-safe by
+  construction, `server.py:1374-1376`) plus a `WEB_DIRECTORY`-registered JS
+  extension (`nodes.py:2269-2272`) — never `ProgressBar`'s `preview=` slot,
+  which is image-typed downstream (`server.py:1293-1301`) and throws on
+  text. `CANVAS_STATE` is a resumable save-state (ADR-CDG-005), not a
+  display snapshot — canvas + schedule position + scheduler identity/config/
+  commit-state + RNG generator state, KV cache deliberately excluded
+  (recomputable via one prefill pass).

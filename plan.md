@@ -58,6 +58,7 @@ touches," across a row for "how this module grows."
 | `nodes/schedule.py`   |    |    |    | ●  |    |    |
 | `nodes/constraints.py`|    |    |    |    | ●  |    |
 | `nodes/options.py`    |    |    |    |    | ●  |    |
+| `web/` (JS extension) |    |    | ●  |    |    |    |
 | `__init__.py`         | ●  | +  | +  | +  | +  |    |
 | packaging + LICENSE   |    |    |    |    |    | ●  |
 
@@ -91,6 +92,12 @@ Per-module notes:
   instead of raw widgets (P4) → consumes `CONSTRAINTS` + options (P5). Expect to
   touch it every phase; keep it thin so that's cheap. It drives the Diffusers
   pipeline (ADR-CDG-004), not `.generate()`.
+- **`web/` is new in P3, for the LIVE-view split only** — a
+  `WEB_DIRECTORY`-registered JS extension (`nodes.py:2269-2272` registration,
+  `server.py:1225-1226` static serving) that listens for `DGemmaSampler`'s
+  per-step `send_sync` custom events and renders the canvas as it denoises.
+  It is not the `DGemmaTrace` analysis node (that stays in `nodes/trace.py`,
+  post-hoc over `CANVAS_TRACE`) — see Phase 3.
 
 Dependency spine in one line: **model → loop → (knobs) → trace → schedule →
 constraints/options → publish.** Nothing downstream is buildable before the loop
@@ -126,12 +133,63 @@ presentation over data that's already flowing, not the phase the capture
 itself gets invented. Wire the retained frames into `CanvasTrace` — keyed by
 absolute noise level `(t, temperature, step_idx)`, never loop index alone,
 because variation runs (Renoise, `loose-ends.md`) start mid-schedule and
-loop-index keying would make cross-run traces silently incomparable — and
-build `DGemmaTrace` (entropy heatmap + commit-per-step avalanche curve + live
-denoise). **Deliverable:** watch the late-burst on your own runs; replicate
-the "Neither Parallel Nor Sequential" curve. ADR-CDG-002's `mask_token` open
-question is already resolved documentarily (ADR-CDG-004, 2026-07-05); this
-phase supplies the empirical corroboration.
+loop-index keying would make cross-run traces silently incomparable.
+ADR-CDG-002's `mask_token` open question is already resolved documentarily
+(ADR-CDG-004, 2026-07-05); this phase supplies the empirical corroboration.
+
+**P3 splits into two deliverables, because ComfyUI's execution model forces
+the split** — a node's outputs exist only once its `FUNCTION` returns, so a
+downstream node cannot receive per-step frames live through a socket; there
+is no partial-return mechanism to hand them off mid-loop.
+
+- **(a) LIVE view — a feature of `DGemmaSampler`'s own node body, not a
+  downstream node.** Per-step canvas is pushed via
+  `PromptServer.instance.send_sync("<custom_event>", payload)` called from
+  inside the sync `FUNCTION` — thread-safe by construction, since `send_sync`
+  just does `call_soon_threadsafe` onto the asyncio message queue
+  (`server.py:1374-1376`) and there is no event-name whitelist on the receiving
+  side (`send_json`, `server.py:1364-1372`), so a custom event name is free to
+  use. The frontend side is a `WEB_DIRECTORY`-registered JS extension —
+  registration is `nodes.py:2269-2272` (checks `module.WEB_DIRECTORY`, mounts
+  it into `EXTENSION_WEB_DIRS`), served as a static route at
+  `server.py:1225-1226`. Adds a `web/` directory to the pack, registered from
+  `__init__.py` (see the module build order table below).
+  **Named trap:** do not smuggle this through `ProgressBar`'s `preview=` slot
+  — that path is structurally image-typed downstream (`comfy/utils.py`'s
+  `ProgressBar.update_absolute` → `main.py`'s hook → `send_image`,
+  `server.py:1293-1301`, which does `image.save(...)` on whatever it's
+  handed and throws on text). Text must go out its own custom event, not
+  `preview=`.
+  **Named residuals:** no in-tree precedent for per-step *text* push exists
+  to copy (checked `comfy_extras/*.py` for `send_sync` usage — none found);
+  this pack establishes the pattern. The frontend `addEventListener` idiom
+  for a custom event is confirmed only at the shim level in the minified
+  core bundle, not walked through in a worked first-party example — verify
+  against the actual JS API when P3 builds this (tracked in
+  `loose-ends.md`).
+- **(b) ANALYSIS — `DGemmaTrace` over the complete `CANVAS_TRACE` socket.**
+  Heatmap, avalanche curve, replay — all post-hoc and lossless, built from
+  the full trace once the node has returned. This is the deliverable the
+  original P3 text already described; it is unaffected by the live/analysis
+  split above.
+
+**Deliverable:** watch the late-burst live during your own runs (a), and
+replicate the "Neither Parallel Nor Sequential" curve from the complete trace
+after the fact (b).
+
+**Beyond P3 — graph-driven stepping (deferred, envelope not yet built).** The
+engine's `step()` primitive is proven extractable: the loop body factors
+cleanly into KV populate → mask build → forward → `scheduler.step()`
+(ADR-CDG-004). A `DGemmaStepSampler` node (`CANVAS_STATE` in, `CANVAS_STATE`
+out, per ADR-CDG-005) could let the *graph* drive iteration instead of the
+node's own internal loop — but this checkout's `comfy_extras` ships no
+For/While pair to drive it with (grepped: only `RepeatImageBatch` exists,
+no loop-control nodes), so graph-side iteration would need a third-party
+loop pack or an eventual own For/While pair. Deferred by design, not
+oversight: ADR-CDG-005 fixes the state contract precisely so this decision
+can stay open without blocking anything — the envelope (what drives the
+loop) is free to vary later because the identity (what crosses each step
+boundary) is already settled.
 
 ### Phase 4 — Schedule node + curve zoo
 Split out `DGemmaEntropySchedule` with a curve selector (linear / linear-quadratic

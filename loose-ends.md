@@ -118,3 +118,65 @@ check before wiring is warranted.
 - Candidate: a `DGemmaTrace` input mode, or a tiny separate node. P3-adjacent.
 - Before wiring: verify `modeling_diffusion_gemma.py`'s encoder → mask-build
   call ordering (flagged ungrounded during this pass, not yet checked).
+
+---
+
+## 2026-07-05 — In-node live text view mechanism: send_sync + WEB_DIRECTORY (grounded, not yet built)
+
+**Category:** grounded mechanism, not yet built
+**Related ADR:** none directly; the mechanism this entry grounds is the (a)
+LIVE-view half of `plan.md`'s Phase 3 split (the (b) ANALYSIS half is
+`DGemmaTrace`, unaffected by this entry).
+**Graduation trigger:** When P3 builds this, if the frontend idiom turns out
+to need more than `addEventListener` + `setDirtyCanvas`, revisit — this entry
+assumes that's sufficient based on the shim-level bundle read, not a
+worked first-party example.
+
+### Context
+ComfyUI's execution model gives a node's outputs to downstream sockets only
+once its `FUNCTION` returns — there is no way for a node to stream per-step
+frames to another node's input live. A live denoise view therefore has to be
+a feature of the *sampling* node's own body, not a downstream consumer.
+
+### Decision
+`DGemmaSampler`'s sync `FUNCTION` calls
+`PromptServer.instance.send_sync("<custom_event>", payload)` once per step.
+Grounded:
+- `send_sync` is thread-safe by construction: it does
+  `self.loop.call_soon_threadsafe(self.messages.put_nowait, (event, data, sid))`
+  (`server.py:1374-1376`), so calling it from a sync function running off the
+  asyncio loop's own thread is safe.
+- There is no event-name whitelist on the receiving side: `send` routes
+  anything that isn't a binary preview type to `send_json`, which just
+  wraps `{"type": event, "data": data}` with no name check
+  (`server.py:1364-1372`, dispatch at `server.py:1272-1281`). A custom event
+  name is free to use.
+- The frontend listener is a `WEB_DIRECTORY`-registered JS extension:
+  `nodes.py:2269-2272` checks `module.WEB_DIRECTORY` and mounts it into
+  `EXTENSION_WEB_DIRS`; `server.py:1225-1226` serves it as a static route
+  (`/extensions/<name>`).
+
+**Named trap:** do not smuggle this through `ProgressBar`'s `preview=` slot.
+That path is structurally image-typed all the way down —
+`comfy/utils.py`'s `ProgressBar.update_absolute` → the global hook installed
+in `main.py` → `server.send_image` (`server.py:1293-1301`), which calls
+`image.save(bytesIO, format=image_type, ...)` on whatever it's handed. A
+string payload throws there; it is not a generic preview channel.
+
+**Named residuals:**
+- No in-tree precedent for per-step *text* push: `comfy_extras/*.py` has no
+  `send_sync` usage to copy from. This pack establishes the pattern rather
+  than following one.
+- The frontend `addEventListener`-on-a-custom-event idiom is confirmed only
+  at the shim/minified-bundle level, not walked through in a worked
+  first-party JS example — verify the actual listener API against the live
+  frontend when P3 builds this, not just against the shim.
+
+### Why Not an ADR?
+- [ ] Hard to reverse? → No — a JS extension file and one `send_sync` call
+      site, both swappable without touching the engine.
+- [x] Surprising without context? → Somewhat, hence this entry carrying the
+      grounding rather than leaving it implicit.
+- [ ] Real trade-off? → None found; the ComfyUI execution model leaves only
+      one mechanism for a live in-node view, so there was nothing to choose
+      between.
