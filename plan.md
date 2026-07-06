@@ -222,6 +222,13 @@ corroboration implemented as a sampling.py fn exercised in tests.
 headless check reaches); raw pre-excision token ids not exposed on any socket —
 banked as #11 (blocks the #9 EOS-guillotine question and #3 signal 2).
 
+**Addendum: `frames` output (P3, additive).** `DGemmaSampler` gained a 4th
+output, `frames` — a `STRING` list (`OUTPUT_IS_LIST`), one raw decode per
+retained `CanvasTrace` frame, in order (`dgemma.loop.decode_frames`): the
+in-graph flipbook `tools/flipbook/flipbook.py` renders externally from the
+GGUF CLI, now available on the transformers backend without leaving the
+graph.
+
 **Beyond P3 — graph-driven stepping (deferred, envelope not yet built).** The
 engine's `step()` primitive is proven extractable: the loop body factors
 cleanly into KV populate → mask build → forward → `scheduler.step()`

@@ -13,8 +13,14 @@ unpack-and-forward with no translation logic of its own (ADR-CDG-003).
 Validation (`t_min < t_max`) lives on the engine side, in
 `run_diffusion` itself — not scattered into this adapter.
 
-P3 adds a third output, `DGEMMA_CANVAS_TRACE` (plan.md Phase 3 (b)), and a
-live per-step push (plan.md Phase 3 (a)): `sample()` builds a closure over
+P3 adds a third output, `DGEMMA_CANVAS_TRACE` (plan.md Phase 3 (b)), a live
+per-step push (plan.md Phase 3 (a)), and a fourth output, `frames` — a
+`STRING` list (`OUTPUT_IS_LIST`), one decoded string per captured step, in
+order (the in-graph "flipbook": noise -> coherent text). Decoding is
+`dgemma.loop.decode_frames` over `canvas_trace.frames`, called here rather
+than inside `run_diffusion` (ADR-CDG-003: the engine's 3-tuple return stays
+unchanged; this is a node-boundary derivation from a value `run_diffusion`
+already returns). `sample()` builds a closure over
 `PromptServer.instance.send_sync` and hands it to `run_diffusion` as
 `on_frame` — the ADR-CDG-003-respecting way to let a live view exist without
 `dgemma/loop.py` ever importing ComfyUI. `PromptServer` is imported lazily,
@@ -47,6 +53,7 @@ if __package__ and "." in __package__:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        decode_frames,
         run_diffusion,
     )
 else:
@@ -57,6 +64,7 @@ else:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        decode_frames,
         run_diffusion,
     )
 
@@ -156,8 +164,9 @@ class DGemmaSampler:
             },
         }
 
-    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE")
-    RETURN_NAMES = ("text", "canvas_state", "canvas_trace")
+    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE", "STRING")
+    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames")
+    OUTPUT_IS_LIST = (False, False, False, True)
     FUNCTION = "sample"
     CATEGORY = "DiffusionGemma"
 
@@ -188,4 +197,5 @@ class DGemmaSampler:
             thinking=thinking,
             on_frame=_build_on_frame(unique_id),
         )
-        return (text, canvas_state, canvas_trace)
+        frames = decode_frames(model.processor, canvas_trace.frames)
+        return (text, canvas_state, canvas_trace, frames)

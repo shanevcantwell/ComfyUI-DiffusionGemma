@@ -50,7 +50,9 @@ every socket **payload** for entropy-native types. See
   `confidence=0.005`, `gen_length=256`, `seed`, and a **`thinking` toggle**
   (injects the model's `<|think|>` control token). Outputs: `STRING` (clean —
   the model's thought-channel frame is excised at the id level, never leaked),
-  `CANVAS_STATE`, `CANVAS_TRACE`.
+  `CANVAS_STATE`, `CANVAS_TRACE`, and `frames` — a per-step `STRING` list (raw,
+  unexcised decode of every captured canvas snapshot: the in-graph "flipbook"
+  from noise to coherent text).
 - **Honesty readout** on `CANVAS_STATE`: `converged`, `committed_fraction`,
   `steps_used`, `turn_closed` (did the model actually end its turn, vs. run out
   of canvas), `answer_tokens` (pre-EOS count — trailing canvas-fill excluded),

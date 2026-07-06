@@ -19,6 +19,24 @@ from nodes.loader import DGemmaLoader
 from nodes.sampler import DGemmaSampler
 
 
+class _StubModel:
+    """Minimal `DGEMMA_MODEL` stand-in exposing only `.processor` — the one
+    attribute `DGemmaSampler.sample()` reads (P3's `frames` output) to call
+    `decode_frames(model.processor, ...)`. A bare `object()` has no
+    `.processor` and would raise `AttributeError` the moment `sample()`
+    reaches that call."""
+
+    processor = object()
+
+
+class _StubTrace:
+    """Minimal `DGEMMA_CANVAS_TRACE` stand-in exposing only `.frames` — see
+    `_StubModel`. Empty by default so the real (unmocked) `decode_frames`
+    degrades to `[]` rather than needing a real tokenizer."""
+
+    frames = ()
+
+
 def test_nodes_modules_do_not_import_comfy():
     assert not any(m == "comfy" or m.startswith("comfy.") for m in sys.modules)
 
@@ -27,7 +45,17 @@ def test_loader_input_types_declares_repo_id_and_quant():
     spec = DGemmaLoader.INPUT_TYPES()
     assert "repo_id" in spec["required"]
     assert "quant" in spec["required"]
-    assert spec["required"]["quant"][0] == ["nf4", "int8", "none"]
+    assert spec["required"]["quant"][0] == ["none"]
+
+
+def test_loader_quant_selector_does_not_offer_nf4_or_int8():
+    """Issue #18 — the door-hardening test: bitsandbytes cannot quantize
+    DiffusionGemma's fused 3D MoE experts, so nf4/int8 were misleading on any
+    hardware for this architecture and must not be offered at all, not just
+    de-defaulted."""
+    spec = DGemmaLoader.INPUT_TYPES()
+    assert "nf4" not in spec["required"]["quant"][0]
+    assert "int8" not in spec["required"]["quant"][0]
 
 
 def test_loader_quant_default_is_none_not_nf4():
@@ -37,6 +65,13 @@ def test_loader_quant_default_is_none_not_nf4():
     stale nf4 default."""
     spec = DGemmaLoader.INPUT_TYPES()
     assert spec["required"]["quant"][1]["default"] == "none"
+
+
+def test_loader_input_types_declares_local_files_only():
+    """local_files_only stays off (network download) by default — only an
+    explicit opt-in restricts resolution to the local HF cache."""
+    spec = DGemmaLoader.INPUT_TYPES()
+    assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
 
 
 def test_loader_declarations():
@@ -49,23 +84,55 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     sentinel = object()
     captured = {}
 
-    def fake_load_model(repo_id, quant):
+    def fake_load_model(repo_id, quant, local_files_only):
         captured["repo_id"] = repo_id
         captured["quant"] = quant
+        captured["local_files_only"] = local_files_only
         return sentinel
 
     monkeypatch.setattr("nodes.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    result = node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="nf4")
+    result = node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
 
     assert result == (sentinel,)
-    assert captured == {"repo_id": "google/diffusiongemma-26B-A4B-it", "quant": "nf4"}
+    assert captured == {
+        "repo_id": "google/diffusiongemma-26B-A4B-it",
+        "quant": "none",
+        "local_files_only": True,
+    }
+
+
+def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
+    """A graph built before this widget existed (or a caller that only passes
+    the required kwargs) must still get the download-permitting default, not
+    a TypeError."""
+    captured = {}
+
+    def fake_load_model(repo_id, quant, local_files_only):
+        captured["local_files_only"] = local_files_only
+        return object()
+
+    monkeypatch.setattr("nodes.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+
+    assert captured["local_files_only"] is False
 
 
 def test_sampler_declarations():
-    assert DGemmaSampler.RETURN_TYPES == ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE")
-    assert DGemmaSampler.RETURN_NAMES == ("text", "canvas_state", "canvas_trace")
+    assert DGemmaSampler.RETURN_TYPES == (
+        "STRING",
+        "DGEMMA_CANVAS_STATE",
+        "DGEMMA_CANVAS_TRACE",
+        "STRING",
+    )
+    assert DGemmaSampler.RETURN_NAMES == ("text", "canvas_state", "canvas_trace", "frames")
+    # `frames` (P3, the per-step flipbook) is the only list output — the
+    # other three stay scalar (plan.md; a wrong flag here would make ComfyUI
+    # fan out `text`/`canvas_state`/`canvas_trace` per-frame too).
+    assert DGemmaSampler.OUTPUT_IS_LIST == (False, False, False, True)
     assert DGemmaSampler.FUNCTION == "sample"
     assert DGemmaSampler.CATEGORY == "DiffusionGemma"
 
@@ -99,16 +166,23 @@ def test_sampler_input_types_declares_all_p2_widgets():
 
 
 def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
-    sentinel_model = object()
+    sentinel_model = _StubModel()
+    sentinel_trace = _StubTrace()
     captured = {}
 
     def fake_run_diffusion(model, prompt, **kwargs):
         captured["model"] = model
         captured["prompt"] = prompt
         captured["kwargs"] = kwargs
-        return ("decoded text", "canvas-state-stub", "canvas-trace-stub")
+        return ("decoded text", "canvas-state-stub", sentinel_trace)
+
+    def fake_decode_frames(processor, frames):
+        captured["decode_processor"] = processor
+        captured["decode_frames"] = frames
+        return ["frame 0", "frame 1"]
 
     monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+    monkeypatch.setattr("nodes.sampler.decode_frames", fake_decode_frames)
 
     node = DGemmaSampler()
     result = node.sample(
@@ -124,8 +198,12 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         thinking=False,
     )
 
-    assert result == ("decoded text", "canvas-state-stub", "canvas-trace-stub")
+    assert result == ("decoded text", "canvas-state-stub", sentinel_trace, ["frame 0", "frame 1"])
     assert captured["model"] is sentinel_model
+    # `decode_frames` is called with the model's processor and the trace's
+    # own frames — one helper call, no logic of its own (ADR-CDG-003).
+    assert captured["decode_processor"] is sentinel_model.processor
+    assert captured["decode_frames"] is sentinel_trace.frames
     assert captured["prompt"] == "hello"
     assert captured["kwargs"]["seed"] == 7
     # P2: assert the node actually forwards every widget value rather than
@@ -152,13 +230,13 @@ def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
 
     def fake_run_diffusion(model, prompt, **kwargs):
         captured["kwargs"] = kwargs
-        return ("text", "state", "trace")
+        return ("text", "state", _StubTrace())
 
     monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
     node = DGemmaSampler()
     node.sample(
-        model=object(),
+        model=_StubModel(),
         prompt="hi",
         seed=1,
         num_inference_steps=12,
@@ -194,16 +272,17 @@ class TestLiveFramePush:
         pytest condition) must not raise, and `text`/`canvas_state` must be
         unaffected."""
         monkeypatch.delitem(sys.modules, "server", raising=False)
+        trace_stub = _StubTrace()
 
         def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
             on_frame(_FakeFrame())  # the collector always calls on_frame per step
-            return ("text", "state", "trace")
+            return ("text", "state", trace_stub)
 
         monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         result = node.sample(
-            model=object(),
+            model=_StubModel(),
             prompt="hi",
             seed=1,
             num_inference_steps=1,
@@ -216,7 +295,7 @@ class TestLiveFramePush:
             unique_id="42",
         )
 
-        assert result == ("text", "state", "trace")
+        assert result == ("text", "state", trace_stub, [])
 
     def test_on_frame_pushes_via_send_sync_when_promptserver_available(self, monkeypatch):
         """The "present" branch, exercised without a real ComfyUI process:
@@ -240,13 +319,13 @@ class TestLiveFramePush:
 
         def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
             on_frame(_FakeFrame())
-            return ("text", "state", "trace")
+            return ("text", "state", _StubTrace())
 
         monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         node.sample(
-            model=object(),
+            model=_StubModel(),
             prompt="hi",
             seed=1,
             num_inference_steps=1,
@@ -279,15 +358,17 @@ class TestLiveFramePush:
         fake_server_module.PromptServer = FakePromptServer
         monkeypatch.setitem(sys.modules, "server", fake_server_module)
 
+        trace_stub = _StubTrace()
+
         def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
             on_frame(_FakeFrame())  # must not raise
-            return ("text", "state", "trace")
+            return ("text", "state", trace_stub)
 
         monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         result = node.sample(
-            model=object(),
+            model=_StubModel(),
             prompt="hi",
             seed=1,
             num_inference_steps=1,
@@ -300,7 +381,7 @@ class TestLiveFramePush:
             unique_id="42",
         )
 
-        assert result == ("text", "state", "trace")
+        assert result == ("text", "state", trace_stub, [])
 
     def test_send_sync_failure_does_not_kill_the_run(self, monkeypatch, caplog):
         """Display must never kill generation (review finding, 2026-07-05):
@@ -322,19 +403,21 @@ class TestLiveFramePush:
         fake_server_module.PromptServer = FakePromptServer
         monkeypatch.setitem(sys.modules, "server", fake_server_module)
 
+        trace_stub = _StubTrace()
+
         def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
             # The engine invokes the callback per step and does NOT guard it
             # (engine contract) — if the closure's own guard were missing,
             # this raise would propagate and abort the "run".
             on_frame(_FakeFrame())
-            return ("text", "state", "trace")
+            return ("text", "state", trace_stub)
 
         monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         with caplog.at_level("WARNING"):
             result = node.sample(
-                model=object(),
+                model=_StubModel(),
                 prompt="hi",
                 seed=1,
                 num_inference_steps=1,
@@ -347,7 +430,7 @@ class TestLiveFramePush:
                 unique_id="42",
             )
 
-        assert result == ("text", "state", "trace")  # output intact, run completed
+        assert result == ("text", "state", trace_stub, [])  # output intact, run completed
         assert any("live push failed" in record.message for record in caplog.records)
 
 

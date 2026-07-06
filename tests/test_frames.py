@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import pytest
 import torch
 
-from dgemma.loop import _FrameCollector, anneal_temperature, derive_canvas_state
+from dgemma.loop import _FrameCollector, anneal_temperature, decode_frames, derive_canvas_state
 from dgemma.types import CanvasState, DiffusionFrame
 
 
@@ -203,6 +203,86 @@ class TestFrameCollector:
         collector = _FrameCollector(num_inference_steps=1, t_min=0.4, t_max=0.8)
         result = collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))
         assert result == {}
+
+
+class _FakeTokenizer:
+    """Minimal stand-in for the real tokenizer: `decode` joins ids as
+    space-separated vocab words via a fixed table, so a test can assert on
+    exactly which ids survived into the decoded string — including the eos
+    and thought-channel-delimiter ids `decode_frames` must NOT trim/excise
+    (unlike `_decode_ids`, which does both)."""
+
+    VOCAB = {
+        1: "hello",
+        2: "world",
+        5: "secret",
+        99: "<eos>",
+        100: "<|channel>",
+        101: "<channel|>",
+    }
+
+    def decode(self, ids, skip_special_tokens=True):
+        return " ".join(self.VOCAB.get(i, f"id{i}") for i in ids)
+
+
+class _FakeProcessor:
+    tokenizer = _FakeTokenizer()
+
+
+class TestDecodeFrames:
+    """`dgemma.loop.decode_frames` — the raw per-step "flipbook" series
+    (plan.md P3 node-level `frames` output). Raw by design: no eos-trim, no
+    thought-channel excision — early frames are mostly noise and that IS the
+    intended view (contrast `_decode_ids`, the answer-text path, which does
+    both)."""
+
+    def test_returns_one_string_per_frame_in_order(self):
+        frames = [
+            _frame(step_idx=0, canvas=torch.tensor([1, 2])),
+            _frame(step_idx=1, canvas=torch.tensor([2, 1])),
+        ]
+
+        texts = decode_frames(_FakeProcessor(), frames)
+
+        assert texts == ["hello world", "world hello"]
+
+    def test_raw_view_does_not_eos_trim_or_excise_thought_channel(self):
+        """Feed a canvas whose ids include an eos (99) NOT at the end and a
+        well-formed thought-channel span (100 ... 101) — `_decode_ids` would
+        trim at the eos and `excise_thought_channel` would remove the
+        channel span; `decode_frames` must do neither, so every id's word
+        survives, in order."""
+        canvas = torch.tensor([1, 99, 2, 100, 5, 101, 2])
+        frames = [_frame(canvas=canvas)]
+
+        texts = decode_frames(_FakeProcessor(), frames)
+
+        assert texts == ["hello <eos> world <|channel> secret <channel|> world"]
+
+    def test_1d_canvas_tensor(self):
+        frames = [_frame(canvas=torch.tensor([1, 2, 1]))]
+
+        assert decode_frames(_FakeProcessor(), frames) == ["hello world hello"]
+
+    def test_2d_canvas_tensor_decodes_example_0_only(self):
+        """`run_diffusion` is single-example/batch-1 today, but the frame's
+        raw `canvas` snapshot may still be `[batch, canvas_len]` — decode
+        example 0, never blend or pick a different row."""
+        canvas = torch.tensor([[1, 2], [99, 99]])
+        frames = [_frame(canvas=canvas)]
+
+        assert decode_frames(_FakeProcessor(), frames) == ["hello world"]
+
+    def test_no_frames_returns_empty_list(self):
+        assert decode_frames(_FakeProcessor(), []) == []
+
+    def test_processor_bare_tokenizer_without_dot_tokenizer_attribute(self):
+        """`getattr(processor, "tokenizer", processor)` fallback: a bare
+        tokenizer handed in directly (no `.tokenizer` wrapper) must still
+        work — mirrors `_decode_ids`'s own fallback."""
+        frames = [_frame(canvas=torch.tensor([1, 2]))]
+
+        assert decode_frames(_FakeTokenizer(), frames) == ["hello world"]
 
 
 class TestDeriveCanvasState:

@@ -429,6 +429,39 @@ def _extract_thought_text(decoded_channel: str) -> str | None:
     return stripped or None
 
 
+def decode_frames(processor: Any, frames: list[DiffusionFrame]) -> list[str]:
+    """Decode each captured `DiffusionFrame.canvas` to a string, in frame
+    order — the "flipbook" series (noise -> coherent text), the raw per-step
+    view `tools/flipbook/flipbook.py` renders from the GGUF CLI, exposed here
+    for the transformers backend (plan.md P3, node-level `frames` output).
+
+    Deliberately RAW, unlike `_decode_ids`: `skip_special_tokens=True`, but
+    NO eos-trim and NO thought-channel excision. Early frames are mostly
+    noise and transient thought-channel delimiters — that IS the intended
+    view; trimming or excising here would hide the evolution the flipbook
+    exists to show. (Contrast `_decode_ids`, which trims at EOS and is fed
+    post-excision ids — that's the *answer* text, a different concern.)
+
+    `canvas` may be a 1-D `[canvas_len]` tensor or a 2-D `[batch, canvas_len]`
+    tensor (`run_diffusion` is single-example/batch-1 today) — example 0 is
+    decoded for a 2-D tensor. Ids are moved off-device and converted to a
+    plain `list[int]` (`.tolist()`) before `tokenizer.decode`, so this works
+    identically for a CPU/GPU tensor or a plain list/tuple already in test
+    fixtures.
+
+    `[]` when `frames` is empty.
+    """
+    tokenizer = getattr(processor, "tokenizer", processor)
+    texts: list[str] = []
+    for frame in frames:
+        canvas = frame.canvas
+        if hasattr(canvas, "dim") and canvas.dim() == 2:
+            canvas = canvas[0]
+        ids = canvas.tolist() if hasattr(canvas, "tolist") else list(canvas)
+        texts.append(tokenizer.decode(ids, skip_special_tokens=True))
+    return texts
+
+
 def run_diffusion(
     dgemma_model: DGemmaModel,
     prompt: str,
