@@ -12,9 +12,6 @@ requires-python = ">=3.10"
 authors = [{ name = "Shane V Cantwell" }]
 keywords = ["comfyui", "diffusiongemma", "discrete-diffusion", "text-diffusion"]
 
-[project.urls]
-Repository = "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma"
-
 # Access path per ADR-CDG-004 (load via transformers, drive via the Diffusers
 # pipeline + scheduler). Pinned now that Phase 1 fixes a working version.
 # torchvision: required by the model's processor (`Gemma4Processor` →
@@ -28,6 +25,9 @@ dependencies = [
     "accelerate",
     "bitsandbytes",
 ]
+
+[project.urls]
+Repository = "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
