@@ -15,3 +15,4 @@ in [`../plan.md`](../plan.md).
 | ADR-CDG-003 | [Split thin node adapters from a ComfyUI-agnostic engine](adr-cdg-003-node-engine-seam.md) | accepted | 2026-06-30 |
 | ADR-CDG-004 | [Drive via Diffusers pipeline + scheduler; load seam unchanged](adr-cdg-004-diffusers-pipeline-drive-seam.md) | accepted | 2026-07-05 |
 | ADR-CDG-005 | [CANVAS_STATE is a complete resumable save-state, not a display snapshot](adr-cdg-005-canvas-state-resumable-savestate.md) | accepted (implementation pending) | 2026-07-05 |
+| ADR-CDG-006 | [DGemmaSamplerAdvanced: a step-windowed, CANVAS_STATE-resumable sampler](adr-cdg-006-advanced-sampler-step-window-resume.md) | proposed | 2026-07-05 |
