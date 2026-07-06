@@ -414,3 +414,48 @@ tensor, ADR-001), NOT the *concepts* — the image-sampler toolkit ports:
   amplitude-annealed noise), per-position schedules (image sigma is a global scalar).
   "Sigma concepts apply AND then do something image diffusion can't" — worth its own
   ADR once the flip-book lets you watch it.
+
+---
+
+## 2026-07-06 — DiffusionGemma ≤ its AR base in wall-clock is structural (KV-cache asymmetry), not a harness artifact
+
+**Category:** grounded characterization (positioning — informs the README's value prop)
+**Related ADR:** none; relates #10 (confidence-trajectory finding) and #16 (3090 run)
+**Graduation trigger:** none — this is a fixed property of the method, not a bug to fix.
+Revisit only if a diffusion-specific serving path (parallel-decode kernels, cached
+bidirectional attention) changes the arithmetic below.
+
+### Observation (operator, across multiple harnesses)
+DiffusionGemma has **never been observed to run *faster* than its autoregressive Gemma
+base** in any harness, despite the "parallel denoising" pitch. Confirmed structural here,
+not a measurement fluke.
+
+### Why (forward-pass mechanics)
+The pitch is K steps ≪ T tokens. What eats it in wall-clock is the **KV-cache asymmetry**:
+- **AR pays for width once, cached.** Each token is a single-position forward pass that
+  reuses all prior positions via KV-cache. T tokens = T cheap passes.
+- **Diffusion pays for width every step, uncached.** Each step is a *full-width
+  bidirectional* pass over the whole canvas — the canvas mutates and attention is
+  bidirectional, so there is no cross-step cache to reuse. Per-step cost ≈
+  `canvas_width` × an AR-token pass.
+- Break-even: `K_steps × full_width_cost` vs `T_tokens × cached_cost`. At canvas 256 /
+  ~8 steps to converge (entropy-bound commit), that's 8 full-256 passes vs 256 cached
+  passes. **Compute-bound → diffusion does more total FLOPs and loses.** Diffusion only
+  wins when the pass is *weight-bandwidth-bound* (width nearly free; only the number of
+  weight-pagings counts — K vs T).
+
+### The spill-regime irony (3090, #16)
+The PCIe-spill regime is exactly where diffusion's few-steps advantage is *largest* (both
+AR and diffusion would bottleneck on streaming 26B of weights; diffusion pays that toll
+~8× vs AR's hundreds). It still doesn't win in practice because the **AR base being
+benchmarked fits in VRAM** — its per-token cost is milliseconds, so 256 × ms beats
+8 × ~15 s. Apples (spilled MoE-diffusion) to a differently-provisioned orchard
+(VRAM-resident AR). Grounding: #16's run was GPU-starved (screenshot: GPU 3%, VRAM 86%),
+i.e. PCIe-bound, ~15 s/step, ~8 steps to converge → ~2 min/prompt.
+
+### Positioning implication (load-bearing for the ship)
+**Do not sell this pack on throughput — it will lose that benchmark by construction on any
+hardware where the AR base fits.** The value prop is *instrumentability*: the watchable
+commit-front, the entropy field, infill/steering, the `committed_fraction` ramp the P3
+trace draws. That is orthogonal to speed. README copy and any launch note should lead with
+"see/steer the diffusion", never "faster".
