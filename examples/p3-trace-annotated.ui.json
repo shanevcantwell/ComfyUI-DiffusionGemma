@@ -1,0 +1,662 @@
+{
+  "id": "5d9a58f3-c808-4dc0-affd-3fe4984a3e31",
+  "revision": 0,
+  "last_node_id": 86,
+  "last_link_id": 15,
+  "nodes": [
+    {
+      "id": 77,
+      "type": "PreviewImage",
+      "pos": [
+        1276.5586103944295,
+        -56.40860144711687
+      ],
+      "size": [
+        458.32853851531354,
+        269.7651058131824
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 11
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "Preview Heatmap",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 78,
+      "type": "PreviewAny",
+      "pos": [
+        1280,
+        286
+      ],
+      "size": [
+        477.8548593078981,
+        492.9320650406788
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "source",
+          "name": "source",
+          "type": "*",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview Trace Summary",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 76,
+      "type": "DGemmaTrace",
+      "pos": [
+        970,
+        722
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "canvas_trace",
+          "name": "canvas_trace",
+          "type": "DGEMMA_CANVAS_TRACE",
+          "link": 10
+        },
+        {
+          "localized_name": "cell_px",
+          "name": "cell_px",
+          "type": "INT",
+          "widget": {
+            "name": "cell_px"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "heatmap",
+          "name": "heatmap",
+          "type": "IMAGE",
+          "links": [
+            11
+          ]
+        },
+        {
+          "localized_name": "summary",
+          "name": "summary",
+          "type": "STRING",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "shanevcantwell/ComfyUI-DiffusionGemma",
+        "ver": "455dd09e43b11f31ce6edee0882d06fbbf31db87",
+        "Node name for S&R": "DGemmaTrace"
+      },
+      "widgets_values": [
+        12
+      ],
+      "title": "3 - Trace / Instrumentation"
+    },
+    {
+      "id": 72,
+      "type": "DGemmaLoader",
+      "pos": [
+        100,
+        130
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "repo_id",
+          "name": "repo_id",
+          "type": "STRING",
+          "widget": {
+            "name": "repo_id"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "quant",
+          "name": "quant",
+          "type": "COMBO",
+          "widget": {
+            "name": "quant"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "local_files_only",
+          "name": "local_files_only",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "local_files_only"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "DGEMMA_MODEL",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "shanevcantwell/ComfyUI-DiffusionGemma",
+        "ver": "455dd09e43b11f31ce6edee0882d06fbbf31db87",
+        "Node name for S&R": "DGemmaLoader"
+      },
+      "widgets_values": [
+        "google/diffusiongemma-26B-A4B-it",
+        "none",
+        false
+      ],
+      "title": "1 - Load DiffusionGemma (HF from_pretrained)"
+    },
+    {
+      "id": 75,
+      "type": "PreviewAny",
+      "pos": [
+        948.5790377093665,
+        209.76598477566625
+      ],
+      "size": [
+        322.4187446191304,
+        353.555733503617
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "source",
+          "name": "source",
+          "type": "*",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview CanvasState",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 74,
+      "type": "PreviewAny",
+      "pos": [
+        965.9850804677925,
+        -86.23397584075515
+      ],
+      "size": [
+        284.04204771844843,
+        542.3629076649777
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "source",
+          "name": "source",
+          "type": "*",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview Text",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 73,
+      "type": "DGemmaSampler",
+      "pos": [
+        470,
+        130
+      ],
+      "size": [
+        413.67078285970865,
+        415.47004667267083
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "DGEMMA_MODEL",
+          "link": 7
+        },
+        {
+          "localized_name": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "num_inference_steps",
+          "name": "num_inference_steps",
+          "type": "INT",
+          "widget": {
+            "name": "num_inference_steps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "t_min",
+          "name": "t_min",
+          "type": "FLOAT",
+          "widget": {
+            "name": "t_min"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "t_max",
+          "name": "t_max",
+          "type": "FLOAT",
+          "widget": {
+            "name": "t_max"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "entropy_bound",
+          "name": "entropy_bound",
+          "type": "FLOAT",
+          "widget": {
+            "name": "entropy_bound"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "confidence",
+          "name": "confidence",
+          "type": "FLOAT",
+          "widget": {
+            "name": "confidence"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "gen_length",
+          "name": "gen_length",
+          "type": "INT",
+          "widget": {
+            "name": "gen_length"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "thinking",
+          "name": "thinking",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "thinking"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "links": [
+            8
+          ]
+        },
+        {
+          "localized_name": "canvas_state",
+          "name": "canvas_state",
+          "type": "DGEMMA_CANVAS_STATE",
+          "links": [
+            9
+          ]
+        },
+        {
+          "localized_name": "canvas_trace",
+          "name": "canvas_trace",
+          "type": "DGEMMA_CANVAS_TRACE",
+          "links": [
+            10
+          ]
+        },
+        {
+          "localized_name": "frames",
+          "name": "frames",
+          "type": "STRING",
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "shanevcantwell/ComfyUI-DiffusionGemma",
+        "ver": "455dd09e43b11f31ce6edee0882d06fbbf31db87",
+        "Node name for S&R": "DGemmaSampler"
+      },
+      "widgets_values": [
+        "What are the next 3 steps in this sequence? 0,1,2,6,16,44,120,...",
+        23,
+        "fixed",
+        48,
+        0.4,
+        0.8,
+        0.05,
+        0.005,
+        512,
+        false
+      ],
+      "title": "2 - Entropy-Bound Sampler"
+    },
+    {
+      "id": 82,
+      "type": "Note",
+      "pos": [
+        100,
+        -340
+      ],
+      "size": [
+        1400,
+        220
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": ""
+      },
+      "widgets_values": [
+        "# ComfyUI-DiffusionGemma \u2014 P3 instrumentation example\n\n**Flow:** Loader -> Sampler -> [Preview Text, Preview CanvasState, Preview Flipbook Frames], and Sampler.canvas_trace -> Trace -> [Preview Heatmap, Preview Trace Summary].\n\nDiffusionGemma is a *uniform-state discrete-diffusion* text model (no MASK sentinel, no sigma schedule, ADR-CDG-001/004). It starts from a canvas of random tokens and iteratively commits low-entropy positions under a per-step entropy budget, re-noising the rest, until the canvas stabilizes into text. Finished canvases feed the KV cache for the next block (block-autoregressive).\n\n**Honest positioning:** this pack's value is INSTRUMENTABILITY \u2014 a watchable commit-front, an entropy field, a live per-step view, and this Trace node's heatmap/curve \u2014 NOT throughput. DiffusionGemma has never been observed to run faster than its own autoregressive Gemma base on hardware where the AR base fits in VRAM: the KV-cache asymmetry is structural (AR pays for canvas width once per token, cached; diffusion pays full-canvas-width cost every step, uncached). Don't come here for speed \u2014 come here to watch and steer the trajectory. (repo loose-ends.md, \"DiffusionGemma <= its AR base\")\n\nPer-node notes below name what each widget/output does and cite the issue that grounds it. Full detail: README.md, plan.md, loose-ends.md, decisions/ in the repo."
+      ],
+      "title": "Overview \u2014 start here"
+    },
+    {
+      "id": 83,
+      "type": "Note",
+      "pos": [
+        100,
+        250
+      ],
+      "size": [
+        340,
+        460
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": ""
+      },
+      "widgets_values": [
+        "### 1 \u2014 DGemmaLoader (load, don't drive)\n\nLoads model + processor via transformers' `from_pretrained` (ADR-CDG-004: load via transformers, drive via the diffusers pipeline downstream in the Sampler).\n\n- **repo_id** \u2014 HF Hub slug (`google/diffusiongemma-26B-A4B-it`) or a local path. First load auto-downloads + caches ~11 safetensors shards (~54GB bf16, ungated, Apache-2.0).\n- **quant** \u2014 `none` is the ONLY option now. bitsandbytes cannot quantize DiffusionGemma's fused 3D MoE expert tensors (it only swaps `nn.Linear`/`Conv1D`, silently skipping ~22.84B of 26B params) \u2014 `nf4`/`int8` were removed from the selector rather than left in to silently not do what they claim (issue #18, wall grounded in #4).\n- **local_files_only** \u2014 off (default): allow HF Hub download + cache. On: force both `from_pretrained` calls to resolve only from the local cache \u2014 no network. Useful once the checkpoint is already cached.\n\nA 48GB-class GPU runs `quant=none` with CPU spill (~2.3s/step observed). Smaller cards have no working quantized path yet (#4, AWQ-INT4 is the lead candidate)."
+      ],
+      "title": "Node 1 notes"
+    },
+    {
+      "id": 84,
+      "type": "Note",
+      "pos": [
+        470,
+        560
+      ],
+      "size": [
+        480,
+        155
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": ""
+      },
+      "widgets_values": [
+        "### 2 \u2014 DGemmaSampler knobs (entropy-bound decoder)\n\nWidget names match `run_diffusion`'s kwargs 1:1 \u2014 no separate node-facing vocabulary.\n\n- **num_inference_steps** \u2014 the step budget / anneal denominator `S`. Temperature schedule is linear over it: `t = t_min + (t_max-t_min)*(cur_step/S)`.\n- **t_min / t_max** \u2014 hot->cool temperature schedule across the anneal (default 0.8->0.4). Governs RENOISE COVERAGE (how many positions get re-noised each step), NOT token identity \u2014 output is always `argmax`, which is temperature-invariant. Visible \"twisting\" happens because a position's committed-neighbor context changes and it re-argmaxes.\n- **entropy_bound** \u2014 a FIXED per-step acceptance budget (not scheduled): how much of the canvas is allowed to commit each step.\n- **confidence** \u2014 early-stop threshold on mean canvas entropy. DISCONTINUOUS, not a smooth quality dial (issue #10): a byte-identical dead zone was measured across 0.005-0.1, with a cliff at 0.001 \u2014 block-autoregression means a threshold change does nothing until it flips one canvas's exit, then all downstream canvases diverge completely.\n- **gen_length** \u2014 total generation length; tiles into 256-token canvases (blocks), each finished block feeding the KV cache for the next.\n- **thinking** \u2014 injects the model's `<|think|>` control token. Caveat (issue #9): can consume the ENTIRE canvas thinking and return an empty answer \u2014 check `CanvasState.turn_closed` / `answer_tokens`, not just `converged`.\n- **seed** \u2014 RNG seed for canvas init; best-effort, not bit-exact across library versions (repo loose-ends.md, \"seeding/renoise\")."
+      ],
+      "title": "Node 2 notes"
+    },
+    {
+      "id": 86,
+      "type": "PreviewAny",
+      "pos": [
+        1800,
+        -56
+      ],
+      "size": [
+        420,
+        500
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "source",
+          "name": "source",
+          "type": "*",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview Flipbook Frames",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 85,
+      "type": "Note",
+      "pos": [
+        980,
+        810
+      ],
+      "size": [
+        780,
+        230
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": ""
+      },
+      "widgets_values": [
+        "### Outputs \u2014 what each Preview shows\n\n- **Preview Text** \u2014 the `STRING` result. Clean by construction: the model's thought-channel span is excised at the token-id level before this socket, never leaked (even when `thinking=true`).\n- **Preview CanvasState** \u2014 the validity readout, not just a bare string (ADR-CDG-001 Addendum: a payload can't lie about whether the canvas actually finished). Key fields: `converged`, `committed_fraction`, `steps_used`, `turn_closed` (did the model actually end its turn vs. run out of canvas), `answer_tokens` (pre-EOS count, excludes trailing canvas-fill).\n- **Preview Flipbook Frames** \u2014 the Sampler's 4th output, `frames`: one decoded STRING per captured diffusion step, in order (`OUTPUT_IS_LIST` \u2014 ComfyUI fans this Preview out per frame). RAW decode (skip_special_tokens only, no eos-trim, no thought-channel excision) \u2014 early frames are mostly noise, and watching that noise resolve into `text` step by step IS the point (the in-graph version of `tools/flipbook/flipbook.py`'s scrubber). Wire `frames` into any list-consuming node the same way.\n- **Preview Trace Summary** (from DGemmaTrace) \u2014 the per-step `committed_fraction` ramp (avalanche curve) plus a mask-token corroboration verdict (empirically confirms no absorbing-MASK sentinel, ADR-CDG-001/004).\n- **Preview Heatmap** (from DGemmaTrace) \u2014 the commit-front image: steps x canvas-positions, nearest-neighbor upscaled by the Trace node's `cell_px` widget (default 6 \u2014 a raw map is unreadably small at 1:1)."
+      ],
+      "title": "Outputs notes"
+    }
+  ],
+  "links": [
+    [
+      7,
+      72,
+      0,
+      73,
+      0,
+      "DGEMMA_MODEL"
+    ],
+    [
+      8,
+      73,
+      0,
+      74,
+      0,
+      "STRING"
+    ],
+    [
+      9,
+      73,
+      1,
+      75,
+      0,
+      "DGEMMA_CANVAS_STATE"
+    ],
+    [
+      10,
+      73,
+      2,
+      76,
+      0,
+      "DGEMMA_CANVAS_TRACE"
+    ],
+    [
+      11,
+      76,
+      0,
+      77,
+      0,
+      "IMAGE"
+    ],
+    [
+      12,
+      76,
+      1,
+      78,
+      0,
+      "STRING"
+    ],
+    [
+      15,
+      73,
+      3,
+      86,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.4064086182410098,
+      "offset": [
+        -341.7421289907983,
+        127.2363108260249
+      ]
+    }
+  },
+  "version": 0.4
+}
