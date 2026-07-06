@@ -77,7 +77,8 @@ Requires `transformers==5.13.0` (DiffusionGemma support) and
 (~54 GB bf16, ungated) download from
 [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it)
 on first load. A 48 GB-class GPU runs the default `quant=none` path with CPU
-spill (~2.3 s/step observed); smaller cards await the quantized path (#4).
+spill (~2.3 s/step observed); smaller cards need a working quantized path,
+which remains unresolved (#4).
 
 **Example graphs** (API format, all operator-verified live —
 [examples/](examples/)): `ping-smoke` (P1 minimal), `p2-knobs-smoke` (all
@@ -94,8 +95,13 @@ variant).
   has measured sweeps).
 - Raw pre-excision canvas ids aren't yet exposed on any socket (issue #11) —
   wanted for token-level trace analysis.
-- Quantized loading on ≤48 GB cards is unresolved (issue #4; AWQ-INT4 checkpoint
-  is the lead candidate).
+- Quantized loading for accessible (8–24 GB) consumer cards is unresolved
+  (issue #4) — the AWQ-INT4/compressed-tensors candidate surveyed there was
+  smoke-tested and found incompatible with this pack's pinned `transformers`
+  version (a real architecture-revision mismatch, not a config error); no
+  viable candidate is currently identified. GGUF/llama.cpp (issue #15) is the
+  most promising remaining direction on accessibility grounds, but is parked
+  pending a design bridge for the live-view/trace instrumentation gap.
 
 ## Where the design lives
 
@@ -106,6 +112,7 @@ variant).
 | **[ADR-CDG-001](decisions/adr-cdg-001-native-socket-types.md)** | Native socket types instead of reusing `SIGMAS`/`LATENT`. |
 | **ADR-CDG-002 → 004** | Access path: load via transformers, **drive via the Diffusers pipeline** (004 amends 002). |
 | **ADR-CDG-005** | `CANVAS_STATE` is a resumable save-state, not a display snapshot. |
+| **[ADR-CDG-006](decisions/adr-cdg-006-advanced-sampler-step-window-resume.md)** | `DGemmaSamplerAdvanced` — step-windowed, chainable/resumable sampler (**proposed**, not yet built). |
 | **[loose-ends.md](loose-ends.md)** | Tactical decisions below the ADR bar. |
 
 ## Relationship to RES4LYF

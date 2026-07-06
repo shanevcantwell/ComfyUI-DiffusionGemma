@@ -48,9 +48,14 @@ introduces names the failure it prevents, even before that failure has occurred.
 
 ## ADR convention
 
-Decision records live in [`decisions/`](decisions/), numbered `NNNN-slug.md`, with
-[`decisions/README.md`](decisions/README.md) as the index table. Format SSoT is
-the `writing-adrs` skill (`../harness-tools/internal-skills/writing-adrs`). Record
+Decision records live in [`decisions/`](decisions/), numbered `NNNN-slug.md`. No
+separate index file — `decisions/README.md` was tried and dropped (2026-07-05):
+a hand-maintained index duplicates each ADR's own Status/Title/Date header, and
+duplication is drift waiting to happen (it already had, twice, before removal).
+Check a directory listing or an ADR's own header for its status; the main
+[`README.md`](README.md)'s "Where the design lives" table links the load-bearing
+ones. Format SSoT is the `writing-adrs` skill
+(`../harness-tools/internal-skills/writing-adrs`). Record
 a decision when it's hard to reverse, surprising without context, and the result
 of a real trade-off — otherwise it's a [`loose-ends.md`](loose-ends.md) entry.
 

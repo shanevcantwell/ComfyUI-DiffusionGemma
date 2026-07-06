@@ -431,9 +431,9 @@ is warranted — this ADR sequences but does not enumerate to that grain.
 resumable `CANVAS_STATE` contract, for the `EntropyBoundScheduler` single-block case.
 When Phase A lands, ADR-CDG-005's status should move from "accepted (implementation
 pending)" toward "accepted (partially implemented — EntropyBound single-block, per
-ADR-CDG-006)". *(That status edit and the `decisions/README.md` index row for
-ADR-CDG-006 are follow-up writes outside this artifact — see the design note returned
-with this ADR.)*
+ADR-CDG-006)". *(That status edit is a follow-up write outside this artifact — see
+the design note returned with this ADR. `decisions/README.md` was removed
+2026-07-05, after this ADR was written; it is no longer a follow-up target.)*
 **Superseded by:** TBD (a future `DGemmaStepSampler` ADR may generalize the envelope).
 
 ## References
