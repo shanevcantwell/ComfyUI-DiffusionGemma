@@ -7,12 +7,13 @@ The `google/diffusiongemma-26B-A4B-it` checkpoint is ~53.6GB (CLAUDE.md) — a
   2. the checkpoint is already present in the local HF cache.
 
 QUANT CHOICE — visible, not buried: `INTEGRATION_QUANT` below defaults to
-`"none"` (unquantized bf16, `device_map="auto"`, accelerate may legally spill
-the remainder to CPU) because bitsandbytes cannot quantize this model's fused
-3D MoE expert parameters, making the NF4 footprint ~45GiB — it does not fit
-the 48GB dev box (grounded in `loose-ends.md`, 2026-07-05 bnb-MoE entry).
-Override with `DGEMMA_INTEGRATION_QUANT=nf4|int8` once a working quantized
-path exists.
+(and, since issue #18 removed the bnb nf4/int8 paths, only accepts) `"none"`
+— unquantized bf16, `device_map="auto"`, accelerate may legally spill the
+remainder to CPU. bitsandbytes could never quantize this model's fused 3D
+MoE expert parameters (the NF4 footprint was ~45GiB regardless — grounded in
+`loose-ends.md`, 2026-07-05 bnb-MoE entry), so the env-var override was
+removed along with the dead code rather than left pointing at a `ValueError`.
+A real quantized path is tracked in issue #4.
 
 REDUCED KNOBS — named, not silent: `num_inference_steps=8` (vs. the grounded
 default 48) because each denoising step is a full 26B forward with
@@ -32,7 +33,7 @@ import pytest
 from dgemma.loop import run_diffusion
 from dgemma.model import DEFAULT_REPO_ID, load_model
 
-INTEGRATION_QUANT = os.environ.get("DGEMMA_INTEGRATION_QUANT", "none")
+INTEGRATION_QUANT = "none"  # the only quant value load_model accepts (issue #18)
 INTEGRATION_NUM_STEPS = 8
 INTEGRATION_GEN_LENGTH = 64
 

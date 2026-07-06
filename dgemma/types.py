@@ -23,9 +23,9 @@ class DGemmaModel:
     model: Any  # transformers.DiffusionGemmaForBlockDiffusion
     processor: Any  # transformers processor (AutoProcessor.from_pretrained(...))
     device: str
-    dtype: str  # human-readable compute dtype label, e.g. "float16" (NF4 compute dtype)
+    dtype: str  # human-readable compute dtype label — always "bfloat16" since issue #18
     repo_id: str
-    quant: str  # "nf4" | "int8" | "none" — how the checkpoint was loaded
+    quant: str  # "none" (issue #18 — bnb nf4/int8 removed, misled on this architecture)
 
 
 @dataclass

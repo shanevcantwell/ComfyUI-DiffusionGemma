@@ -29,10 +29,17 @@ class DGemmaLoader:
         return {
             "required": {
                 "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
-                # Default "none" (not "nf4"), issue #4: nf4 OOMs structurally
-                # on this box (bnb can't quantize the fused 3D MoE experts) —
-                # see dgemma/model.py's DEFAULT_QUANT provenance comment.
-                "quant": (["nf4", "int8", "none"], {"default": DEFAULT_QUANT}),
+                # "none" is the only honest option (issue #18): bitsandbytes
+                # cannot quantize DiffusionGemma's fused 3D MoE experts, so
+                # "nf4"/"int8" were removed from the selector rather than left
+                # to silently not do what they claim — see dgemma/model.py's
+                # DEFAULT_QUANT provenance comment.
+                "quant": (["none"], {"default": DEFAULT_QUANT}),
+                # Off by default: keep the HF download-and-cache behavior.
+                # On: forces both from_pretrained calls to resolve only from
+                # the local HF cache (no network) — useful once a checkpoint
+                # is already cached (e.g. tokenizer-only test runs).
+                "local_files_only": ("BOOLEAN", {"default": False}),
             }
         }
 
@@ -41,5 +48,5 @@ class DGemmaLoader:
     FUNCTION = "load"
     CATEGORY = "DiffusionGemma"
 
-    def load(self, repo_id: str, quant: str):
-        return (load_model(repo_id=repo_id, quant=quant),)
+    def load(self, repo_id: str, quant: str, local_files_only: bool = False):
+        return (load_model(repo_id=repo_id, quant=quant, local_files_only=local_files_only),)

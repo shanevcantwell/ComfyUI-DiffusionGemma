@@ -23,7 +23,6 @@ dependencies = [
     "torch",
     "torchvision",
     "accelerate",
-    "bitsandbytes",
 ]
 
 [project.urls]
