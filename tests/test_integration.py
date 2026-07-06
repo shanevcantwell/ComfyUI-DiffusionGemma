@@ -1,10 +1,16 @@
-"""End-to-end DiffusionGemma load + generate, gated behind an explicit opt-in
-env var AND an HF-cache presence check.
+"""End-to-end DiffusionGemma load + generate — the original `live` test.
 
-The `google/diffusiongemma-26B-A4B-it` checkpoint is ~53.6GB (CLAUDE.md) — a
-26B load is not a unit-test cost, so this only runs when both:
-  1. `DGEMMA_INTEGRATION=1` is set (explicit opt-in), and
-  2. the checkpoint is already present in the local HF cache.
+Gating idiom (reconciled 2026-07-06, was env-var `DGEMMA_INTEGRATION=1` +
+an inline cache check): SELECTION is the `live` pytest marker (`pytest -m
+live` opts in; the default `pytest` excludes it via `pyproject.toml`'s
+`addopts`) — the env var did the same "explicit opt-in" job the marker now
+does, so it was dropped rather than kept alongside it as a second gate.
+Per-test READINESS (weights actually cached + a CUDA device present) is the
+`require_live_weights` fixture (`tests/conftest.py`), which SKIPS — not
+errors — when either is missing, so `pytest -m live` on a box without the
+checkpoint/GPU reports a skip. The `google/diffusiongemma-26B-A4B-it`
+checkpoint is ~53.6GB (CLAUDE.md) — a 26B load is not a unit-test cost,
+which is exactly why it lives behind both the marker and the fixture.
 
 QUANT CHOICE — visible, not buried: `INTEGRATION_QUANT` below defaults to
 (and, since issue #18 removed the bnb nf4/int8 paths, only accepts) `"none"`
@@ -25,41 +31,21 @@ full 256-token canvas — the reduction that actually bites is the step count.
 """
 from __future__ import annotations
 
-import os
 import time
 
 import pytest
 
 from dgemma.loop import run_diffusion
-from dgemma.model import DEFAULT_REPO_ID, load_model
+from dgemma.model import load_model
 
 INTEGRATION_QUANT = "none"  # the only quant value load_model accepts (issue #18)
 INTEGRATION_NUM_STEPS = 8
 INTEGRATION_GEN_LENGTH = 64
 
-
-def _weights_cached() -> bool:
-    try:
-        from huggingface_hub import scan_cache_dir
-    except ImportError:
-        return False
-    try:
-        cache_info = scan_cache_dir()
-    except Exception:
-        return False
-    return any(repo.repo_id == DEFAULT_REPO_ID for repo in cache_info.repos)
+pytestmark = pytest.mark.live
 
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("DGEMMA_INTEGRATION") != "1" or not _weights_cached(),
-    reason=(
-        "Set DGEMMA_INTEGRATION=1 and ensure google/diffusiongemma-26B-A4B-it "
-        "is in the local HF cache (~53.6GB) to run this test."
-    ),
-)
-
-
-def test_load_and_generate_smoke():
+def test_load_and_generate_smoke(require_live_weights):
     t0 = time.perf_counter()
     model = load_model(quant=INTEGRATION_QUANT)
     load_seconds = time.perf_counter() - t0

@@ -55,4 +55,10 @@ py-modules = []
 # entirely; `dgemma`/`nodes` are still found via `sys.path[0]` (the cwd
 # `python -m pytest` inserts).
 testpaths = ["tests"]
-addopts = "--import-mode=importlib"
+# `-m 'not live'`: the default fast suite excludes `live` tests (real
+# weights + CUDA) so bare `pytest` stays CI-safe/no-GPU; `pytest -m live`
+# selects only them. See `tests/README.md` for the two-halves convention.
+addopts = "--import-mode=importlib -m 'not live'"
+markers = [
+    "live: requires real DiffusionGemma weights (bf16, ~52GB cached) + a CUDA device; excluded from the default fast suite — run with `pytest -m live`",
+]

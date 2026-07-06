@@ -13,6 +13,15 @@ letting prose claim identity.
 Tokenizer-only: loads `AutoProcessor` from the local HF cache
 (`local_files_only=True` — never the network, never the 26B weights).
 Skip-gated when the cached checkpoint is unreachable.
+
+NOT marked `live` (reconciled 2026-07-06, `live`-taxonomy pass): the `live`
+marker denotes "needs the real ~53.6GB bf16 weights + a CUDA device"
+(`pyproject.toml`); this test needs neither — only the processor/tokenizer
+config files, no forward pass, no GPU. It keeps its own lightweight
+`skipif` (module-level, above) as a self-contained cache-presence guard
+rather than borrowing the heavier marker, so it stays part of the fast
+default suite on any box where the tokenizer config happens to be cached
+(as it is here) and degrades to a graceful skip elsewhere.
 """
 from __future__ import annotations
 
