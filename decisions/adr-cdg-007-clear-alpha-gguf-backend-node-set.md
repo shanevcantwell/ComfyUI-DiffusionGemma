@@ -1,6 +1,6 @@
 # ADR-CDG-007 — Clear-alpha architecture: GGUF/llama.cpp-fork backend, three-node set, steering-vs-illumination socket rule
 
-**Status**: proposed
+**Status**: rejected (2026-07-06) — the GGUF/fork alpha is **not adopted for 0.1.0**; the pack ships on the `transformers`-bf16 path (ADR-CDG-002). See "Decision reversal" below. The GGUF design is preserved as the record of the considered-and-set-aside alpha.
 **Date**: 2026-07-06
 **Related**: ADR-CDG-002 (access path — this ADR *amends* it for the alpha: it flips 002's
 GGUF-as-primary rejection for the alpha scope), ADR-CDG-004 (drive seam — this ADR defers the
@@ -11,6 +11,43 @@ as milestone-2, gated on native per-step stepping this backend does not provide)
 Source of the decision arc: `handoffs/2026-07-05-flipbook-and-sampler-theory.md` (committed).
 Sampler *mechanics* (anneal formula, renoise, early-stop discontinuity, failure-mode theory) stay
 in that handoff and `loose-ends.md`; this ADR captures only the *architecture decisions* they motivate.
+
+---
+
+## Decision reversal (2026-07-06) — this proposal is REJECTED for 0.1.0
+
+**What changed.** This ADR *proposed* shipping the alpha on the GGUF/llama.cpp-fork backend. That
+proposal is **not adopted for 0.1.0.** 0.1.0 ships on the **`transformers`-bf16 path** (ADR-CDG-002
+load seam) — the runtime with two verified integration PASSes on the 48 GB RTX-8000.
+
+**Why the reversal (decisive → supporting):**
+
+1. **Fork dependency is disqualifying for a public pack.** The GGUF backend is a *private, unpublished*
+   llama.cpp fork (`/srv/dev/llama.cpp-diffusiongemma`). This ADR's own **Open Question 1** flagged the
+   fork's public/buildable status as a **blocking prerequisite, not a follow-up.** A ComfyUI-Manager
+   listing cannot depend on a fork a user cannot obtain; the transformers path depends only on public HF
+   weights + public `transformers`. **OQ1 is hereby resolved in the honest direction:** rather than block
+   0.1.0 on publishing/upstreaming a fork, ship on the public in-torch path.
+2. **The transformers path works today.** bf16 + `device_map="auto"` CPU-spill, two verified PASSes
+   (`dgemma/model.py`) — ships now, no fork gate.
+3. **No in-torch quant rescues the memory fit — and that is inherent, not a missing flag.** The
+   ~42.5 GiB of fused 3D MoE experts (`DiffusionGemmaTextExperts`) are not `nn.Linear`/`Conv1D`, so every
+   stock quantizer (bnb nf4/int8, torchao/quanto **fp8**, AWQ) skips them — fp8 would shrink only the
+   ~1 B of Linear params. This is **module coverage, not a hardware cast**: nf4 already dequantizes to
+   fp16 on Turing with no Blackwell needed. GGUF fit *only* because llama.cpp quantizes the experts
+   natively in the conversion.
+
+**The honest envelope of 0.1.0.** The shipped path needs a **large-VRAM GPU (≈48 GB+)** and CPU-spills
+the unquantizable experts (~24 tok/s). It does **not** fit consumer 16–24 GB cards. 0.1.0 is an
+*experimental instrumentation pack* — its README/requirements must state this envelope plainly.
+Ampere/bf16-tensor-core validation and any smaller-checkpoint path remain **issue #16** (`pri:later`).
+
+**GGUF is deferred, not cancelled.** It remains the route to consumer-fittable memory (Q4_K_M ~15.6 GB,
+experts quantized). Revive when the fork is public/upstreamed. Tracked: **issue #15** (`pri:later`).
+
+**Status bookkeeping.** Because this ADR is **rejected**, its proposed amendments/deferrals do **not**
+take effect: ADR-CDG-002 stands as the load seam; ADR-CDG-004 and ADR-CDG-006 are **not** deferred-by-007
+and retain their own independent status.
 
 ---
 
@@ -195,9 +232,10 @@ diffusers drive seam and ADR-CDG-006's step-window sampler to **milestone-2**, g
 loads (open question 2). These are **scope reclassifications, not rejections** — the diffusers path
 stays the prize.
 
-*Bidirectional bookkeeping deferred until acceptance:* this ADR is `proposed`. On transition to
-`accepted`, update ADR-CDG-002 / -004 / -006 status lines to reference ADR-CDG-007's alpha-scope
-amendment. Not done now — a `proposed` ADR does not yet move another ADR's status.
+*Bidirectional bookkeeping — resolved by rejection (2026-07-06):* this ADR never reached `accepted`,
+so none of its proposed amendments/deferrals fired. ADR-CDG-002 / -004 / -006 status lines are **left
+untouched** — a `rejected` ADR moves no other ADR's status. The GGUF-alpha consideration is retained
+above as durable record so the quant dead-ends and the fork-dependency reasoning are not re-burned.
 
 **Superseded by:** TBD (milestone-2's native-stepping ADR may supersede the backend decision if/when
 the diffusers path loads).
