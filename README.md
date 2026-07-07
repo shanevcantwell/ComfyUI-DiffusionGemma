@@ -1,4 +1,5 @@
 # ComfyUI-DiffusionGemma
+<img width="1774" height="1674" alt="image" src="https://github.com/user-attachments/assets/38871944-af3f-42ba-9422-cc222ec3e4eb" />
 
 A ComfyUI node pack for **DiffusionGemma** — text generation by *uniform-state
 discrete diffusion*, exposed as a ComfyUI graph you can watch, instrument, and
@@ -126,18 +127,9 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 | **[ADR-CDG-006](decisions/adr-cdg-006-advanced-sampler-step-window-resume.md)** | `DGemmaSamplerAdvanced` — step-windowed, chainable/resumable sampler (**proposed**, not yet built). |
 | **[loose-ends.md](loose-ends.md)** | Tactical decisions below the ADR bar. |
 
-## Relationship to RES4LYF
-
-This pack **steals RES4LYF's shape and rejects its substrate.** RES4LYF honestly
-reuses `SIGMAS`/`LATENT` because it *is* genuinely sigma/latent-based. This pack
-is not — so reusing those types would be a literal instance of the "lying
-sigmas" trap RES4LYF jokingly named, but unintentional and load-bearing. The
-node graph here reflects the real substrate, which is what makes it teachable
-rather than a disguise. (See ADR-CDG-001.)
-
 ## Come explore
 
-This is an instrument for poking at how the model thinks — so questions,
+This is an instrument for poking at how this diffusion LLM thinks. Questions,
 findings, and half-formed ideas are exactly the point. The
 **[Discussions](../../discussions)** tab is open for show-and-tell (post a
 trace, a heatmap, a run that annealed somewhere strange) and for ideas. See
