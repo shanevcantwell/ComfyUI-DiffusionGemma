@@ -14,6 +14,10 @@ jobs:
   publish-node:
     name: Publish Custom Node to registry
     runs-on: ubuntu-latest
+    # REGISTRY_ACCESS_TOKEN is an Environment secret (environment `env`); a job
+    # must declare that environment to read it, or the token resolves empty and
+    # `comfy node publish --token` fails (see run 28865742308).
+    environment: env
     if: ${{ github.repository_owner == 'shanevcantwell' }}
     steps:
       - name: Check out code
