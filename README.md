@@ -85,9 +85,36 @@ Requires `transformers==5.13.0` (DiffusionGemma support) and
 `diffusers>=0.39.0` (the pipeline + schedulers — see ADR-CDG-004). Weights
 (~54 GB bf16, ungated) download from
 [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it)
-on first load. A 48 GB-class GPU runs the default `quant=none` path with CPU
-spill (~2.3 s/step observed); smaller cards need a working quantized path,
-which remains unresolved (#4).
+on first load.
+
+### Hardware & memory — the honest requirements
+
+This is a **large model with no quantized path yet** (issue #4 — bitsandbytes
+can't quantize its fused MoE experts, so you load full bf16, ~54 GB). The model
+card asks for a ≥ 60 GB GPU for a naïve full-VRAM load — but **you do not need
+one**, because **ComfyUI's memory management carries it**: it offloads weights to
+system RAM and streams them to the GPU as needed.
+
+- **Disk — ~54 GB free.** The weights download once to your HuggingFace cache
+  (`~/.cache/huggingface`, or wherever `HF_HOME` points); budget the space before
+  you start.
+- **First run is slow — that's the download, not a hang.** The very first load
+  pulls the full ~54 GB from HuggingFace before generation begins; on a normal
+  connection that's a long, silent wait. It's **cached after**, so every load
+  afterward is far faster. Once it's cached, flip the loader's `local_files_only`
+  on to skip the network check entirely.
+- **VRAM — confirmed running on 48 GB (RTX-8000) and, squeezed, 24 GB
+  (RTX-3090).** 24 GB is the tested practical floor: it *just* fits, riding
+  ComfyUI's automatic offload.
+- **System RAM — the requirement people miss.** Whatever isn't resident in VRAM
+  lives in system RAM, so you need room to hold most of a ~54 GB model off-GPU.
+  On a 24 GB card the bulk of it rides in RAM — thin system memory, not VRAM, is
+  what actually stops a run.
+- **Speed — offload costs time:** ~2.3 s/step on the 48 GB card with CPU spill,
+  slower as VRAM shrinks. More VRAM → less offload → faster. (Instrumentability,
+  not speed — as ever.)
+- **Below ~24 GB VRAM:** not yet — a quantized / GGUF path for 8–16 GB cards is
+  still open (issues #4, #15).
 
 **Example graphs** ([examples/](examples/)): start with
 **`p3-trace-annotated.ui.json`** — the annotated canvas graph that *teaches* the
@@ -106,7 +133,8 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
   has measured sweeps).
 - Raw pre-excision canvas ids aren't yet exposed on any socket (issue #11) —
   wanted for token-level trace analysis.
-- Quantized loading for accessible (8–24 GB) consumer cards is unresolved
+- Quantized loading for consumer cards **below the ~24 GB offload floor**
+  (8–16 GB) is unresolved
   (issue #4) — the AWQ-INT4/compressed-tensors candidate surveyed there was
   smoke-tested and found incompatible with this pack's pinned `transformers`
   version (a real architecture-revision mismatch, not a config error); no
