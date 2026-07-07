@@ -3,9 +3,9 @@
 STATUS: Phase 3 (plan.md) — instrumentation. `DGemmaLoader` + `DGemmaSampler`
 (P1) + `DGemmaTrace` (P3) land here; prompt in, text + validity readout +
 canvas trace out, plus a live per-step view via the `web/` extension.
-`DGemmaFlipbook` (issue #21, additive) renders the same per-step trace as a
-watchable/shareable `IMAGE` batch alongside the sampler's inspectable STRING
-`frames` output.
+`DGemmaSampler` (issue #21, reworked) also emits a `frames_image` `IMAGE`
+batch — the same per-step `frames` STRING series rendered watchable/
+shareable, alongside the STRING itself, rather than a separate node.
 
 ComfyUI discovers a custom node pack by importing this module and reading
 NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS (+ `WEB_DIRECTORY`, checked
@@ -28,12 +28,10 @@ relative import, masking the actual dependency error behind a baffling
 empirically by the reviewer).
 """
 if __package__:
-    from .nodes.flipbook import DGemmaFlipbook
     from .nodes.loader import DGemmaLoader
     from .nodes.sampler import DGemmaSampler
     from .nodes.trace import DGemmaTrace
 else:
-    from nodes.flipbook import DGemmaFlipbook
     from nodes.loader import DGemmaLoader
     from nodes.sampler import DGemmaSampler
     from nodes.trace import DGemmaTrace
@@ -42,13 +40,11 @@ NODE_CLASS_MAPPINGS: dict = {
     "DGemmaLoader": DGemmaLoader,
     "DGemmaSampler": DGemmaSampler,
     "DGemmaTrace": DGemmaTrace,
-    "DGemmaFlipbook": DGemmaFlipbook,
 }
 NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaLoader": "DiffusionGemma Loader",
     "DGemmaSampler": "DiffusionGemma Sampler",
     "DGemmaTrace": "DiffusionGemma Trace",
-    "DGemmaFlipbook": "DiffusionGemma Flipbook",
 }
 
 # P3 (a): the live per-step view (`web/live_view.js`). Relative to this

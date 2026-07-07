@@ -53,7 +53,7 @@ sys.modules[sys_module_name] = module
 spec.loader.exec_module(module)
 
 mappings = module.NODE_CLASS_MAPPINGS
-assert set(mappings) == {{"DGemmaLoader", "DGemmaSampler", "DGemmaTrace", "DGemmaFlipbook"}}, sorted(mappings)
+assert set(mappings) == {{"DGemmaLoader", "DGemmaSampler", "DGemmaTrace"}}, sorted(mappings)
 assert all(isinstance(cls, type) for cls in mappings.values())
 assert set(module.NODE_DISPLAY_NAME_MAPPINGS) == set(mappings)
 

@@ -26,6 +26,7 @@ them can substitute for another.
 from __future__ import annotations
 
 import pytest
+import torch
 
 from dgemma.loop import (
     DEFAULT_CONFIDENCE,
@@ -108,8 +109,8 @@ def test_sampler_node_frames_real(live_model):
     """Drives the actual `DGemmaSampler.sample()` node method (not just the
     underlying `run_diffusion`/`decode_frames` calls) against the real
     model, closing the gap between "the engine seam works" and "the node
-    boundary wires it correctly" (`nodes/sampler.py:200`'s `decode_frames`
-    call).
+    boundary wires it correctly" (`nodes/sampler.py`'s `decode_frames` and
+    `render_frames_to_image_batch` calls).
 
     `unique_id=None` with no real `PromptServer`/ComfyUI process is not a
     reduced assertion — it is the exact headless path every other test in
@@ -117,7 +118,9 @@ def test_sampler_node_frames_real(live_model):
     catches the `server` package's `ImportError` and no-ops
     (`nodes/sampler.py:119-120`; confirmed absent in this venv,
     `tests/test_seam.py`), so `sample()` runs to completion unchanged and
-    this asserts the real 4-tuple / `OUTPUT_IS_LIST` shape it returns.
+    this asserts the real 5-tuple / `OUTPUT_IS_LIST` shape it returns —
+    including `frames_image` (issue #21 rework) rendered from a REAL decoded
+    per-step series, not a fake tokenizer's stand-in strings.
     """
     node = DGemmaSampler()
     result = node.sample(
@@ -135,9 +138,16 @@ def test_sampler_node_frames_real(live_model):
     )
 
     assert isinstance(result, tuple)
-    assert len(result) == 4
-    text, canvas_state, canvas_trace, frames = result
+    assert len(result) == 5
+    text, canvas_state, canvas_trace, frames, frames_image = result
     assert isinstance(text, str)
     assert isinstance(frames, list)  # the OUTPUT_IS_LIST=True `frames` output
     assert all(isinstance(f, str) for f in frames)
     assert len(frames) == len(canvas_trace.frames)
+    # `frames_image` is a single stacked (N, H, W, 3) batch tensor, NOT a
+    # list (OUTPUT_IS_LIST=False) — see nodes/sampler.py's docstring.
+    assert frames_image.dim() == 4
+    assert frames_image.shape[0] == len(frames)
+    assert frames_image.shape[-1] == 3
+    assert frames_image.dtype == torch.float32
+    assert torch.all(frames_image >= 0.0) and torch.all(frames_image <= 1.0)

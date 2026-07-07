@@ -1,36 +1,24 @@
-"""nodes/flipbook.py — DGemmaFlipbook: thin ComfyUI adapter (ADR-CDG-003).
+"""nodes/frames_image.py — `render_frames_to_image_batch`: renders a list of
+already-decoded per-step strings into a ComfyUI `IMAGE` batch (issue #21,
+reworked to be a `DGemmaSampler` output rather than a standalone node).
 
-Renders the SAME per-step series `nodes/sampler.py`'s `frames` STRING output
-already carries — `dgemma.loop.decode_frames` over `canvas_trace.frames` — as
-an `IMAGE` batch instead of a list of strings, so the "watch it reason"
-series is watchable/shareable (e.g. via `SaveAnimatedWEBP`/VHS downstream)
-and not just inspectable as text. Purely additive (issue #21): this module
-never touches `nodes/sampler.py`'s STRING output or calls `decode_frames`
-differently — same decoded strings, alternate rendering, so the two outputs
-always agree on content.
+`DGemmaSampler` already decodes each captured step to a string for its
+`frames` `STRING` output (`dgemma.loop.decode_frames` over
+`canvas_trace.frames`) — this module renders that SAME list of strings as a
+`(N, H, W, 3)` float32 `[0, 1]` image batch, so the "watch it reason" series
+is watchable/shareable (e.g. via `SaveAnimatedWEBP`/VHS downstream) and not
+just inspectable as text, with the sampler's own strings passed straight in
+rather than re-decoded (one decode, two renderings).
 
-Tensor/PIL construction here — rasterizing each decoded step to a
-fixed-size RGB canvas, then stacking one canvas per step on the batch dim —
-is the ADR-CDG-003-sanctioned adapter-layer exception, the same shape as
+Tensor/PIL construction here — rasterizing each string to a fixed-size RGB
+canvas, then stacking one canvas per step on the batch dim — is the
+ADR-CDG-003-sanctioned adapter-layer exception, the same shape as
 `nodes/trace.py`'s own `_heatmap_to_image`: no denoising-loop logic, no
 re-derivation of what `decode_frames` returns, just wrapping plain strings
-into a ComfyUI-native `IMAGE` tensor.
-
-**INPUT_TYPES is `canvas_trace` only (issue #21's stated signature,
-mirroring `DGemmaTrace`), which surfaced a real gap this file does NOT paper
-over:** `decode_frames` needs a processor (tokenizer) to turn a frame's raw
-canvas ids into text, and `CanvasTrace` previously carried no such reference
-(`DGemmaTrace`'s own analysis never decodes text, so it never needed one).
-Rather than smuggle a second `DGEMMA_MODEL` input onto this node — which
-would diverge from the issue's `canvas_trace`-only signature and force every
-existing graph to rewire a second edge — `dgemma.types.CanvasTrace` gained
-one new optional field, `processor` (default `None`, populated by
-`dgemma.loop.run_diffusion` from `dgemma_model.processor`, the same object
-`DGEMMA_MODEL` already points at — pointer-based transfer, not a copy). This
-is the only change outside this file; it is additive (existing keyword-arg
-`CanvasTrace(...)` constructions across the test suite are unaffected) and
-does not touch `nodes/sampler.py`'s STRING `frames` output or its own call
-to `decode_frames`.
+into a ComfyUI-native `IMAGE` tensor. This module is intentionally
+ComfyUI-agnostic itself (no socket types, no `INPUT_TYPES`/`RETURN_TYPES`) —
+it is a plain rendering helper the node layer (`nodes/sampler.py`) calls,
+not a node.
 """
 from __future__ import annotations
 
@@ -39,13 +27,6 @@ import logging
 import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont
-
-# Dual-context import, explicit package-depth gate — see nodes/loader.py for
-# the full rationale (ComfyUI loader context vs. pytest/standalone).
-if __package__ and "." in __package__:
-    from ..dgemma.loop import decode_frames
-else:
-    from dgemma.loop import decode_frames
 
 # Headless-safe font search (issue #21's hard constraint): a short list of
 # common monospace TTF install paths, tried in order. None of these are
@@ -78,7 +59,7 @@ def _load_font(font_size: int):
         except OSError:
             continue
     logging.info(
-        "DGemmaFlipbook: no monospace TTF found among candidates, "
+        "render_frames_to_image_batch: no monospace TTF found among candidates, "
         "falling back to PIL's bundled default bitmap font."
     )
     return ImageFont.load_default()
@@ -149,76 +130,35 @@ def _rasterize_frame(
     return image
 
 
-def _frames_to_image_batch(
-    texts: list[str], *, width: int, font_size: int, caption_step_index: bool
+def render_frames_to_image_batch(
+    frames: list[str], width: int = 512, font_size: int = 20, caption_step_index: bool = True
 ) -> torch.Tensor:
-    """Rasterize `texts` (one decoded step each, in order) into a ComfyUI
-    `IMAGE` tensor: `(N, H, W, 3)` float32 in `[0, 1]`, channels-last, N ==
-    `len(texts)`. All wrapping/height math runs once up front so every
+    """Rasterize `frames` (one already-decoded step each, in order — e.g.
+    `DGemmaSampler`'s own `frames` `STRING` output) into a ComfyUI `IMAGE`
+    tensor: `(N, H, W, 3)` float32 in `[0, 1]`, channels-last, N ==
+    `len(frames)`. All wrapping/height math runs once up front so every
     frame shares identical `(H, W)` — the batch-dim requirement — rather
     than each frame picking its own size and needing a later resize pass.
 
-    `[]` input (a trace with no captured frames) yields a `(0, 1, 1, 3)`
-    tensor rather than fabricating a placeholder frame — an honest empty
-    batch, mirroring `nodes/trace.py`'s degenerate-input handling.
+    `[]` input (no captured frames) yields a `(0, 1, 1, 3)` tensor rather
+    than fabricating a placeholder frame — an honest empty batch, mirroring
+    `nodes/trace.py`'s degenerate-input handling.
     """
-    if not texts:
+    if not frames:
         return torch.zeros((0, 1, 1, 3), dtype=torch.float32)
 
     font = _load_font(font_size)
-    total = len(texts)
-    wrapped = [_wrap_text(text, font, max_width=width - 2 * _MARGIN) for text in texts]
+    total = len(frames)
+    wrapped = [_wrap_text(text, font, max_width=width - 2 * _MARGIN) for text in frames]
     max_lines = max(len(lines) for lines in wrapped)
     line_h = _line_height(font)
     height = 2 * _MARGIN + max_lines * line_h
 
-    frames = []
-    for idx, text in enumerate(texts):
+    images = []
+    for idx, text in enumerate(frames):
         caption = f"step {idx + 1}/{total}" if caption_step_index else None
         image = _rasterize_frame(text, width=width, height=height, font=font, caption=caption)
-        frames.append(np.asarray(image, dtype=np.uint8))
+        images.append(np.asarray(image, dtype=np.uint8))
 
-    batch = np.stack(frames, axis=0)  # (N, H, W, 3) uint8
+    batch = np.stack(images, axis=0)  # (N, H, W, 3) uint8
     return torch.from_numpy(batch).to(torch.float32) / 255.0
-
-
-class DGemmaFlipbook:
-    """Renders a complete `CANVAS_TRACE` as a watchable `IMAGE` batch: one
-    frame per captured denoising step, the decoded canvas text (via the same
-    `dgemma.loop.decode_frames` the sampler's `frames` STRING output uses)
-    rasterized onto a fixed-size dark canvas and stacked on the batch dim —
-    `(num_steps, H, W, 3)` float32 in `[0, 1]`, channels-last. Feed the
-    output to `SaveAnimatedWEBP` or a Video Helper Suite node to play the
-    noise-to-coherent-text series back as an animation.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "canvas_trace": ("DGEMMA_CANVAS_TRACE",),
-                "width": ("INT", {"default": 512, "min": 64, "max": 4096}),
-                "font_size": ("INT", {"default": 20, "min": 6, "max": 128}),
-                "caption_step_index": ("BOOLEAN", {"default": True}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("frames",)
-    FUNCTION = "render"
-    CATEGORY = "DiffusionGemma"
-
-    def render(self, canvas_trace, width: int = 512, font_size: int = 20, caption_step_index: bool = True):
-        if canvas_trace.frames and canvas_trace.processor is None:
-            raise ValueError(
-                "DGemmaFlipbook: canvas_trace.processor is None, but frames are "
-                "present — cannot decode canvas ids to text without a tokenizer. "
-                "This CANVAS_TRACE was likely hand-constructed (e.g. a test "
-                "fixture) rather than produced by DGemmaSampler/run_diffusion, "
-                "which always populates it."
-            )
-        texts = decode_frames(canvas_trace.processor, canvas_trace.frames)
-        images = _frames_to_image_batch(
-            texts, width=width, font_size=font_size, caption_step_index=caption_step_index
-        )
-        return (images,)

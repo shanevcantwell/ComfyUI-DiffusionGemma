@@ -619,9 +619,5 @@ def run_diffusion(
             "t_max": t_max,
             "num_inference_steps": num_inference_steps,
         },
-        # Carried by reference (see CanvasTrace.processor's docstring) so a
-        # bare CANVAS_TRACE socket can decode its own frames downstream
-        # (issue #21, DGemmaFlipbook) without a second DGEMMA_MODEL input.
-        processor=dgemma_model.processor,
     )
     return text, canvas_state, canvas_trace

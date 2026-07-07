@@ -14,6 +14,7 @@ from __future__ import annotations
 import sys
 
 import pytest
+import torch
 
 from nodes.loader import DGemmaLoader
 from nodes.sampler import DGemmaSampler
@@ -127,12 +128,21 @@ def test_sampler_declarations():
         "DGEMMA_CANVAS_STATE",
         "DGEMMA_CANVAS_TRACE",
         "STRING",
+        "IMAGE",
     )
-    assert DGemmaSampler.RETURN_NAMES == ("text", "canvas_state", "canvas_trace", "frames")
-    # `frames` (P3, the per-step flipbook) is the only list output — the
-    # other three stay scalar (plan.md; a wrong flag here would make ComfyUI
-    # fan out `text`/`canvas_state`/`canvas_trace` per-frame too).
-    assert DGemmaSampler.OUTPUT_IS_LIST == (False, False, False, True)
+    assert DGemmaSampler.RETURN_NAMES == (
+        "text",
+        "canvas_state",
+        "canvas_trace",
+        "frames",
+        "frames_image",
+    )
+    # `frames` (P3, the per-step flipbook STRING list) is the only
+    # `OUTPUT_IS_LIST=True` output. `frames_image` (issue #21 rework) is a
+    # single stacked (N, H, W, 3) batch tensor, NOT a list — a wrong flag
+    # here would make ComfyUI fan out per-frame and break
+    # PreviewImage/SaveAnimatedWEBP/VHS, which all expect one batch tensor.
+    assert DGemmaSampler.OUTPUT_IS_LIST == (False, False, False, True, False)
     assert DGemmaSampler.FUNCTION == "sample"
     assert DGemmaSampler.CATEGORY == "DiffusionGemma"
 
@@ -168,6 +178,7 @@ def test_sampler_input_types_declares_all_p2_widgets():
 def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
     sentinel_model = _StubModel()
     sentinel_trace = _StubTrace()
+    sentinel_image_batch = object()
     captured = {}
 
     def fake_run_diffusion(model, prompt, **kwargs):
@@ -181,8 +192,14 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         captured["decode_frames"] = frames
         return ["frame 0", "frame 1"]
 
+    def fake_render_frames_to_image_batch(frames, **kwargs):
+        captured["render_frames"] = frames
+        captured["render_kwargs"] = kwargs
+        return sentinel_image_batch
+
     monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
     monkeypatch.setattr("nodes.sampler.decode_frames", fake_decode_frames)
+    monkeypatch.setattr("nodes.sampler.render_frames_to_image_batch", fake_render_frames_to_image_batch)
 
     node = DGemmaSampler()
     result = node.sample(
@@ -198,12 +215,22 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         thinking=False,
     )
 
-    assert result == ("decoded text", "canvas-state-stub", sentinel_trace, ["frame 0", "frame 1"])
+    assert result == (
+        "decoded text",
+        "canvas-state-stub",
+        sentinel_trace,
+        ["frame 0", "frame 1"],
+        sentinel_image_batch,
+    )
     assert captured["model"] is sentinel_model
     # `decode_frames` is called with the model's processor and the trace's
     # own frames — one helper call, no logic of its own (ADR-CDG-003).
     assert captured["decode_processor"] is sentinel_model.processor
     assert captured["decode_frames"] is sentinel_trace.frames
+    # `render_frames_to_image_batch` reuses the SAME decoded strings
+    # `decode_frames` just produced — one decode, two renderings, never a
+    # second re-decode of `canvas_trace.frames`.
+    assert captured["render_frames"] == ["frame 0", "frame 1"]
     assert captured["prompt"] == "hello"
     assert captured["kwargs"]["seed"] == 7
     # P2: assert the node actually forwards every widget value rather than
@@ -219,6 +246,60 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
     # by the node, regardless of whether a live ComfyUI process exists to
     # actually consume it — see the guarded-import tests below).
     assert callable(captured["kwargs"]["on_frame"])
+
+
+def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkeypatch):
+    """The 5th output contract (issue #21 rework): `frames_image` is a
+    SINGLE stacked `(N, H, W, 3)` float32 `[0, 1]` `IMAGE` batch tensor, with
+    `N == len(frames)` — never a list of N single-frame tensors. A list here
+    would fan out per-frame under ComfyUI's `OUTPUT_IS_LIST` machinery and
+    break `PreviewImage`'s scrubber, `SaveAnimatedWEBP`, and VHS, all of
+    which expect one batch tensor (`nodes/sampler.py`'s own docstring).
+
+    `run_diffusion`/`decode_frames` are mocked (as every other test in this
+    file mocks them) but `render_frames_to_image_batch` runs FOR REAL here —
+    this is the one test in this file proving the actual rendering, not just
+    that it was called.
+    """
+    sentinel_trace = _StubTrace()
+    decoded_frames = ["noise noise noise", "partial coherent text", "the sky is blue"]
+
+    def fake_run_diffusion(model, prompt, **kwargs):
+        return ("decoded text", "canvas-state-stub", sentinel_trace)
+
+    def fake_decode_frames(processor, frames):
+        return decoded_frames
+
+    monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+    monkeypatch.setattr("nodes.sampler.decode_frames", fake_decode_frames)
+
+    node = DGemmaSampler()
+    result = node.sample(
+        model=_StubModel(),
+        prompt="hello",
+        seed=7,
+        num_inference_steps=48,
+        t_min=0.4,
+        t_max=0.8,
+        entropy_bound=0.1,
+        confidence=0.005,
+        gen_length=256,
+        thinking=False,
+    )
+
+    assert len(result) == 5
+    _text, _canvas_state, _canvas_trace, frames, frames_image = result
+    assert frames == decoded_frames
+
+    assert isinstance(frames_image, torch.Tensor)
+    assert not isinstance(frames_image, list)
+    assert frames_image.dtype == torch.float32
+    assert frames_image.dim() == 4  # (N, H, W, 3)
+    num_steps, _height, _width, channels = frames_image.shape
+    assert num_steps == len(decoded_frames)
+    assert channels == 3
+    assert torch.all(frames_image >= 0.0)
+    assert torch.all(frames_image <= 1.0)
 
 
 def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
@@ -255,6 +336,21 @@ def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
     assert captured["kwargs"]["confidence"] == pytest.approx(0.9)
     assert captured["kwargs"]["gen_length"] == 64
     assert captured["kwargs"]["thinking"] is True
+
+
+def _assert_result_with_no_captured_frames(result, *, text: str, state: str, trace) -> None:
+    """Shared assertion for `TestLiveFramePush`'s fixtures below: every one
+    uses a `_StubTrace()` with `frames=()`, so `frames` decodes to `[]` and
+    `frames_image` (real, unmocked `render_frames_to_image_batch`) renders
+    the honest empty `(0, 1, 1, 3)` batch — see
+    `tests/test_frames_image.py::TestRenderOutputContract::test_no_frames_yields_empty_batch_not_a_crash`
+    for that helper's own degenerate-input contract."""
+    got_text, got_state, got_trace, got_frames, got_image = result
+    assert got_text == text
+    assert got_state == state
+    assert got_trace is trace
+    assert got_frames == []
+    assert got_image.shape == (0, 1, 1, 3)
 
 
 class TestLiveFramePush:
@@ -295,7 +391,7 @@ class TestLiveFramePush:
             unique_id="42",
         )
 
-        assert result == ("text", "state", trace_stub, [])
+        _assert_result_with_no_captured_frames(result, text="text", state="state", trace=trace_stub)
 
     def test_on_frame_pushes_via_send_sync_when_promptserver_available(self, monkeypatch):
         """The "present" branch, exercised without a real ComfyUI process:
@@ -381,7 +477,7 @@ class TestLiveFramePush:
             unique_id="42",
         )
 
-        assert result == ("text", "state", trace_stub, [])
+        _assert_result_with_no_captured_frames(result, text="text", state="state", trace=trace_stub)
 
     def test_send_sync_failure_does_not_kill_the_run(self, monkeypatch, caplog):
         """Display must never kill generation (review finding, 2026-07-05):
@@ -430,7 +526,7 @@ class TestLiveFramePush:
                 unique_id="42",
             )
 
-        assert result == ("text", "state", trace_stub, [])  # output intact, run completed
+        _assert_result_with_no_captured_frames(result, text="text", state="state", trace=trace_stub)  # output intact, run completed
         assert any("live push failed" in record.message for record in caplog.records)
 
 

@@ -24,11 +24,12 @@ dependencies = [
     "torchvision",
     "accelerate",
     # Pillow: was already present transitively (torchvision), but issue #21's
-    # `DGemmaFlipbook` imports it directly (PIL text rasterization) — declared
-    # explicitly now that it's a direct dependency, not just a transitive one.
+    # `nodes/frames_image.py` (DGemmaSampler's `frames_image` output) imports
+    # it directly (PIL text rasterization) — declared explicitly now that
+    # it's a direct dependency, not just a transitive one.
     "Pillow",
     # numpy: same story — already present transitively (torch), now a direct
-    # import (`DGemmaFlipbook`'s PIL-image -> tensor conversion).
+    # import (`nodes/frames_image.py`'s PIL-image -> tensor conversion).
     "numpy",
 ]
 

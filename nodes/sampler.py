@@ -30,6 +30,32 @@ condition — this pack has no `comfy`/`server` dependency, see
 sampler; everything else (`text`, `canvas_state`, `canvas_trace`) proceeds
 unchanged either way.
 
+A fifth output, `frames_image` (issue #21, reworked from a standalone
+`DGemmaFlipbook` node into a second sampler output): the same decoded
+`frames` strings rendered as a single stacked
+`(N, H, W, 3)` float32 `[0, 1]` `IMAGE` batch via
+`nodes.frames_image.render_frames_to_image_batch` — the "watch it reason"
+series made watchable/shareable (e.g. `SaveAnimatedWEBP`/VHS downstream), not
+just inspectable as text. Reuses the `frames` list `decode_frames` already
+produced (one decode, two renderings) rather than re-decoding
+`canvas_trace.frames` a second time. Render params (width/font size/caption)
+are fixed sensible defaults here, not new widgets — the sampler's knob
+surface (P2) stays unchanged; this is a display rendering, not a sampling
+parameter. Unlike `frames`, `frames_image` is `OUTPUT_IS_LIST=False`: it is
+ONE stacked batch tensor, not a list of N single-frame tensors — the shape
+`PreviewImage`'s scrubber, `SaveAnimatedWEBP`, and VHS nodes all expect from
+an `IMAGE` output (a list here would fan out per-frame and break every one of
+those consumers).
+
+**Why a sampler output, not a standalone node (issue #21 rework):** the
+earlier `DGemmaFlipbook` node took `CANVAS_TRACE` alone and needed a
+tokenizer to decode it, but `CANVAS_TRACE` never carried one — forcing
+`dgemma.types.CanvasTrace` to grow an optional `processor` field just to
+carry a runtime object across a data-plane socket (a payload-purity smell,
+ADR-CDG-001). This node already holds `model.processor` and already decodes
+`frames` itself, so rendering the image batch here instead keeps
+`CANVAS_TRACE` pure.
+
 **Named trap (plan.md Risks): this MUST NOT touch `comfy.utils.ProgressBar`'s
 `preview=` slot.** That path is structurally image-typed downstream
 (`server.py:1293-1301`, `ProgressBar.update_absolute` -> `send_image`, which
@@ -56,6 +82,7 @@ if __package__ and "." in __package__:
         decode_frames,
         run_diffusion,
     )
+    from .frames_image import render_frames_to_image_batch
 else:
     from dgemma.loop import (
         DEFAULT_CONFIDENCE,
@@ -67,6 +94,7 @@ else:
         decode_frames,
         run_diffusion,
     )
+    from nodes.frames_image import render_frames_to_image_batch
 
 # Event name for the live per-step push (plan.md Phase 3 (a)). Namespaced
 # under the pack's own prefix — `send_sync`'s receiving side has no
@@ -74,6 +102,13 @@ else:
 # collision with another pack's event name would silently cross-wire two
 # unrelated `web/` extensions' `addEventListener` handlers.
 DGEMMA_STEP_EVENT = "dgemma.sampler.step"
+
+# `frames_image` render defaults (issue #21 rework) — fixed, not widgets; see
+# the `frames_image` output's docstring above for why this is a display
+# rendering rather than a sampling parameter.
+FRAMES_IMAGE_WIDTH = 512
+FRAMES_IMAGE_FONT_SIZE = 20
+FRAMES_IMAGE_CAPTION_STEP_INDEX = True
 
 
 def _build_on_frame(unique_id):
@@ -164,9 +199,12 @@ class DGemmaSampler:
             },
         }
 
-    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE", "STRING")
-    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames")
-    OUTPUT_IS_LIST = (False, False, False, True)
+    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE", "STRING", "IMAGE")
+    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "frames_image")
+    # `frames_image` is a single stacked (N, H, W, 3) batch tensor, NOT a
+    # list — False here, unlike `frames`' True (see this module's docstring:
+    # a list would fan out per-frame and break PreviewImage/SaveAnimatedWEBP/VHS).
+    OUTPUT_IS_LIST = (False, False, False, True, False)
     FUNCTION = "sample"
     CATEGORY = "DiffusionGemma"
 
@@ -198,4 +236,10 @@ class DGemmaSampler:
             on_frame=_build_on_frame(unique_id),
         )
         frames = decode_frames(model.processor, canvas_trace.frames)
-        return (text, canvas_state, canvas_trace, frames)
+        frames_image = render_frames_to_image_batch(
+            frames,
+            width=FRAMES_IMAGE_WIDTH,
+            font_size=FRAMES_IMAGE_FONT_SIZE,
+            caption_step_index=FRAMES_IMAGE_CAPTION_STEP_INDEX,
+        )
+        return (text, canvas_state, canvas_trace, frames, frames_image)

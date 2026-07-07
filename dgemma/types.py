@@ -116,19 +116,6 @@ class CanvasTrace:
     scheduler_name: str
     scheduler_config: dict
 
-    processor: Any = None
-    """The processor (tokenizer) `run_diffusion` decoded this trace's text
-    with — carried by reference (ADR-CON pointer-based-transfer discipline:
-    the same object `DGEMMA_MODEL.processor` already points at, not a copy),
-    so a downstream consumer of a bare `CANVAS_TRACE` socket (issue #21,
-    `DGemmaFlipbook`) can decode each frame's raw canvas ids to text via
-    `dgemma.loop.decode_frames` without a second `DGEMMA_MODEL` input having
-    to be re-wired through the graph. `None` for a trace built without a real
-    model (e.g. a hand-constructed unit-test fixture) — callers that need to
-    decode must check for that rather than assume it's always populated;
-    `DGemmaTrace`'s own analysis (heatmap/curve/corroboration) never reads
-    this field, since none of it decodes text."""
-
 
 @dataclass
 class CanvasState:
