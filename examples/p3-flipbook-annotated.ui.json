@@ -16,11 +16,10 @@
         500
       ],
       "flags": {},
-      "order": 10,
+      "order": 12,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "images",
           "name": "images",
           "type": "IMAGE",
           "link": 72
@@ -28,7 +27,6 @@
       ],
       "outputs": [
         {
-          "localized_name": "images",
           "name": "images",
           "type": "IMAGE",
           "links": null
@@ -60,11 +58,10 @@
         960
       ],
       "flags": {},
-      "order": 9,
+      "order": 11,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "anything",
           "name": "anything",
           "shape": 7,
           "type": "*",
@@ -73,7 +70,6 @@
       ],
       "outputs": [
         {
-          "localized_name": "output",
           "name": "output",
           "type": "*",
           "links": null
@@ -121,38 +117,9 @@
       "flags": {},
       "order": 0,
       "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "repo_id",
-          "name": "repo_id",
-          "type": "STRING",
-          "widget": {
-            "name": "repo_id"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "quant",
-          "name": "quant",
-          "type": "COMBO",
-          "widget": {
-            "name": "quant"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "local_files_only",
-          "name": "local_files_only",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "local_files_only"
-          },
-          "link": null
-        }
-      ],
+      "inputs": [],
       "outputs": [
         {
-          "localized_name": "model",
           "name": "model",
           "type": "DGEMMA_MODEL",
           "links": [
@@ -194,100 +161,17 @@
         450
       ],
       "flags": {},
-      "order": 5,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "model",
           "name": "model",
           "type": "DGEMMA_MODEL",
           "link": 7
-        },
-        {
-          "localized_name": "prompt",
-          "name": "prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "prompt"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "seed",
-          "name": "seed",
-          "type": "INT",
-          "widget": {
-            "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "num_inference_steps",
-          "name": "num_inference_steps",
-          "type": "INT",
-          "widget": {
-            "name": "num_inference_steps"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "t_min",
-          "name": "t_min",
-          "type": "FLOAT",
-          "widget": {
-            "name": "t_min"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "t_max",
-          "name": "t_max",
-          "type": "FLOAT",
-          "widget": {
-            "name": "t_max"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "entropy_bound",
-          "name": "entropy_bound",
-          "type": "FLOAT",
-          "widget": {
-            "name": "entropy_bound"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "confidence",
-          "name": "confidence",
-          "type": "FLOAT",
-          "widget": {
-            "name": "confidence"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "gen_length",
-          "name": "gen_length",
-          "type": "INT",
-          "widget": {
-            "name": "gen_length"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "thinking",
-          "name": "thinking",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "thinking"
-          },
-          "link": null
         }
       ],
       "outputs": [
         {
-          "localized_name": "text",
           "name": "text",
           "type": "STRING",
           "links": [
@@ -295,7 +179,6 @@
           ]
         },
         {
-          "localized_name": "canvas_state",
           "name": "canvas_state",
           "type": "DGEMMA_CANVAS_STATE",
           "links": [
@@ -303,7 +186,6 @@
           ]
         },
         {
-          "localized_name": "canvas_trace",
           "name": "canvas_trace",
           "type": "DGEMMA_CANVAS_TRACE",
           "links": [
@@ -311,7 +193,6 @@
           ]
         },
         {
-          "localized_name": "frames",
           "name": "frames",
           "shape": 6,
           "type": "STRING",
@@ -320,8 +201,7 @@
           ]
         },
         {
-          "localized_name": "frames_image",
-          "name": "frames_image",
+          "name": "images",
           "type": "IMAGE",
           "links": [
             72
@@ -377,11 +257,10 @@
       "flags": {
         "collapsed": false
       },
-      "order": 6,
+      "order": 8,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "source",
           "name": "source",
           "type": "*",
           "link": 8
@@ -389,7 +268,6 @@
       ],
       "outputs": [
         {
-          "localized_name": "STRING",
           "name": "STRING",
           "type": "STRING",
           "links": null
@@ -457,7 +335,7 @@
         450
       ],
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -481,35 +359,24 @@
       "type": "DGemmaTrace",
       "pos": [
         -190,
-        120
+        -70
       ],
       "size": [
         210,
-        80
+        90
       ],
       "flags": {},
-      "order": 8,
+      "order": 10,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "canvas_trace",
           "name": "canvas_trace",
           "type": "DGEMMA_CANVAS_TRACE",
           "link": 10
-        },
-        {
-          "localized_name": "cell_px",
-          "name": "cell_px",
-          "type": "INT",
-          "widget": {
-            "name": "cell_px"
-          },
-          "link": null
         }
       ],
       "outputs": [
         {
-          "localized_name": "heatmap",
           "name": "heatmap",
           "type": "IMAGE",
           "links": [
@@ -517,7 +384,6 @@
           ]
         },
         {
-          "localized_name": "summary",
           "name": "summary",
           "type": "STRING",
           "links": [
@@ -548,18 +414,17 @@
       "type": "PreviewAny",
       "pos": [
         -190,
-        260
+        70
       ],
       "size": [
-        330,
+        340,
         460
       ],
       "flags": {},
-      "order": 12,
+      "order": 14,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "source",
           "name": "source",
           "type": "*",
           "link": 12
@@ -567,7 +432,6 @@
       ],
       "outputs": [
         {
-          "localized_name": "STRING",
           "name": "STRING",
           "type": "STRING",
           "links": null
@@ -593,69 +457,23 @@
       "bgcolor": "#353"
     },
     {
-      "id": 77,
-      "type": "PreviewImage",
-      "pos": [
-        -190,
-        -60
-      ],
-      "size": [
-        690,
-        120
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 11
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "links": null
-        }
-      ],
-      "title": "Preview Heatmap",
-      "properties": {
-        "Node name for S&R": "PreviewImage",
-        "cnr_id": "comfy-core",
-        "ver": "0.27.0",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [],
-      "color": "#2a363b",
-      "bgcolor": "#3f5159"
-    },
-    {
       "id": 75,
       "type": "PreviewAny",
       "pos": [
-        170,
-        260
+        180,
+        70
       ],
       "size": [
-        330,
-        450
+        340,
+        460
       ],
       "flags": {
         "collapsed": false
       },
-      "order": 7,
+      "order": 9,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "source",
           "name": "source",
           "type": "*",
           "link": 9
@@ -663,7 +481,6 @@
       ],
       "outputs": [
         {
-          "localized_name": "STRING",
           "name": "STRING",
           "type": "STRING",
           "links": null
@@ -689,80 +506,18 @@
       "bgcolor": "#353"
     },
     {
-      "id": 89,
-      "type": "Note",
-      "pos": [
-        50,
-        120
-      ],
-      "size": [
-        450,
-        90
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Outputs & what to watch",
-      "properties": {
-        "text": "frames = text flipbook (-> Preview Text). images = picture flipbook (-> Preview Image). canvas_trace -> Trace = heatmap + summary. Watch the commit-front: fluent-but-wrong shows as an early lock-in.",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "frames = text flipbook (-> Preview Text). images = picture flipbook (-> Preview Image). canvas_trace -> Trace = heatmap + summary. Watch the commit-front: fluent-but-wrong shows as an early lock-in."
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 86,
-      "type": "Note",
-      "pos": [
-        -970,
-        300
-      ],
-      "size": [
-        360,
-        90
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "What this is",
-      "properties": {
-        "text": "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed.",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed."
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
       "id": 90,
       "type": "Note",
       "pos": [
-        200,
-        -60
+        50,
+        -70
       ],
       "size": [
-        370,
-        320
+        470,
+        90
       ],
       "flags": {},
-      "order": 1,
+      "order": 3,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -782,18 +537,61 @@
       "bgcolor": "#653"
     },
     {
+      "id": 77,
+      "type": "PreviewImage",
+      "pos": [
+        -190,
+        -250
+      ],
+      "size": [
+        710,
+        120
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 11
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "Preview Heatmap",
+      "properties": {
+        "Node name for S&R": "PreviewImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
       "id": 91,
       "type": "Note",
       "pos": [
-        560,
-        260
+        180,
+        590
       ],
       "size": [
-        370,
-        320
+        340,
+        90
       ],
       "flags": {},
-      "order": 1,
+      "order": 4,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -816,15 +614,15 @@
       "id": 92,
       "type": "Note",
       "pos": [
-        200,
-        260
+        -190,
+        590
       ],
       "size": [
-        370,
-        320
+        340,
+        90
       ],
       "flags": {},
-      "order": 1,
+      "order": 5,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -839,6 +637,37 @@
       },
       "widgets_values": [
         "Run vitals: scheduler + knobs, steps actually taken, and the avalanche curve (committed fraction per step, climbing to 1.0). Steep early climb = committed hard and fast, maybe a wrong basin. Also confirms no fixed MASK sentinel."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 86,
+      "type": "Note",
+      "pos": [
+        -960,
+        360
+      ],
+      "size": [
+        360,
+        90
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "What this is",
+      "properties": {
+        "text": "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -928,9 +757,9 @@
       "title": "Metadata",
       "bounding": [
         -200,
-        -130,
-        710,
-        860
+        -320,
+        730,
+        1010
       ],
       "color": "#3f789e",
       "flags": {}
@@ -951,13 +780,18 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.30607549215561736,
+      "scale": 0.30607549215561963,
       "offset": [
-        2790.7132771265915,
-        1180.5696666833337
+        1837.3522407185148,
+        514.9946299425853
       ]
     },
-    "ue_links": []
+    "ue_links": [],
+    "frontendVersion": "1.45.15",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
   },
   "version": 0.4
 }
