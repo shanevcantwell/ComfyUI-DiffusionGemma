@@ -232,26 +232,30 @@ class TestTransformersVersionGuard:
     requirements.txt pin that would downgrade an already-installed package,
     so this repo's env can end up holding a transformers other than the one
     it targets. `_check_transformers_version` must turn that into one
-    actionable RuntimeError instead of a raw import/attribute traceback."""
+    actionable RuntimeError instead of a raw import/attribute traceback.
 
-    def test_matching_version_is_a_no_op(self):
-        _check_transformers_version(REQUIRED_TRANSFORMERS_VERSION)  # must not raise
+    Patch-tolerant (coordinator follow-up): the guard accepts the pinned
+    major.minor series (`5.13.x`) and flags only a different minor or major —
+    a working patch bump is a bugfix on the same tested API surface, while a
+    minor/major bump is untested surface."""
 
-    def test_older_version_raises_actionable_runtime_error(self):
+    # ACCEPTED: the exact pin and any patch within the series must not raise.
+    @pytest.mark.parametrize("version", ["5.13.0", "5.13.1", "5.13.99"])
+    def test_patch_within_pinned_series_is_accepted(self, version):
+        _check_transformers_version(version)  # must not raise
+
+    # REJECTED: a different minor, a different major, or a clearly-old
+    # version must all raise the actionable error.
+    @pytest.mark.parametrize("version", ["5.12.0", "5.14.0", "6.0.0", "4.50.0"])
+    def test_out_of_series_version_raises_actionable_runtime_error(self, version):
         with pytest.raises(RuntimeError) as excinfo:
-            _check_transformers_version("5.12.0")
+            _check_transformers_version(version)
 
         message = str(excinfo.value)
         assert REQUIRED_TRANSFORMERS_VERSION in message  # names the required version
-        assert "5.12.0" in message  # names what's actually installed
+        assert version in message  # names what's actually installed
         assert "pip install transformers==" in message  # concrete fix
         assert "issue #25" in message.lower() or "#25" in message
-
-    def test_newer_version_also_raises(self):
-        """The pin is exact (`==`), not a floor — a newer transformers is
-        just as much a mismatch as an older one."""
-        with pytest.raises(RuntimeError, match=REQUIRED_TRANSFORMERS_VERSION):
-            _check_transformers_version("5.14.0")
 
     def test_message_explains_manager_downgrade_skip_behavior(self):
         """The actionable message must explain *why* the env can be wrong
@@ -265,5 +269,5 @@ class TestTransformersVersionGuard:
     def test_installed_none_reads_the_real_transformers_version(self):
         """Default (no `installed` arg) path: reads the real, currently
         importable `transformers.__version__` — exercised here as a no-op
-        because the dev/test environment is pinned to the required version."""
+        because the dev/test environment is on the pinned major.minor series."""
         _check_transformers_version()  # must not raise in this repo's own env

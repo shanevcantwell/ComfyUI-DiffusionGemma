@@ -40,17 +40,32 @@ DEFAULT_QUANT = "none"
 # ComfyUI-Manager installs deps from requirements.txt via plain pip — and
 # pip (per Manager's own installer) silently *skips* a pin that would
 # downgrade an already-installed package. An env can therefore end up
-# holding a transformers other than this pack's exact target, which
+# holding a transformers other than this pack's target series, which
 # DiffusionGemmaForBlockDiffusion either doesn't exist in (raw ImportError,
 # no context) or behaves differently under (worse: no error at all). This
 # front-door guard turns both into one actionable message.
+#
+# Patch-tolerant: accepts the pinned major.minor series (`5.13.x` for a
+# `5.13.0` pin) and flags only a different minor or major. A working patch
+# bump is a bugfix on the same API surface this pack was tested against, so
+# hard-failing it would be more disruptive than the risk it guards; a
+# minor/major bump is untested surface, so it stays flagged.
 REQUIRED_TRANSFORMERS_VERSION = "5.13.0"
 
 
+def _required_series() -> tuple[int, ...]:
+    """The accepted `(major, minor)` series, DERIVED from
+    `REQUIRED_TRANSFORMERS_VERSION` (never hardcoded) so the pin stays the
+    single source of truth. `"5.13.0"` -> `(5, 13)`."""
+    return tuple(int(part) for part in REQUIRED_TRANSFORMERS_VERSION.split(".")[:2])
+
+
 def _version_mismatch_message(installed: str) -> str:
+    series = ".".join(str(n) for n in _required_series())
     return (
-        f"ComfyUI-DiffusionGemma requires transformers=={REQUIRED_TRANSFORMERS_VERSION}, "
-        f"but transformers=={installed} is installed in this Python environment. "
+        f"ComfyUI-DiffusionGemma requires transformers {series}.x "
+        f"(this pack pins =={REQUIRED_TRANSFORMERS_VERSION}), but "
+        f"transformers=={installed} is installed in this Python environment. "
         "ComfyUI-Manager's dependency installer silently skips a requirements.txt pin "
         "that would downgrade an already-installed package, so this environment can "
         "hold a transformers version other than the one this pack targets even after "
@@ -62,28 +77,41 @@ def _version_mismatch_message(installed: str) -> str:
 
 def _check_transformers_version(installed: str | None = None) -> None:
     """Raise an actionable `RuntimeError` (issue #25) unless the installed
-    transformers is exactly `REQUIRED_TRANSFORMERS_VERSION`.
+    transformers is in `REQUIRED_TRANSFORMERS_VERSION`'s major.minor series.
+
+    Patch-tolerant: accepts the pinned major.minor series (`5.13.x` for a
+    `5.13.0` pin) and flags anything with a different minor or major
+    (`5.12.*`, `5.14.*`, `6.*`, ...). A working patch bump is a bugfix on
+    the same API surface this pack was tested against, so it shouldn't
+    hard-fail; a minor/major bump is untested surface, so it is flagged.
 
     `installed` is normally left `None` (reads the real `transformers.__version__`
     at call time) — the parameter exists so this thin guard is directly
     unit-testable without monkeypatching `sys.modules`. Compares with
     `packaging.version.Version` when `packaging` is importable (it normally
-    is: transformers depends on it itself), which tolerates things like a
-    `5.13.0` local build tag; falls back to a plain string compare
-    otherwise — an exact-pin compare doesn't need semantic parsing to be
-    *correct*, only to be that lenient, so the fallback is still safe.
+    is: transformers depends on it itself), taking `.release[:2]` (major,
+    minor) so a local build tag / pre-release suffix doesn't derail the
+    series match; falls back to a patch-tolerant `major.minor.` string-prefix
+    compare when `packaging` isn't importable. Both paths DERIVE the accepted
+    series from `REQUIRED_TRANSFORMERS_VERSION` — no hardcoded `"5.13"`.
     """
     if installed is None:
         import transformers as _transformers
 
         installed = getattr(_transformers, "__version__", "unknown")
 
+    required_series = _required_series()
+
     try:
         from packaging.version import Version
 
-        mismatched = Version(installed) != Version(REQUIRED_TRANSFORMERS_VERSION)
+        mismatched = Version(installed).release[:2] != required_series
     except Exception:
-        mismatched = installed != REQUIRED_TRANSFORMERS_VERSION
+        # Patch-tolerant string fallback: the installed version must start
+        # with the `major.minor.` prefix. The trailing dot is load-bearing —
+        # it stops `5.130.0` from matching a `5.13` series.
+        prefix = ".".join(str(n) for n in required_series) + "."
+        mismatched = not installed.startswith(prefix)
 
     if mismatched:
         raise RuntimeError(_version_mismatch_message(installed))
