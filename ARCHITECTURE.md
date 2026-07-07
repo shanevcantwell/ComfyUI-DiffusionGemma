@@ -131,7 +131,9 @@ rather than decoding twice. `frames` is a list output (`OUTPUT_IS_LIST`);
 `images` is one batch tensor, not a list — a list would fan out per-frame and
 break `PreviewImage`'s scrubber, `SaveAnimatedWEBP`, and VHS-style consumers
 that expect a single batched `IMAGE` (`nodes/sampler.py:202-207`, docstring
-44-48).
+44-48). Confirmed in use: VHS `Video Combine` and `SaveAnimatedWEBP` consume
+`images` directly for GIF/MP4/WEBP export — the anticipated benefit of the
+single-batch shape, verified rather than assumed.
 
 ## 5. The two display paths
 
