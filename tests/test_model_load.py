@@ -13,6 +13,10 @@ DiffusionGemma's fused 3D MoE experts, so both were misleading on any
 hardware for this architecture) — `quant` now only accepts `"none"`, and
 this module no longer has `_quantization_config`/`_device_map` branches to
 cover.
+
+`TestTransformersVersionGuard` covers issue #25's front-door guard: the
+`installed` parameter on `_check_transformers_version` exists precisely so
+this is testable without monkeypatching `sys.modules["transformers"]`.
 """
 from __future__ import annotations
 
@@ -22,6 +26,8 @@ import torch
 from dgemma.model import (
     DEFAULT_QUANT,
     DEFAULT_REPO_ID,
+    REQUIRED_TRANSFORMERS_VERSION,
+    _check_transformers_version,
     _resolve_device,
     load_model,
 )
@@ -219,3 +225,45 @@ class TestLoadModel:
 
         with pytest.raises(ValueError, match="unrelated config bug"):
             load_model(repo_id="fake/repo")
+
+
+class TestTransformersVersionGuard:
+    """issue #25 front-door guard: ComfyUI-Manager silently skips a
+    requirements.txt pin that would downgrade an already-installed package,
+    so this repo's env can end up holding a transformers other than the one
+    it targets. `_check_transformers_version` must turn that into one
+    actionable RuntimeError instead of a raw import/attribute traceback."""
+
+    def test_matching_version_is_a_no_op(self):
+        _check_transformers_version(REQUIRED_TRANSFORMERS_VERSION)  # must not raise
+
+    def test_older_version_raises_actionable_runtime_error(self):
+        with pytest.raises(RuntimeError) as excinfo:
+            _check_transformers_version("5.12.0")
+
+        message = str(excinfo.value)
+        assert REQUIRED_TRANSFORMERS_VERSION in message  # names the required version
+        assert "5.12.0" in message  # names what's actually installed
+        assert "pip install transformers==" in message  # concrete fix
+        assert "issue #25" in message.lower() or "#25" in message
+
+    def test_newer_version_also_raises(self):
+        """The pin is exact (`==`), not a floor — a newer transformers is
+        just as much a mismatch as an older one."""
+        with pytest.raises(RuntimeError, match=REQUIRED_TRANSFORMERS_VERSION):
+            _check_transformers_version("5.14.0")
+
+    def test_message_explains_manager_downgrade_skip_behavior(self):
+        """The actionable message must explain *why* the env can be wrong
+        even after a normal ComfyUI-Manager install — not just state the
+        required version."""
+        with pytest.raises(RuntimeError) as excinfo:
+            _check_transformers_version("5.12.0")
+
+        assert "downgrade" in str(excinfo.value).lower()
+
+    def test_installed_none_reads_the_real_transformers_version(self):
+        """Default (no `installed` arg) path: reads the real, currently
+        importable `transformers.__version__` — exercised here as a no-op
+        because the dev/test environment is pinned to the required version."""
+        _check_transformers_version()  # must not raise in this repo's own env

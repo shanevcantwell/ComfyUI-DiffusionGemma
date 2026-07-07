@@ -24,7 +24,6 @@ issue #4 (AWQ-INT4 checkpoint is the lead candidate), not a bnb config here.
 from __future__ import annotations
 
 import torch
-from transformers import AutoProcessor, DiffusionGemmaForBlockDiffusion
 
 from .types import DGemmaModel
 
@@ -36,6 +35,75 @@ _QUANT_CHOICES = ("none",)
 # default both source from here, so there is exactly one place that decides
 # what a fresh graph starts with.
 DEFAULT_QUANT = "none"
+
+# issue #25: the ComfyUI registry archive has no build step, so
+# ComfyUI-Manager installs deps from requirements.txt via plain pip — and
+# pip (per Manager's own installer) silently *skips* a pin that would
+# downgrade an already-installed package. An env can therefore end up
+# holding a transformers other than this pack's exact target, which
+# DiffusionGemmaForBlockDiffusion either doesn't exist in (raw ImportError,
+# no context) or behaves differently under (worse: no error at all). This
+# front-door guard turns both into one actionable message.
+REQUIRED_TRANSFORMERS_VERSION = "5.13.0"
+
+
+def _version_mismatch_message(installed: str) -> str:
+    return (
+        f"ComfyUI-DiffusionGemma requires transformers=={REQUIRED_TRANSFORMERS_VERSION}, "
+        f"but transformers=={installed} is installed in this Python environment. "
+        "ComfyUI-Manager's dependency installer silently skips a requirements.txt pin "
+        "that would downgrade an already-installed package, so this environment can "
+        "hold a transformers version other than the one this pack targets even after "
+        "a normal Manager install. Fix: run "
+        f"`pip install transformers=={REQUIRED_TRANSFORMERS_VERSION}` in ComfyUI's own "
+        "Python environment. See issue #25."
+    )
+
+
+def _check_transformers_version(installed: str | None = None) -> None:
+    """Raise an actionable `RuntimeError` (issue #25) unless the installed
+    transformers is exactly `REQUIRED_TRANSFORMERS_VERSION`.
+
+    `installed` is normally left `None` (reads the real `transformers.__version__`
+    at call time) — the parameter exists so this thin guard is directly
+    unit-testable without monkeypatching `sys.modules`. Compares with
+    `packaging.version.Version` when `packaging` is importable (it normally
+    is: transformers depends on it itself), which tolerates things like a
+    `5.13.0` local build tag; falls back to a plain string compare
+    otherwise — an exact-pin compare doesn't need semantic parsing to be
+    *correct*, only to be that lenient, so the fallback is still safe.
+    """
+    if installed is None:
+        import transformers as _transformers
+
+        installed = getattr(_transformers, "__version__", "unknown")
+
+    try:
+        from packaging.version import Version
+
+        mismatched = Version(installed) != Version(REQUIRED_TRANSFORMERS_VERSION)
+    except Exception:
+        mismatched = installed != REQUIRED_TRANSFORMERS_VERSION
+
+    if mismatched:
+        raise RuntimeError(_version_mismatch_message(installed))
+
+
+_check_transformers_version()
+
+try:
+    from transformers import AutoProcessor, DiffusionGemmaForBlockDiffusion
+except ImportError as exc:
+    # The version check above already raised its own actionable message for
+    # a simple version mismatch — reaching here with an ImportError means
+    # something else is broken about the installed transformers (partial or
+    # corrupt install). Still name the required version and issue #25
+    # instead of surfacing the raw traceback.
+    raise RuntimeError(
+        "Could not import DiffusionGemmaForBlockDiffusion from transformers "
+        f"(required: transformers=={REQUIRED_TRANSFORMERS_VERSION}). See issue #25. "
+        f"Original error: {exc}"
+    ) from exc
 
 
 def _resolve_device(model) -> str:
