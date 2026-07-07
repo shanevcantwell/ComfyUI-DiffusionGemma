@@ -135,7 +135,7 @@ def test_sampler_declarations():
         "canvas_state",
         "canvas_trace",
         "frames",
-        "frames_image",
+        "images",
     )
     # `frames` (P3, the per-step flipbook STRING list) is the only
     # `OUTPUT_IS_LIST=True` output. `frames_image` (issue #21 rework) is a

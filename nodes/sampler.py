@@ -200,7 +200,7 @@ class DGemmaSampler:
         }
 
     RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE", "STRING", "IMAGE")
-    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "frames_image")
+    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "images")
     # `frames_image` is a single stacked (N, H, W, 3) batch tensor, NOT a
     # list — False here, unlike `frames`' True (see this module's docstring:
     # a list would fan out per-frame and break PreviewImage/SaveAnimatedWEBP/VHS).
