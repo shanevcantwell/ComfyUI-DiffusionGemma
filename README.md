@@ -146,6 +146,7 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 
 | Doc | What it holds |
 |-----|---------------|
+| **[VISION.md](VISION.md)** | *Why it might matter* — the questions the instrument was built to ask, each tagged `[established]` / `[hypothesis]` / `[open]`. Speculative by design, cited throughout. |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Contributor-facing map — how the pieces fit and why. |
 | **[plan.md](plan.md)** | The 6-phase build roadmap with per-phase evidence. |
 | **[decisions/](decisions/)** | ADRs — *why* the load-bearing choices were made. |
