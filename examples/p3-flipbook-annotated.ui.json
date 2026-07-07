@@ -432,7 +432,7 @@
       "outputs": [],
       "title": "Model & hardware",
       "properties": {
-        "text": "On first run the Loader auto-downloads google/diffusiongemma-26B-A4B-it (~53 GB, bf16) from HuggingFace and caches it. The model card wants >=60 GB GPU for a full bf16 load; smaller cards offload to CPU and run slower. quant=none is the only honest setting (the fused MoE experts can't be bitsandbytes-quantized). Turn local_files_only ON once it's cached to run offline.",
+        "text": "First run auto-downloads ~53 GB (bf16) from HuggingFace and caches it. Wants >=60 GB GPU; smaller cards offload and slow. quant=none only. local_files_only = run offline once cached.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -440,7 +440,7 @@
         }
       },
       "widgets_values": [
-        "On first run the Loader auto-downloads google/diffusiongemma-26B-A4B-it (~53 GB, bf16) from HuggingFace and caches it. The model card wants >=60 GB GPU for a full bf16 load; smaller cards offload to CPU and run slower. quant=none is the only honest setting (the fused MoE experts can't be bitsandbytes-quantized). Turn local_files_only ON once it's cached to run offline."
+        "First run auto-downloads ~53 GB (bf16) from HuggingFace and caches it. Wants >=60 GB GPU; smaller cards offload and slow. quant=none only. local_files_only = run offline once cached."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -463,7 +463,7 @@
       "outputs": [],
       "title": "Knobs to play with",
       "properties": {
-        "text": "num_inference_steps: how many denoise passes. t_min/t_max: temperature window — a hotter, longer schedule delays premature commitment. entropy_bound + confidence: the per-step rule for which tokens freeze. gen_length: canvas size. thinking: toggle the model's reasoning channel. Good first-run values: steps 48, t 0.4-0.8, entropy_bound 0.05, confidence 0.005, gen_length 1024.",
+        "text": "steps = denoise passes. t_min/t_max = temperature window (hotter/longer delays commitment). entropy_bound + confidence = what freezes each step. gen_length = canvas size. thinking = reasoning channel. Try: steps 48, t 0.4-0.8, eb 0.05, conf 0.005.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -471,7 +471,7 @@
         }
       },
       "widgets_values": [
-        "num_inference_steps: how many denoise passes. t_min/t_max: temperature window — a hotter, longer schedule delays premature commitment. entropy_bound + confidence: the per-step rule for which tokens freeze. gen_length: canvas size. thinking: toggle the model's reasoning channel. Good first-run values: steps 48, t 0.4-0.8, entropy_bound 0.05, confidence 0.005, gen_length 1024."
+        "steps = denoise passes. t_min/t_max = temperature window (hotter/longer delays commitment). entropy_bound + confidence = what freezes each step. gen_length = canvas size. thinking = reasoning channel. Try: steps 48, t 0.4-0.8, eb 0.05, conf 0.005."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -706,7 +706,7 @@
       "outputs": [],
       "title": "Outputs & what to watch",
       "properties": {
-        "text": "Two per-step flipbooks: `frames` (text, a STRING list -> Preview Text) and `images` (rendered frames, an IMAGE list -> Preview Image, shareable). `canvas_trace` -> DGemmaTrace draws a commit heatmap + summary. Watch the commit-front spread: a fluent-but-wrong answer reveals itself as an early, confident lock-in. (The `images` output requires a build that includes it — issue #21.)",
+        "text": "frames = text flipbook (-> Preview Text). images = picture flipbook (-> Preview Image). canvas_trace -> Trace = heatmap + summary. Watch the commit-front: fluent-but-wrong shows as an early lock-in.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -714,7 +714,7 @@
         }
       },
       "widgets_values": [
-        "Two per-step flipbooks: `frames` (text, a STRING list -> Preview Text) and `images` (rendered frames, an IMAGE list -> Preview Image, shareable). `canvas_trace` -> DGemmaTrace draws a commit heatmap + summary. Watch the commit-front spread: a fluent-but-wrong answer reveals itself as an early, confident lock-in. (The `images` output requires a build that includes it — issue #21.)"
+        "frames = text flipbook (-> Preview Text). images = picture flipbook (-> Preview Image). canvas_trace -> Trace = heatmap + summary. Watch the commit-front: fluent-but-wrong shows as an early lock-in."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -737,7 +737,7 @@
       "outputs": [],
       "title": "What this is",
       "properties": {
-        "text": "DiffusionGemma writes text by DIFFUSION: it denoises a whole canvas of tokens over N steps instead of left-to-right. This graph instruments that process so you can watch the answer crystallize step by step. The draw here is observability, not speed.",
+        "text": "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -745,7 +745,7 @@
         }
       },
       "widgets_values": [
-        "DiffusionGemma writes text by DIFFUSION: it denoises a whole canvas of tokens over N steps instead of left-to-right. This graph instruments that process so you can watch the answer crystallize step by step. The draw here is observability, not speed."
+        "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -768,7 +768,7 @@
       "outputs": [],
       "title": "Heatmap — watch the answer crystallize",
       "properties": {
-        "text": "Each pixel = one token position at one step. HORIZONTAL = canvas positions (left = start of the generated region, right = end). VERTICAL = denoising steps (top = first, bottom = last). WHITE = that position CHANGED this step (still being renoised, not settled). BLACK = it held steady (locked in). Read top-to-bottom to watch the answer freeze: the top row is all white (nothing committed yet), and black spreads down as positions stop changing. The white->black boundary is the COMMIT FRONT. A front that snaps to black early and all at once = premature crystallization (committed before it finished thinking - the fluent-but-wrong trap); a front that stays white longer settled gradually. NOTE: white = still moving, black = locked - it's a 'what's still changing' map, not a 'what's filled in' map.",
+        "text": "Pixel = one position x one step. X = positions, Y = steps (top->bottom). WHITE = changed this step (still moving), BLACK = locked in. Black spreading down = the commit front; early + all-at-once = premature crystallization.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -776,7 +776,7 @@
         }
       },
       "widgets_values": [
-        "Each pixel = one token position at one step. HORIZONTAL = canvas positions (left = start of the generated region, right = end). VERTICAL = denoising steps (top = first, bottom = last). WHITE = that position CHANGED this step (still being renoised, not settled). BLACK = it held steady (locked in). Read top-to-bottom to watch the answer freeze: the top row is all white (nothing committed yet), and black spreads down as positions stop changing. The white->black boundary is the COMMIT FRONT. A front that snaps to black early and all at once = premature crystallization (committed before it finished thinking - the fluent-but-wrong trap); a front that stays white longer settled gradually. NOTE: white = still moving, black = locked - it's a 'what's still changing' map, not a 'what's filled in' map."
+        "Pixel = one position x one step. X = positions, Y = steps (top->bottom). WHITE = changed this step (still moving), BLACK = locked in. Black spreading down = the commit front; early + all-at-once = premature crystallization."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -799,7 +799,7 @@
       "outputs": [],
       "title": "CanvasState — is the answer actually done?",
       "properties": {
-        "text": "The honesty readout beside the text. A bare string can't say whether its canvas finished denoising - too few steps or too wide an entropy bound leaves finished-LOOKING text that's still uncommitted noise. converged: True only if the last step accepted every position under the entropy bound (the schedule bottomed out) - NOT a claim EOS fired or that tokens stayed locked. committed_fraction: fraction of positions locked on the final step. steps_used: steps actually run (early-stop can finish before the max). turn_closed: True only if a real end-of-turn token was committed in the answer; False = the turn never truly stopped (empty/all-thought answer, or it hit the length budget mid-thought). thought / stray_thought_delimiter: the excised reasoning channel + a malformed-leftover flag. THE TELL: converged=True but turn_closed=False -> the text looks done but didn't really finish.",
+        "text": "Is the text really finished? converged = schedule bottomed out (NOT proof of EOS). turn_closed = a real stop was hit. committed_fraction / steps_used = how far it got. Tell: converged=True but turn_closed=False = looks done, didn't finish.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -807,7 +807,7 @@
         }
       },
       "widgets_values": [
-        "The honesty readout beside the text. A bare string can't say whether its canvas finished denoising - too few steps or too wide an entropy bound leaves finished-LOOKING text that's still uncommitted noise. converged: True only if the last step accepted every position under the entropy bound (the schedule bottomed out) - NOT a claim EOS fired or that tokens stayed locked. committed_fraction: fraction of positions locked on the final step. steps_used: steps actually run (early-stop can finish before the max). turn_closed: True only if a real end-of-turn token was committed in the answer; False = the turn never truly stopped (empty/all-thought answer, or it hit the length budget mid-thought). thought / stray_thought_delimiter: the excised reasoning channel + a malformed-leftover flag. THE TELL: converged=True but turn_closed=False -> the text looks done but didn't really finish."
+        "Is the text really finished? converged = schedule bottomed out (NOT proof of EOS). turn_closed = a real stop was hit. committed_fraction / steps_used = how far it got. Tell: converged=True but turn_closed=False = looks done, didn't finish."
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -830,7 +830,7 @@
       "outputs": [],
       "title": "Trace Summary — the run's vitals",
       "properties": {
-        "text": "A text digest of the whole run. scheduler + config: which scheduler drove it (default EntropyBoundScheduler) and its knobs (entropy_bound, t_min/t_max, num_inference_steps). steps: denoising steps actually captured (fewer than the max if it early-stopped). committed_fraction per step: the AVALANCHE CURVE - fraction of positions locked in at each step, climbing toward 1.0. Watch how fast it climbs; a steep early jump means the model committed hard and fast (and may have locked a wrong basin before it finished thinking). mask-token corroboration: confirms this model does pure uniform-state renoise with no fixed 'MASK' sentinel; it flags a candidate if one ever appears.",
+        "text": "Run vitals: scheduler + knobs, steps actually taken, and the avalanche curve (committed fraction per step, climbing to 1.0). Steep early climb = committed hard and fast, maybe a wrong basin. Also confirms no fixed MASK sentinel.",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -838,7 +838,7 @@
         }
       },
       "widgets_values": [
-        "A text digest of the whole run. scheduler + config: which scheduler drove it (default EntropyBoundScheduler) and its knobs (entropy_bound, t_min/t_max, num_inference_steps). steps: denoising steps actually captured (fewer than the max if it early-stopped). committed_fraction per step: the AVALANCHE CURVE - fraction of positions locked in at each step, climbing toward 1.0. Watch how fast it climbs; a steep early jump means the model committed hard and fast (and may have locked a wrong basin before it finished thinking). mask-token corroboration: confirms this model does pure uniform-state renoise with no fixed 'MASK' sentinel; it flags a candidate if one ever appears."
+        "Run vitals: scheduler + knobs, steps actually taken, and the avalanche curve (committed fraction per step, climbing to 1.0). Steep early climb = committed hard and fast, maybe a wrong basin. Also confirms no fixed MASK sentinel."
       ],
       "color": "#432",
       "bgcolor": "#653"
