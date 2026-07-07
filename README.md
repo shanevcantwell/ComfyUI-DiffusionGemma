@@ -4,14 +4,13 @@ A ComfyUI node pack for **DiffusionGemma** — text generation by *uniform-state
 discrete diffusion*, exposed as a ComfyUI graph you can watch, instrument, and
 take apart.
 
-> ### ✅ Status: working — loader, sampler, knobs, and live instrumentation
+> ### ✅ Status: working end-to-end
 >
-> As of **2026-07-05** the pack runs end-to-end in ComfyUI: prompt in → text out,
-> with every entropy-bound knob exposed as a widget, a **live per-step canvas
-> view** while the sampler runs, and a post-hoc **trace node** (commit heatmap +
-> summary). Phases 0–3 of the [build plan](plan.md) are closed, each with live
-> verification on real weights banked in the record. P4 (schedule node + curve
-> zoo) and P5 (constraints + options chain) are next.
+> Prompt in → text out, live in ComfyUI: every entropy knob on a widget, a
+> **live per-step view** of the canvas denoising as it runs, a **picture
+> flipbook** of the whole process, and a **trace node** (commit heatmap +
+> summary) to read what happened. Verified on real weights across two GPUs.
+> Where it's headed lives in the [roadmap](plan.md).
 
 | Phase | What landed | Evidence |
 |-------|-------------|----------|
@@ -20,23 +19,24 @@ take apart.
 | P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | plan.md P2 evidence; entropy_bound sweep |
 | P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, live per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
 
-## What it is (the idea)
+## What it is — meaning annealed out of noise
 
-DiffusionGemma doesn't autoregress within a block. It starts from a fixed
-**256-token canvas of random vocabulary tokens** and iteratively refines it: an
-entropy-bound sampler commits the lowest-entropy positions under a budget and
-re-noises the rest, step after step, until it stabilizes. Finished canvases are
-appended to the KV cache and the next canvas begins (block-autoregressive).
-There is **no sigma schedule and no latent space** — the "schedule" is a
-per-step *temperature + entropy-budget* trajectory, and the working state is a
-discrete token canvas.
+Every answer starts as a **canvas of pure noise**: 256 positions, each a random
+token drawn from the whole multilingual vocabulary — maximum entropy, no meaning
+anywhere. Generation is an **annealing**. A temperature schedule starts hot and
+cools; at each step the positions the model is most *certain* about — the
+lowest-entropy ones — freeze into place, while the rest are re-noised and tried
+again. The text isn't written left-to-right. It **precipitates out of the
+entropy field**: the confident tokens crystallizing first, the uncertain ones
+settling last, until a coherent answer has cooled out of the noise.
 
-ComfyUI's sampling ecosystem (`KSampler`, `BasicScheduler`, RES4LYF, the solver
-zoo) is built on `SIGMAS` and `LATENT` — continuous Gaussian diffusion.
-DiffusionGemma's loop has no input of that shape. So this pack keeps RES4LYF's
-**node topology** (schedule → constraints → sampler → options chain) but swaps
-every socket **payload** for entropy-native types. See
-**[ADR-CDG-001](decisions/adr-cdg-001-native-socket-types.md)**.
+That process is the thing this pack lets you **watch**. The "schedule" here is
+a temperature-and-entropy trajectory over a canvas of discrete tokens — no sigma
+curve, no latent space. The whole point is to see the **commit-front** sweep
+across the canvas: where meaning locks in early, where it stays molten, and —
+sometimes — where the model anneals confidently into a *wrong* answer and can't
+climb back out, exactly the way real annealing gets trapped in a local minimum.
+You can't catch that by reading the final text. You can watch it happen here.
 
 ## What works today
 
@@ -134,6 +134,14 @@ is not — so reusing those types would be a literal instance of the "lying
 sigmas" trap RES4LYF jokingly named, but unintentional and load-bearing. The
 node graph here reflects the real substrate, which is what makes it teachable
 rather than a disguise. (See ADR-CDG-001.)
+
+## Come explore
+
+This is an instrument for poking at how the model thinks — so questions,
+findings, and half-formed ideas are exactly the point. The
+**[Discussions](../../discussions)** tab is open for show-and-tell (post a
+trace, a heatmap, a run that annealed somewhere strange) and for ideas. See
+**[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
 
 ## License
 
