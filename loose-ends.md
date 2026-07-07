@@ -4,7 +4,7 @@ Tactical decisions that didn't qualify for ADR treatment but are worth
 remembering. See `decisions/` for full ADRs.
 
 **Created:** 2026-06-30
-**Last updated:** 2026-07-05
+**Last updated:** 2026-07-06
 
 ---
 
@@ -312,3 +312,150 @@ the (expensive) exoneration chain.
   `localStorage.clear()` → userdata-dir 200s → stock-only on fresh port/origin.
 - The `nf4` OOM found the same session is **not** this — that one is
   explained and banked on issue #4.
+
+---
+
+## 2026-07-06 — Entropy-bound decoder: schedule + early-stop mechanics (grounded in the llama.cpp fork)
+
+**Category:** grounded mechanism + sampler-tuning knowledge (don't re-derive)
+**Related ADR:** ADR-CDG-007 (alpha backend = this fork); relates ADR-CDG-006 (sampler)
+**Source:** `/srv/dev/llama.cpp-diffusiongemma/examples/diffusion/diffusion.cpp`
+(`diffusion_generate_entropy_bound`).
+
+### Findings (source-grounded)
+- **Temperature schedule** is linear, hot→cool, denominated on `max_steps`:
+  `t = t_min + (t_max−t_min)·(cur_step/S)` (`:532`), `S=max_steps`, `cur_step`
+  counts down. Step 0 = `t_max` (0.8); tail → `t_min` (0.4). This IS the
+  sigma-analog. `entropy_bound` (0.1) is a FIXED per-step acceptance budget, not
+  scheduled.
+- **Renoise:** rejected positions (missed the cumulative-entropy `entropy_bound`
+  cut) get a fresh uniform-random token (`current_canvas[pos]=renoise[pos]`,
+  `:657`) — the ancestral-noise-blast analogue. What anneals is COVERAGE (how many
+  positions renoise, via the acceptance test), NOT amplitude (each renoise is a
+  full random token).
+- **argmax is temperature-invariant:** output is always `argmax_canvas[pos]`
+  (`:658`). Temperature governs acceptance-count / renoise-coverage and the entropy
+  that feeds the stop — NOT displayed token identity. Visible "twisting" happens
+  because a position's CONTEXT (renoised neighbors) changes and re-argmaxes it.
+- **Early-stop truncates the anneal** (the "concludes too quickly / unfinished"
+  cause): stop = argmax stable for `stability_threshold` (default 1, trivially
+  weak) AND mean entropy `< confidence_threshold` (0.005) (`:662-667`). It shares
+  the SAME `cur_step` counter as the temperature formula, so firing at k≪S halts
+  while still HOT (observed t≈0.60–0.63, ~mid-anneal), before the low-temperature
+  refinement tail.
+- **Lever to run the full anneal:** `--diffusion-eb-confidence 0.0` (mean Shannon
+  entropy can't be <0 → stop never fires → full `max_steps`). `--diffusion-eb-stability
+  > max_steps` is a second lever. Raising `max_steps` is UNRELIABLE (for a fixed
+  absolute step it makes `t` hotter). ADR-CDG-007 defaults confidence to 0.0.
+- **`confidence` is discontinuous** (corroborates #10): it thresholds `entropy_sum/C`,
+  a scalar sampled only ~once per step, jumping non-uniformly → dead zones (bands
+  landing between two steps' samples) and cliffs (crossing a sample flips the stop
+  step). Not a smooth dial — hence 0.0 (fully off), not a small tweak.
+- **`mask_token=4` in the CLI startup log is VESTIGIAL** — it belongs to the other,
+  unused LLaDA absorbing-mask path (`diffusion_generate`), not the entropy-bound
+  path. NOT a contradiction of ADR-CDG-001's "no MASK." Don't be confused by it.
+
+### Failure-mode note (conceptual)
+The rule minimizes *local self-consistency*, not correctness → it can converge into
+coherent-but-wrong basins (the "porridge bird" ramble; the France doubled answer).
+The correct token is high-entropy vs the committed (closed) context, so the
+acceptance rule renoises it away rather than committing it; escape is undirected
+(uniform random). Keeping it hot longer (confidence 0.0, warmer `t_min`) keeps the
+system open so a wrong basin has less time to crystallize — but grants more escape
+*attempts*, it does not *steer* toward right.
+
+---
+
+## 2026-07-06 — ADR-CDG-006 `ResumeState` is incomplete for bit-exact resume
+
+**Category:** design defect in a `proposed` ADR (fix before build)
+**Related ADR:** ADR-CDG-006 (resumable/step-window sampler); milestone-2 per ADR-CDG-007
+**Graduation trigger:** fix when ADR-006 is revived.
+
+### Finding (audit vs `pipeline_diffusion_gemma.py`)
+ADR-006's central claim — bit-exact `[0,k)+[k,N) == [0,N)` — is NOT achievable as
+written. `ResumeState` captures the object graph (canvas ids, RNG generator state,
+scheduler config) but omits two mutated CROSS-STEP model locals the pipeline carries
+every step:
+- `self_conditioning_logits` (`:365-371,383`) — step k conditions on step k−1's
+  `pred_logits`; resuming without it → different logits → different accepted tokens
+  even with identical RNG.
+- `argmax_history` (`:350-353,411-417`) — the early-stop rolling window; dropping it
+  diverges early-stop timing near a window boundary.
+Both must be added to `ResumeState` (and threaded through the windowed pipeline
+subclass) before Phase A's own acceptance test can pass. Separately, the ADR has real
+padding (Risk/Observability duplicates Negative Consequences; anneal-relativity stated
+3×) — cut on revision.
+
+---
+
+## 2026-07-06 — Sigma-toolkit → entropy-space transfer (research threads, not yet decisions)
+
+**Category:** research directions (analogy-driven hypotheses to test)
+**Related ADR:** ADR-CDG-007 (`SIGMAS→heat` node is the vehicle); augments the
+DGemmaRenoise entry above.
+**Graduation trigger:** each becomes an ADR/experiment when built.
+
+### Threads
+The temperature anneal is the sigma-analog; entropy is arguably a *richer* handle
+than gaussian sigma (per-position, content-adaptive, the actual objective — not a
+proxy). "Not gaussian sigmas" is about the *payload* (correctly not a `SIGMAS`
+tensor, ADR-001), NOT the *concepts* — the image-sampler toolkit ports:
+- **Schedule shape:** the temperature curve is naively linear; Karras/exponential/
+  beta/Clown-style entropy-temperature curves are unexplored (likely highest-leverage;
+  "schedule > sampler" folklore probably holds). This is exactly what the `SIGMAS→heat`
+  node (ADR-007) unlocks by borrowing RES4LYF/stock schedulers.
+- **Churn** (`s_churn` — deliberate re-noising to escape local minima) = image
+  diffusion's answer to the coherent-but-wrong-basin failure above. "Keep it hot to
+  twist out" IS churn — decades of prior art on how much/when.
+- **img2img strength** = how hard you renoise a text-seeded canvas = the DGemmaRenoise
+  `strength` param (2026-07-05 entry) — same knob, same intuition.
+- **The frontier** is where discreteness breaks the analogy: full-token renoise (not
+  amplitude-annealed noise), per-position schedules (image sigma is a global scalar).
+  "Sigma concepts apply AND then do something image diffusion can't" — worth its own
+  ADR once the flip-book lets you watch it.
+
+---
+
+## 2026-07-06 — DiffusionGemma ≤ its AR base in wall-clock is structural (KV-cache asymmetry), not a harness artifact
+
+**Category:** grounded characterization (positioning — informs the README's value prop)
+**Related ADR:** none; relates #10 (confidence-trajectory finding) and #16 (3090 run)
+**Graduation trigger:** none — this is a fixed property of the method, not a bug to fix.
+Revisit only if a diffusion-specific serving path (parallel-decode kernels, cached
+bidirectional attention) changes the arithmetic below.
+
+### Observation (operator, across multiple harnesses)
+DiffusionGemma has **never been observed to run *faster* than its autoregressive Gemma
+base** in any harness, despite the "parallel denoising" pitch. Confirmed structural here,
+not a measurement fluke.
+
+### Why (forward-pass mechanics)
+The pitch is K steps ≪ T tokens. What eats it in wall-clock is the **KV-cache asymmetry**:
+- **AR pays for width once, cached.** Each token is a single-position forward pass that
+  reuses all prior positions via KV-cache. T tokens = T cheap passes.
+- **Diffusion pays for width every step, uncached.** Each step is a *full-width
+  bidirectional* pass over the whole canvas — the canvas mutates and attention is
+  bidirectional, so there is no cross-step cache to reuse. Per-step cost ≈
+  `canvas_width` × an AR-token pass.
+- Break-even: `K_steps × full_width_cost` vs `T_tokens × cached_cost`. At canvas 256 /
+  ~8 steps to converge (entropy-bound commit), that's 8 full-256 passes vs 256 cached
+  passes. **Compute-bound → diffusion does more total FLOPs and loses.** Diffusion only
+  wins when the pass is *weight-bandwidth-bound* (width nearly free; only the number of
+  weight-pagings counts — K vs T).
+
+### The spill-regime irony (3090, #16)
+The PCIe-spill regime is exactly where diffusion's few-steps advantage is *largest* (both
+AR and diffusion would bottleneck on streaming 26B of weights; diffusion pays that toll
+~8× vs AR's hundreds). It still doesn't win in practice because the **AR base being
+benchmarked fits in VRAM** — its per-token cost is milliseconds, so 256 × ms beats
+8 × ~15 s. Apples (spilled MoE-diffusion) to a differently-provisioned orchard
+(VRAM-resident AR). Grounding: #16's run was GPU-starved (screenshot: GPU 3%, VRAM 86%),
+i.e. PCIe-bound, ~15 s/step, ~8 steps to converge → ~2 min/prompt.
+
+### Positioning implication (load-bearing for the ship)
+**Do not sell this pack on throughput — it will lose that benchmark by construction on any
+hardware where the AR base fits.** The value prop is *instrumentability*: the watchable
+commit-front, the entropy field, infill/steering, the `committed_fraction` ramp the P3
+trace draws. That is orthogonal to speed. README copy and any launch note should lead with
+"see/steer the diffusion", never "faster".

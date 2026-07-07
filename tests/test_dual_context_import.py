@@ -1,5 +1,6 @@
 """Coverage closer for the dotted-package import branch of
-`nodes/loader.py:19` and `nodes/sampler.py:22` (test-coverage-plan.md Phase 2).
+`nodes/loader.py:19`, `nodes/sampler.py:22`, and `nodes/trace.py` (P3's new
+module, same dual-context gate) — test-coverage-plan.md Phase 2's precedent.
 
 `tests/test_comfyui_loader_context.py` already proves this branch executes
 correctly under ComfyUI's real loader mechanics — but it does so in a
@@ -63,3 +64,12 @@ def test_sampler_resolves_relative_import_under_dotted_package_context(synthetic
     assert "." in module.__package__
     assert module.DGemmaSampler.FUNCTION == "sample"
     assert module.run_diffusion.__module__ == f"{synthetic_pack_root}.dgemma.loop"
+
+
+def test_trace_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    module = importlib.import_module(f"{synthetic_pack_root}.nodes.trace")
+
+    assert module.__package__ == f"{synthetic_pack_root}.nodes"
+    assert "." in module.__package__
+    assert module.DGemmaTrace.FUNCTION == "render"
+    assert module.build_commit_heatmap.__module__ == f"{synthetic_pack_root}.dgemma.sampling"

@@ -23,6 +23,9 @@ models/
 traces/
 outputs/
 
+# flip-book tool: generated per-step frames (regenerable, not source)
+tools/flipbook/out/
+
 # Tooling
 .pytest_cache/
 .ruff_cache/

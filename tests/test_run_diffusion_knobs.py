@@ -117,7 +117,7 @@ class TestKnobThreading:
         captured: dict = {}
         _install_fakes(monkeypatch, captured, sequence=[1, 2, 3])
 
-        text, canvas_state = run_diffusion(
+        text, canvas_state, canvas_trace = run_diffusion(
             _fake_model(),
             "hello",
             seed=3,
@@ -204,7 +204,7 @@ class TestThoughtChannelIntegration:
         sequence = [THOUGHT_CHANNEL_START_ID, thought_word_id, newline_id, THOUGHT_CHANNEL_END_ID, 9, 10]
         _install_fakes(monkeypatch, captured, sequence=sequence)
 
-        text, canvas_state = run_diffusion(_fake_model(), "hi", thinking=False)
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi", thinking=False)
 
         assert text == "TEXT:9,10"
         assert canvas_state.thought is None  # empty-frame content isn't surfaced as a "real" thought
@@ -214,7 +214,7 @@ class TestThoughtChannelIntegration:
         sequence = [THOUGHT_CHANNEL_START_ID, 55, 56, THOUGHT_CHANNEL_END_ID, 9, 10]
         _install_fakes(monkeypatch, captured, sequence=sequence)
 
-        text, canvas_state = run_diffusion(_fake_model(), "hi", thinking=True)
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi", thinking=True)
 
         assert text == "TEXT:9,10"
         assert "55" not in text and "56" not in text  # never leaked onto the STRING payload
@@ -233,7 +233,7 @@ class TestThoughtChannelIntegration:
         ]
         _install_fakes(monkeypatch, captured, sequence=sequence)
 
-        text, canvas_state = run_diffusion(_fake_model(), "hi", thinking=True)
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi", thinking=True)
 
         assert text == "TEXT:9,10,11"
         assert canvas_state.thought == "TEXT:55\n\nTEXT:66"  # both spans surfaced, joined visibly
@@ -246,7 +246,7 @@ class TestThoughtChannelIntegration:
         sequence = [9, 10, THOUGHT_CHANNEL_START_ID, 11, 12]
         _install_fakes(monkeypatch, captured, sequence=sequence)
 
-        text, canvas_state = run_diffusion(_fake_model(), "hi")
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
 
         # Answer tokens after the stray delimiter survive on the payload
         # (the fake decode keeps the raw id visible; a real tokenizer's
@@ -263,8 +263,133 @@ class TestThoughtChannelIntegration:
         sequence = [THOUGHT_CHANNEL_START_ID, 7, 8]
         _install_fakes(monkeypatch, captured, sequence=sequence)
 
-        text, canvas_state = run_diffusion(_fake_model(), "hi")
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
 
         assert text == "TEXT:"  # empty answer, honestly — the whole canvas was a broken frame
         assert canvas_state.thought == "TEXT:7,8"
         assert canvas_state.stray_thought_delimiter is False
+
+
+class TestCanvasTrace:
+    """P3 step 1/2: `CanvasTrace` must never ride without the scheduler
+    identity that minted its commit readings (ADR-CDG-001 addendum) — the
+    correctness must-have named in the plan's Risks section."""
+
+    def test_carries_scheduler_identity_and_config(self, monkeypatch):
+        captured: dict = {}
+
+        class EntropyBoundScheduler:  # noqa: N801 — matching the real class's own __name__ on purpose
+            def __init__(self, **kwargs):
+                captured["scheduler_kwargs"] = kwargs
+
+        class FakePipeline:
+            def __init__(self, model, scheduler, processor):
+                self.eos_token_id = 999
+
+            def __call__(self, **kwargs):
+                callback = kwargs["callback_on_step_end"]
+                callback_kwargs = {
+                    "scheduler_output": FakeSchedulerOutput([[True, True]]),
+                    "canvas": torch.tensor([[1, 2]]),
+                }
+                callback(self, 0, 0, callback_kwargs)
+                return FakePipelineOutput(sequences=[torch.tensor([1, 2], dtype=torch.long)])
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", EntropyBoundScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", FakePipeline)
+
+        text, canvas_state, canvas_trace = run_diffusion(
+            _fake_model(), "hi", num_inference_steps=7, entropy_bound=0.3, t_min=0.2, t_max=0.6
+        )
+
+        assert canvas_trace.scheduler_name == "EntropyBoundScheduler"
+        assert canvas_trace.scheduler_config == {
+            "entropy_bound": 0.3,
+            "t_min": 0.2,
+            "t_max": 0.6,
+            "num_inference_steps": 7,
+        }
+        assert len(canvas_trace.frames) == 1
+
+    def test_frames_match_collector_output(self, monkeypatch):
+        """`CanvasTrace.frames` is `collector.frames` carried through, not a
+        copy or a reshape — no new keying logic (plan.md step 1)."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, sequence=[1, 2, 3])
+
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
+
+        assert len(canvas_trace.frames) == 1
+        assert canvas_trace.frames[0].step_idx == 0
+
+
+class TestTurnClosedHonestyRider:
+    """[SEVERABLE RIDER — issue #9] `turn_closed`/`answer_tokens` on
+    `CanvasState`. Reproduces both named specimens from issue #9's comments
+    behaviorally (the discrimination `turn_closed` exists for), not by
+    replaying the issue's literal `steps_used` figures — these are synthetic
+    single-callback fakes, so `steps_used` is always 1 here regardless."""
+
+    def test_all_thought_empty_answer_is_not_turn_closed(self, monkeypatch):
+        """Specimen (i): all-thought/empty-answer. The whole canvas is an
+        unmatched turn-start thought frame — `excise_thought_channel`
+        excises it to the end, leaving `remaining_ids == []`. No EOS to
+        find in an empty answer."""
+        captured: dict = {}
+        sequence = [THOUGHT_CHANNEL_START_ID, 7, 8]  # no end_id anywhere -> excised to end
+        _install_fakes(monkeypatch, captured, sequence=sequence)
+
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
+
+        assert text == "TEXT:"
+        assert canvas_state.answer_tokens == 0
+        assert canvas_state.turn_closed is False
+
+    def test_budget_truncated_mid_token_is_not_turn_closed_despite_converged(self, monkeypatch):
+        """Specimen (ii): budget-truncated mid-token answer. The fake
+        scheduler output always reports full acceptance
+        (`committed_fraction == 1.0`, `converged == True`), but the canvas
+        never contains the EOS id anywhere — the canvas ran out before EOS,
+        the exact gap issue #9 names `converged` as unable to see."""
+        captured: dict = {}
+        sequence = [9, 10, 11, 12]  # no 999 (the fake eos_token_id) anywhere
+        _install_fakes(monkeypatch, captured, sequence=sequence)
+
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
+
+        assert canvas_state.converged is True
+        assert canvas_state.committed_fraction == pytest.approx(1.0)
+        assert canvas_state.turn_closed is False
+        assert canvas_state.answer_tokens == len(sequence)
+
+    def test_eos_inside_budget_is_turn_closed(self, monkeypatch):
+        """Normal converged-with-EOS-inside-budget case: `turn_closed` must
+        actually discriminate, not default one way regardless of input.
+        `answer_tokens` counts pre-EOS content ONLY (review finding,
+        2026-07-05): the EOS is the stop signal, not answer content, and
+        anything after it is fill — for `[9, 10, 999, 3, 4]` the honest
+        count is 2, not 5."""
+        captured: dict = {}
+        sequence = [9, 10, 999, 3, 4]  # 999 is the fake eos_token_id
+        _install_fakes(monkeypatch, captured, sequence=sequence)
+
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
+
+        assert canvas_state.turn_closed is True
+        assert canvas_state.answer_tokens == 2
+
+    def test_trailing_eos_fill_run_excluded_from_answer_tokens(self, monkeypatch):
+        """The live-observed failure shape the eos-trim exists for (review
+        finding, 2026-07-05): a converged run pads the canvas tail with a
+        trailing EOS/renoise fill run (~30 tokens observed live). A bare
+        `len(canvas_ids)` would report content + 1 + N; the honest
+        `answer_tokens` is the pre-EOS content count alone."""
+        captured: dict = {}
+        content = [9, 10, 11]
+        sequence = content + [999] + [999] * 5  # content + eos + eos-fill padding
+        _install_fakes(monkeypatch, captured, sequence=sequence)
+
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi")
+
+        assert canvas_state.turn_closed is True
+        assert canvas_state.answer_tokens == len(content)

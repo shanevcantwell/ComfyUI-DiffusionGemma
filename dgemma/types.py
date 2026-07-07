@@ -23,9 +23,9 @@ class DGemmaModel:
     model: Any  # transformers.DiffusionGemmaForBlockDiffusion
     processor: Any  # transformers processor (AutoProcessor.from_pretrained(...))
     device: str
-    dtype: str  # human-readable compute dtype label, e.g. "float16" (NF4 compute dtype)
+    dtype: str  # human-readable compute dtype label — always "bfloat16" since issue #18
     repo_id: str
-    quant: str  # "nf4" | "int8" | "none" — how the checkpoint was loaded
+    quant: str  # "none" (issue #18 — bnb nf4/int8 removed, misled on this architecture)
 
 
 @dataclass
@@ -87,6 +87,34 @@ class DiffusionFrame:
                 "committed_fraction_per_example."
             )
         return self.committed_fraction_per_example[0]
+
+
+@dataclass
+class CanvasTrace:
+    """The complete per-step record of one `run_diffusion` call — the
+    `CANVAS_TRACE` socket payload (ADR-CDG-001), consumed post-hoc by
+    `DGemmaTrace` (plan.md Phase 3 (b)).
+
+    ADR-CDG-001's addendum on scheduler-relative commit semantics is
+    non-negotiable here: a commit mask (or, as here, a per-step
+    `committed_fraction` reading) means something different depending on
+    which scheduler minted it — a ratchet under `BlockRefinementScheduler`,
+    a stateless per-step reading under `EntropyBoundScheduler`. A
+    `CanvasTrace` that carried `frames` alone, without saying which
+    scheduler produced them and with what config, would be a lying payload
+    the same way a disguised `SIGMAS` tensor is. `scheduler_name` +
+    `scheduler_config` are therefore not optional metadata — they are the
+    mint identity that gives the frames' commit readings their meaning.
+
+    Frames are already self-keyed (`DiffusionFrame`'s own
+    `(canvas_idx, step_idx, t, temperature)` identity, see that class's
+    docstring) — this type carries the collection as-is, no new keying
+    logic.
+    """
+
+    frames: list[DiffusionFrame]
+    scheduler_name: str
+    scheduler_config: dict
 
 
 @dataclass
@@ -152,3 +180,33 @@ class CanvasState:
     delimiter itself vanishes in `skip_special_tokens=True` decode); this
     flag is the validity-side signal that an anomalous frame remnant exists
     rather than letting the condition vanish."""
+
+    turn_closed: bool = False
+    """Issue #9's honesty-readout half: `True` iff `eos_token_id` was found
+    committed somewhere in the (thought-excised) answer ids — the turn ran
+    to a real stop, not just "the canvas is full of plausible-looking
+    tokens." `False` covers BOTH of issue #9's named specimens: an
+    all-thought/empty-answer turn (nothing to find EOS in) and a
+    budget-truncated answer that hit `gen_length` mid-token with
+    `converged=True, committed_fraction=1.0` — the exact gap `converged`
+    alone cannot see (`CanvasState.converged`'s docstring already says it
+    doesn't confirm EOS). `turn_closed` is deliberately independent of
+    `converged`: a run can converge (every position locked in this step)
+    while still not being turn_closed (it locked in on non-EOS filler
+    because the canvas ran out first)."""
+
+    answer_tokens: int = 0
+    """Issue #9's companion honesty field: the count of (thought-excised)
+    answer ids **before the first EOS** — the EOS itself and any trailing
+    EOS/renoise fill run (a converged run pads the canvas tail with one;
+    ~30 tokens observed live) are excluded, mirroring `_decode_ids`'s own
+    trim, because a bare `len(canvas_ids)` would inflate the count by that
+    padding and defeat the field's honesty purpose (review finding,
+    2026-07-05). When no EOS is present, the full thought-excised length
+    counts (every id is content the budget-truncated canvas actually
+    holds); `0` when `canvas_ids` is unavailable (e.g. a unit test
+    constructing `CanvasState` directly without a real canvas). Read
+    alongside `turn_closed`: a small `answer_tokens` with
+    `turn_closed=False` is the all-thought/empty-answer specimen; a large
+    `answer_tokens` with `turn_closed=False` is the budget-truncated
+    specimen — same field pair, different failure shape."""

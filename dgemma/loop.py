@@ -11,12 +11,12 @@ without a reshape.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import torch
 from diffusers import DiffusionGemmaPipeline, EntropyBoundScheduler
 
-from .types import CanvasState, DGemmaModel, DiffusionFrame
+from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame
 
 # Grounded defaults (CLAUDE.md / plan.md — first local run, Q4_K_M).
 DEFAULT_NUM_INFERENCE_STEPS = 48
@@ -115,6 +115,22 @@ class _FrameCollector:
     retains every frame (the seam P3's `CanvasTrace` grows into). `steps_used`
     counts every step regardless of retention policy.
 
+    `on_frame`, when given, is invoked once per captured step with the
+    freshly built `DiffusionFrame` — regardless of `keep_frames` (a caller
+    watching every step live still wants a callback even under `"last"`
+    retention, which only governs what's kept afterward). Pure w.r.t.
+    ComfyUI (ADR-CDG-003): this collector never imports or touches
+    `PromptServer` itself — that's `nodes/sampler.py`'s closure, built and
+    passed in from the node layer. `on_frame` runs after the retention
+    policy is applied, so a callback exception never loses the frame itself.
+
+    Engine contract on `on_frame` exceptions (deliberate, review finding
+    2026-07-05): they PROPAGATE. The engine does not swallow a caller's
+    callback error — a user's analysis callback silently eaten here would
+    be its own dishonesty. A callback whose failure must not kill the run
+    (e.g. a display-only push) guards itself at its own layer; that is what
+    `nodes/sampler.py`'s live-push closure does.
+
     `canvas_idx` tracking: the pipeline's `step_idx` resets to 0 for each
     canvas/block (inner denoising loop nested in the outer canvas loop,
     `pipeline_diffusion_gemma.py:318,356`), and the callback contract carries
@@ -129,6 +145,7 @@ class _FrameCollector:
     t_min: float
     t_max: float
     keep_frames: Literal["last", "all"] = "last"
+    on_frame: Callable[[DiffusionFrame], None] | None = None
     frames: list[DiffusionFrame] = field(default_factory=list)
     steps_used: int = 0
     _canvas_idx: int = -1
@@ -180,6 +197,8 @@ class _FrameCollector:
             self.frames[:] = [frame]
         else:
             self.frames.append(frame)
+        if self.on_frame is not None:
+            self.on_frame(frame)
         return {}
 
 
@@ -191,6 +210,7 @@ def derive_canvas_state(
     steps_used: int,
     thought: str | None = None,
     stray_thought_delimiter: bool = False,
+    eos_token_id: int | None = None,
 ) -> CanvasState:
     """Derive `CanvasState`'s validity fields from the captured frames.
 
@@ -199,10 +219,38 @@ def derive_canvas_state(
     (issue #8) are passed through unmodified — the excised thought-channel
     content (or `None`) and the stray-delimiter anomaly flag from
     `excise_thought_channel`.
+
+    `turn_closed`/`answer_tokens` (issue #9, severable rider): reuses the
+    excision/decode machinery already in `run_diffusion` rather than
+    capturing anything new. `turn_closed` is `True` iff `eos_token_id` is
+    given and appears somewhere in `canvas_ids`: EOS was actually committed
+    inside the generated region, as opposed to the canvas simply running out
+    (`gen_length` reached with no EOS ever emitted) — the exact honesty gap
+    issue #9 named, independent of `converged` (a run can converge on
+    non-EOS filler once the canvas is full).
+
+    `answer_tokens` counts the (thought-excised) ids **before the first
+    EOS**, mirroring `_decode_ids`'s own trim: `canvas_ids` is not
+    eos-trimmed, and a converged run pads the rest of the canvas with a
+    trailing EOS/renoise fill run (observed live, ~30 tokens), so a bare
+    `len(canvas_ids)` would inflate the count by that padding — defeating
+    the honesty purpose the field exists for (review finding, 2026-07-05).
+    The EOS token itself is deliberately NOT counted: it is the stop signal,
+    not answer content. When no EOS is present the full (thought-excised)
+    length is the honest count — every id is content the budget-truncated
+    canvas actually holds. `0` when `canvas_ids` is `None` (the existing
+    unit-test call shape, which never asserts on this field).
     """
     if not frames:
         raise RuntimeError("No frames captured — the denoising callback never fired.")
     last = frames[-1]
+    if canvas_ids is not None:
+        ids = [int(x) for x in canvas_ids]
+        turn_closed = eos_token_id is not None and eos_token_id in ids
+        answer_tokens = ids.index(eos_token_id) if turn_closed else len(ids)
+    else:
+        turn_closed = False
+        answer_tokens = 0
     return CanvasState(
         text=text,
         canvas_ids=canvas_ids,
@@ -211,6 +259,8 @@ def derive_canvas_state(
         steps_used=steps_used,
         thought=thought,
         stray_thought_delimiter=stray_thought_delimiter,
+        turn_closed=bool(turn_closed),
+        answer_tokens=answer_tokens,
     )
 
 
@@ -379,6 +429,39 @@ def _extract_thought_text(decoded_channel: str) -> str | None:
     return stripped or None
 
 
+def decode_frames(processor: Any, frames: list[DiffusionFrame]) -> list[str]:
+    """Decode each captured `DiffusionFrame.canvas` to a string, in frame
+    order — the "flipbook" series (noise -> coherent text), the raw per-step
+    view `tools/flipbook/flipbook.py` renders from the GGUF CLI, exposed here
+    for the transformers backend (plan.md P3, node-level `frames` output).
+
+    Deliberately RAW, unlike `_decode_ids`: `skip_special_tokens=True`, but
+    NO eos-trim and NO thought-channel excision. Early frames are mostly
+    noise and transient thought-channel delimiters — that IS the intended
+    view; trimming or excising here would hide the evolution the flipbook
+    exists to show. (Contrast `_decode_ids`, which trims at EOS and is fed
+    post-excision ids — that's the *answer* text, a different concern.)
+
+    `canvas` may be a 1-D `[canvas_len]` tensor or a 2-D `[batch, canvas_len]`
+    tensor (`run_diffusion` is single-example/batch-1 today) — example 0 is
+    decoded for a 2-D tensor. Ids are moved off-device and converted to a
+    plain `list[int]` (`.tolist()`) before `tokenizer.decode`, so this works
+    identically for a CPU/GPU tensor or a plain list/tuple already in test
+    fixtures.
+
+    `[]` when `frames` is empty.
+    """
+    tokenizer = getattr(processor, "tokenizer", processor)
+    texts: list[str] = []
+    for frame in frames:
+        canvas = frame.canvas
+        if hasattr(canvas, "dim") and canvas.dim() == 2:
+            canvas = canvas[0]
+        ids = canvas.tolist() if hasattr(canvas, "tolist") else list(canvas)
+        texts.append(tokenizer.decode(ids, skip_special_tokens=True))
+    return texts
+
+
 def run_diffusion(
     dgemma_model: DGemmaModel,
     prompt: str,
@@ -391,8 +474,9 @@ def run_diffusion(
     t_max: float = DEFAULT_T_MAX,
     confidence: float = DEFAULT_CONFIDENCE,
     thinking: bool = False,
-    keep_frames: Literal["last", "all"] = "last",
-) -> tuple[str, CanvasState]:
+    keep_frames: Literal["last", "all"] = "all",
+    on_frame: Callable[[DiffusionFrame], None] | None = None,
+) -> tuple[str, CanvasState, CanvasTrace]:
     """Drive one prompt through the block-diffusion denoising loop.
 
     Constructs `EntropyBoundScheduler` directly with the entropy/temperature
@@ -436,7 +520,24 @@ def run_diffusion(
     excised from the canvas ids via `excise_thought_channel` before `text`
     is derived, so it never leaks onto the `STRING` payload in either mode.
 
-    Returns `(text, CanvasState)` — never a bare string (ADR-CDG-001 Addendum).
+    `keep_frames` defaults to `"all"` (P3): per-step state here is small
+    (ADR-CDG-005's own domain framing — a `gen_length`-length int64 canvas
+    plus a per-example float per step), so retaining every step for the
+    returned `CanvasTrace` isn't worth gating behind a toggle. `on_frame`,
+    when given, is invoked once per captured step regardless of
+    `keep_frames` — the seam that lets `nodes/sampler.py` push a live view
+    without this module ever importing ComfyUI (ADR-CDG-003): the callback
+    body that touches `PromptServer` lives in the node layer, not here.
+    `on_frame` exceptions propagate (engine contract — see
+    `_FrameCollector`'s docstring): a callback that must never kill the run
+    guards itself, as the node layer's display-only closure does.
+
+    Returns `(text, CanvasState, CanvasTrace)` — never a bare string
+    (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
+    the scheduler's class name and the entropy/temperature config passed to
+    it, per ADR-CDG-001's addendum on scheduler-relative commit semantics
+    (a trace without the scheduler identity that minted its commit readings
+    is a lying payload).
 
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
@@ -455,7 +556,11 @@ def run_diffusion(
         generator = torch.Generator(device=dgemma_model.device).manual_seed(seed)
 
     collector = _FrameCollector(
-        num_inference_steps=num_inference_steps, t_min=t_min, t_max=t_max, keep_frames=keep_frames
+        num_inference_steps=num_inference_steps,
+        t_min=t_min,
+        t_max=t_max,
+        keep_frames=keep_frames,
+        on_frame=on_frame,
     )
 
     if thinking:
@@ -503,5 +608,16 @@ def run_diffusion(
         steps_used=collector.steps_used,
         thought=thought,
         stray_thought_delimiter=excision.stray_start_delimiter,
+        eos_token_id=pipeline.eos_token_id,
     )
-    return text, canvas_state
+    canvas_trace = CanvasTrace(
+        frames=collector.frames,
+        scheduler_name=type(scheduler).__name__,
+        scheduler_config={
+            "entropy_bound": entropy_bound,
+            "t_min": t_min,
+            "t_max": t_max,
+            "num_inference_steps": num_inference_steps,
+        },
+    )
+    return text, canvas_state, canvas_trace

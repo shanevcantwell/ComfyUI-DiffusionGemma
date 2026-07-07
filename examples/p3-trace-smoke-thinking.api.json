@@ -1,0 +1,93 @@
+{
+  "72": {
+    "inputs": {
+      "repo_id": "google/diffusiongemma-26B-A4B-it",
+      "quant": "none"
+    },
+    "class_type": "DGemmaLoader",
+    "_meta": {
+      "title": "DiffusionGemma Loader"
+    }
+  },
+  "73": {
+    "inputs": {
+      "prompt": "Why do birds suddenly appear?",
+      "seed": 7,
+      "num_inference_steps": 48,
+      "t_min": 0.4,
+      "t_max": 0.8,
+      "entropy_bound": 0.1,
+      "confidence": 0.005,
+      "gen_length": 256,
+      "thinking": true,
+      "model": [
+        "72",
+        0
+      ]
+    },
+    "class_type": "DGemmaSampler",
+    "_meta": {
+      "title": "DiffusionGemma Sampler"
+    }
+  },
+  "74": {
+    "inputs": {
+      "source": [
+        "73",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview Text"
+    }
+  },
+  "75": {
+    "inputs": {
+      "source": [
+        "73",
+        1
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview CanvasState"
+    }
+  },
+  "76": {
+    "inputs": {
+      "canvas_trace": [
+        "73",
+        2
+      ]
+    },
+    "class_type": "DGemmaTrace",
+    "_meta": {
+      "title": "DiffusionGemma Trace"
+    }
+  },
+  "77": {
+    "inputs": {
+      "images": [
+        "76",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Heatmap"
+    }
+  },
+  "78": {
+    "inputs": {
+      "source": [
+        "76",
+        1
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview Trace Summary"
+    }
+  }
+}

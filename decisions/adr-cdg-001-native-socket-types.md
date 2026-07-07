@@ -1,6 +1,6 @@
 # ADR-CDG-001 — Define native socket types instead of reusing ComfyUI's SIGMAS / LATENT
 
-**Status**: accepted (implementation pending)
+**Status**: accepted
 **Date**: 2026-06-30
 **Related**: ADR-CDG-002 (access path), ADR-CDG-004 (drive-seam amendment;
 confirms the "no MASK" claim below, 2026-07-05); supports the topology choice

@@ -1,6 +1,6 @@
 # ADR-CDG-003 — Split thin node adapters from a ComfyUI-agnostic engine
 
-**Status**: accepted (implementation pending)
+**Status**: accepted
 **Date**: 2026-06-30
 **Related**: ADR-CDG-001 (socket types are the engine's public face), ADR-CDG-002 (access path)
 
@@ -54,7 +54,16 @@ dataclass, passed through untouched.
 
 ### Negative Consequences
 - Indirection the idiomatic inline-everything pattern avoids.
-- Two import surfaces to keep coherent.
+- Two import surfaces to keep coherent. **Observed, not just anticipated
+  (2026-07-05):** ComfyUI's loader (`/srv/dev/ComfyUI/nodes.py:2226-2246`) puts
+  `custom_nodes/` — never the pack root — on `sys.path` and loads the pack
+  under a directory-derived module name, so `nodes/`'s bare `from dgemma...`
+  imports failed in production (`ModuleNotFoundError`) despite passing every
+  unit test (pytest puts the repo root on `sys.path`). Fixed via an explicit
+  package-depth gate in each `nodes/` module; enforcement surface is
+  `tests/test_comfyui_loader_context.py`, which replays ComfyUI's exact load
+  mechanics in a fresh interpreter. Full account: `../loose-ends.md`'s
+  2026-07-05 "ComfyUI loader context broke bare `dgemma` imports" entry.
 
 ## Alternatives Considered
 

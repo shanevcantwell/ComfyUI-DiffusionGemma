@@ -1,0 +1,20 @@
+# requirements.txt — DERIVED from pyproject.toml [project] dependencies.
+# Do not hand-edit this file directly; edit pyproject.toml and re-emit/verify
+# instead (enforced by tests/test_requirements_sync.py, which fails the build
+# the moment the two drift apart).
+#
+# Why this file exists at all (issue #25): the ComfyUI registry archive that
+# ComfyUI-Manager downloads has no build step — Manager installs dependencies
+# by running `pip install -r requirements.txt` against this file, not by
+# reading pyproject.toml's [project] dependencies. Without this file, the
+# pack ships with zero dependencies installed on a fresh Manager install.
+#
+# torch, torchvision, numpy, and Pillow are intentionally OMITTED even though
+# they are real [project] dependencies: ComfyUI core already ships all four,
+# and a Manager-driven pip install of them here would touch pre-built CUDA
+# wheels (torch/torchvision) and the numpy ABI that the rest of a ComfyUI
+# install depends on — a wheel/ABI hazard, not a missing dependency. See
+# tests/test_requirements_sync.py for the enforced core-filter set.
+transformers==5.13.0
+diffusers>=0.39.0
+accelerate

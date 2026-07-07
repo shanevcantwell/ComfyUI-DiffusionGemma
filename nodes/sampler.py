@@ -12,8 +12,61 @@ values, not a distinct parameter set) — this keeps `sample()` a pure
 unpack-and-forward with no translation logic of its own (ADR-CDG-003).
 Validation (`t_min < t_max`) lives on the engine side, in
 `run_diffusion` itself — not scattered into this adapter.
+
+P3 adds a third output, `DGEMMA_CANVAS_TRACE` (plan.md Phase 3 (b)), a live
+per-step push (plan.md Phase 3 (a)), and a fourth output, `frames` — a
+`STRING` list (`OUTPUT_IS_LIST`), one decoded string per captured step, in
+order (the in-graph "flipbook": noise -> coherent text). Decoding is
+`dgemma.loop.decode_frames` over `canvas_trace.frames`, called here rather
+than inside `run_diffusion` (ADR-CDG-003: the engine's 3-tuple return stays
+unchanged; this is a node-boundary derivation from a value `run_diffusion`
+already returns). `sample()` builds a closure over
+`PromptServer.instance.send_sync` and hands it to `run_diffusion` as
+`on_frame` — the ADR-CDG-003-respecting way to let a live view exist without
+`dgemma/loop.py` ever importing ComfyUI. `PromptServer` is imported lazily,
+inside `sample()`, guarded so its absence (the normal pytest/headless
+condition — this pack has no `comfy`/`server` dependency, see
+`tests/test_seam.py`) degrades to a no-op live push rather than crashing the
+sampler; everything else (`text`, `canvas_state`, `canvas_trace`) proceeds
+unchanged either way.
+
+A fifth output, `frames_image` (issue #21, reworked from a standalone
+`DGemmaFlipbook` node into a second sampler output): the same decoded
+`frames` strings rendered as a single stacked
+`(N, H, W, 3)` float32 `[0, 1]` `IMAGE` batch via
+`nodes.frames_image.render_frames_to_image_batch` — the "watch it reason"
+series made watchable/shareable (e.g. `SaveAnimatedWEBP`/VHS downstream), not
+just inspectable as text. Reuses the `frames` list `decode_frames` already
+produced (one decode, two renderings) rather than re-decoding
+`canvas_trace.frames` a second time. Render params (width/font size/caption)
+are fixed sensible defaults here, not new widgets — the sampler's knob
+surface (P2) stays unchanged; this is a display rendering, not a sampling
+parameter. Unlike `frames`, `frames_image` is `OUTPUT_IS_LIST=False`: it is
+ONE stacked batch tensor, not a list of N single-frame tensors — the shape
+`PreviewImage`'s scrubber, `SaveAnimatedWEBP`, and VHS nodes all expect from
+an `IMAGE` output (a list here would fan out per-frame and break every one of
+those consumers).
+
+**Why a sampler output, not a standalone node (issue #21 rework):** the
+earlier `DGemmaFlipbook` node took `CANVAS_TRACE` alone and needed a
+tokenizer to decode it, but `CANVAS_TRACE` never carried one — forcing
+`dgemma.types.CanvasTrace` to grow an optional `processor` field just to
+carry a runtime object across a data-plane socket (a payload-purity smell,
+ADR-CDG-001). This node already holds `model.processor` and already decodes
+`frames` itself, so rendering the image batch here instead keeps
+`CANVAS_TRACE` pure.
+
+**Named trap (plan.md Risks): this MUST NOT touch `comfy.utils.ProgressBar`'s
+`preview=` slot.** That path is structurally image-typed downstream
+(`server.py:1293-1301`, `ProgressBar.update_absolute` -> `send_image`, which
+calls `image.save(...)` on whatever it's handed) and throws on text. Text
+goes out its own custom event via `send_sync`, never through `preview=`.
+This is a review-gate risk, not a test-enforced one — there is no clean unit
+test for "this code path never calls the wrong API" (plan.md Risks).
 """
 from __future__ import annotations
+
+import logging
 
 # Dual-context import, explicit package-depth gate — see nodes/loader.py for
 # the full rationale (ComfyUI loader context vs. pytest/standalone; observed
@@ -26,8 +79,10 @@ if __package__ and "." in __package__:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        decode_frames,
         run_diffusion,
     )
+    from .frames_image import render_frames_to_image_batch
 else:
     from dgemma.loop import (
         DEFAULT_CONFIDENCE,
@@ -36,8 +91,74 @@ else:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        decode_frames,
         run_diffusion,
     )
+    from nodes.frames_image import render_frames_to_image_batch
+
+# Event name for the live per-step push (plan.md Phase 3 (a)). Namespaced
+# under the pack's own prefix — `send_sync`'s receiving side has no
+# event-name whitelist (`loose-ends.md`), so any string works, but a
+# collision with another pack's event name would silently cross-wire two
+# unrelated `web/` extensions' `addEventListener` handlers.
+DGEMMA_STEP_EVENT = "dgemma.sampler.step"
+
+# `frames_image` render defaults (issue #21 rework) — fixed, not widgets; see
+# the `frames_image` output's docstring above for why this is a display
+# rendering rather than a sampling parameter.
+FRAMES_IMAGE_WIDTH = 512
+FRAMES_IMAGE_FONT_SIZE = 20
+FRAMES_IMAGE_CAPTION_STEP_INDEX = True
+
+
+def _build_on_frame(unique_id):
+    """Build the live-push closure handed to `run_diffusion` as `on_frame`.
+
+    Lives here, not in `dgemma/loop.py` (ADR-CDG-003): this is the one place
+    in the pack allowed to import ComfyUI server infrastructure. `PromptServer`
+    is imported lazily inside the closure (not at module top) so this module
+    stays importable — and the sampler still runs — with no ComfyUI process
+    alive (the normal pytest condition); a real live session is the only
+    context where the import succeeds and the push actually fires.
+
+    Display must never kill generation (review finding, 2026-07-05): the
+    whole push — import, instance lookup, `send_sync` — is guarded, and any
+    failure (no server, serialization error, dropped websocket) is logged
+    and swallowed rather than propagated. The guard lives HERE, not in
+    `dgemma/loop.py`'s hook site, deliberately: the engine's `on_frame`
+    contract propagates callback exceptions (see `_FrameCollector`'s
+    docstring — an engine that silently ate a user's analysis-callback
+    error would be its own dishonesty), so the display-only closure guards
+    itself at the layer that owns the display concern. A `send_sync` hiccup
+    must not abort a multi-step 26B generation run.
+    """
+
+    def on_frame(frame) -> None:
+        try:
+            from server import PromptServer
+
+            instance = PromptServer.instance
+            if instance is None:
+                return
+            instance.send_sync(
+                DGEMMA_STEP_EVENT,
+                {
+                    "node": unique_id,
+                    "canvas_idx": frame.canvas_idx,
+                    "step_idx": frame.step_idx,
+                    "t": frame.t,
+                    "temperature": frame.temperature,
+                    "committed_fraction": frame.committed_fraction,
+                },
+            )
+        except ImportError:
+            return  # No live ComfyUI process (e.g. pytest) — skip the push, not an error.
+        except Exception as exc:  # noqa: BLE001 — deliberate breadth: display-only, see docstring.
+            logging.warning(
+                "DGemmaSampler live push failed (display only, generation continues): %s", exc
+            )
+
+    return on_frame
 
 
 class DGemmaSampler:
@@ -67,11 +188,23 @@ class DGemmaSampler:
                 ),
                 "gen_length": ("INT", {"default": DEFAULT_GEN_LENGTH, "min": 1, "max": 8192}),
                 "thinking": ("BOOLEAN", {"default": False}),
-            }
+            },
+            "hidden": {
+                # Standard ComfyUI hidden-input idiom (grepped against the
+                # live install: tests/execution/testing_nodes/.../
+                # specific_tests.py) — the node's own graph id, so the
+                # per-step live push (P3 (a)) can be routed to the right
+                # node's widget rather than broadcast anonymously.
+                "unique_id": "UNIQUE_ID",
+            },
         }
 
-    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE")
-    RETURN_NAMES = ("text", "canvas_state")
+    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE", "STRING", "IMAGE")
+    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "images")
+    # `frames_image` is a single stacked (N, H, W, 3) batch tensor, NOT a
+    # list — False here, unlike `frames`' True (see this module's docstring:
+    # a list would fan out per-frame and break PreviewImage/SaveAnimatedWEBP/VHS).
+    OUTPUT_IS_LIST = (False, False, False, True, False)
     FUNCTION = "sample"
     CATEGORY = "DiffusionGemma"
 
@@ -87,8 +220,9 @@ class DGemmaSampler:
         confidence: float,
         gen_length: int,
         thinking: bool,
+        unique_id=None,
     ):
-        text, canvas_state = run_diffusion(
+        text, canvas_state, canvas_trace = run_diffusion(
             model,
             prompt,
             seed=seed,
@@ -99,5 +233,13 @@ class DGemmaSampler:
             t_max=t_max,
             confidence=confidence,
             thinking=thinking,
+            on_frame=_build_on_frame(unique_id),
         )
-        return (text, canvas_state)
+        frames = decode_frames(model.processor, canvas_trace.frames)
+        frames_image = render_frames_to_image_batch(
+            frames,
+            width=FRAMES_IMAGE_WIDTH,
+            font_size=FRAMES_IMAGE_FONT_SIZE,
+            caption_step_index=FRAMES_IMAGE_CAPTION_STEP_INDEX,
+        )
+        return (text, canvas_state, canvas_trace, frames, frames_image)

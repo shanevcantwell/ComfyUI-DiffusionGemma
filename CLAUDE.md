@@ -1,10 +1,11 @@
 # ComfyUI-DiffusionGemma — agent instructions
 
 A ComfyUI node pack exposing **DiffusionGemma** (uniform-state discrete diffusion
-text generation) as an instrumentable node graph. This repo is currently
-**design-only** — decision records + build plan, no working nodes yet. Start at
-[`README.md`](README.md) (what + status), [`plan.md`](plan.md) (what's next), and
-[`decisions/`](decisions/) (why).
+text generation) as an instrumentable node graph. **Working as of 2026-07-05**:
+phases P0–P3 closed (loader, sampler with full knob surface + thinking toggle,
+live per-step view, `DGemmaTrace` analysis) — each phase's evidence is recorded
+in `plan.md`. Start at [`README.md`](README.md) (what + status),
+[`plan.md`](plan.md) (what's next), and [`decisions/`](decisions/) (why).
 
 ## Canonical path
 
@@ -47,9 +48,14 @@ introduces names the failure it prevents, even before that failure has occurred.
 
 ## ADR convention
 
-Decision records live in [`decisions/`](decisions/), numbered `NNNN-slug.md`, with
-[`decisions/README.md`](decisions/README.md) as the index table. Format SSoT is
-the `writing-adrs` skill (`../harness-tools/internal-skills/writing-adrs`). Record
+Decision records live in [`decisions/`](decisions/), numbered `NNNN-slug.md`. No
+separate index file — `decisions/README.md` was tried and dropped (2026-07-05):
+a hand-maintained index duplicates each ADR's own Status/Title/Date header, and
+duplication is drift waiting to happen (it already had, twice, before removal).
+Check a directory listing or an ADR's own header for its status; the main
+[`README.md`](README.md)'s "Where the design lives" table links the load-bearing
+ones. Format SSoT is the `writing-adrs` skill
+(`../harness-tools/internal-skills/writing-adrs`). Record
 a decision when it's hard to reverse, surprising without context, and the result
 of a real trade-off — otherwise it's a [`loose-ends.md`](loose-ends.md) entry.
 
