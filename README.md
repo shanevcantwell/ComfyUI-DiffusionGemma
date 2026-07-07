@@ -113,6 +113,7 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 
 | Doc | What it holds |
 |-----|---------------|
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Contributor-facing map — how the pieces fit and why. |
 | **[plan.md](plan.md)** | The 6-phase build roadmap with per-phase evidence. |
 | **[decisions/](decisions/)** | ADRs — *why* the load-bearing choices were made. |
 | **[ADR-CDG-001](decisions/adr-cdg-001-native-socket-types.md)** | Native socket types instead of reusing `SIGMAS`/`LATENT`. |
