@@ -41,10 +41,12 @@ every socket **payload** for entropy-native types. See
 ## What works today
 
 - **`DGemmaLoader`** — loads `google/diffusiongemma-26B-A4B-it` via transformers,
-  drives via the Diffusers pipeline (ADR-CDG-004). `quant` default is `none`
-  (bf16 with CPU spill — fits a 48 GB card); `nf4` is offered but OOMs
-  structurally on this model's fused MoE experts (issue #4 tracks the
-  quantized-load path).
+  drives via the Diffusers pipeline (ADR-CDG-004). `quant` offers `none` only
+  (bf16 with CPU spill — fits a 48 GB card). bitsandbytes `nf4`/`int8` were
+  removed (issue #18): they can't touch this model's fused 3D MoE experts —
+  bnb only swaps `nn.Linear`, silently skipping ~22.84 B of 26 B params, so the
+  "quantized" load is still ~46 GB and mislabeled as 4-bit on *any* card. A real
+  quantized path for smaller cards is tracked in issue #4.
 - **`DGemmaSampler`** — all knobs as widgets, defaults from grounded live runs:
   `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`,
   `confidence=0.005`, `gen_length=256`, `seed`, and a **`thinking` toggle**
@@ -82,10 +84,12 @@ on first load. A 48 GB-class GPU runs the default `quant=none` path with CPU
 spill (~2.3 s/step observed); smaller cards need a working quantized path,
 which remains unresolved (#4).
 
-**Example graphs** (API format, all operator-verified live —
-[examples/](examples/)): `ping-smoke` (P1 minimal), `p2-knobs-smoke` (all
-widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking`
-variant).
+**Example graphs** ([examples/](examples/)): start with
+**`p3-trace-annotated.ui.json`** — the annotated canvas graph that *teaches* the
+Loader → Sampler → Trace flow; open it in the ComfyUI canvas and read the embedded
+Note nodes. The runnable smoke graphs (API format, operator-verified live) build
+up the same shape in steps: `ping-smoke` (P1 minimal), `p2-knobs-smoke` (all
+widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant).
 
 ## Known limitations (tracked, not hidden)
 
