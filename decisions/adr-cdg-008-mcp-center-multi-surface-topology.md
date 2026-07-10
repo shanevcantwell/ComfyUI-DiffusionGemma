@@ -343,4 +343,4 @@ drive contract; does not replace either).
   against.
 - GROUND_PHYSICS invariants: `ONE-DOOR`, `STATELESS-CORE`, `IDENTITY⊥ENVELOPE`,
   `EMIT-CANONICAL / PARSE-AT-THE-DOOR`
-  (`../harness-tools/docs/ground-physics/GROUND_PHYSICS.md`).
+  (`../operating-doctrine/ground-physics/GROUND_PHYSICS.md`).
