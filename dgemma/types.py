@@ -62,6 +62,12 @@ class DiffusionFrame:
     temperature. Both ride the frame so a reader never has to reconstruct one
     from the other against the scheduler config.
 
+    `num_inference_steps` in that formula is the scheduler's EFFECTIVE value
+    (`scheduler.num_inference_steps` after `set_timesteps`), not necessarily
+    the value `run_diffusion` was called with — see `_FrameCollector`'s
+    docstring (`dgemma/loop.py`, issue #20) for the corrector-scheduler case
+    where the two diverge.
+
     Commit info is **per-example**: `committed_fraction_per_example[i]` is
     the fraction of example i's canvas positions accepted this step (mean of
     `scheduler_output.accepted_index[i]` over the block dim only — never the
@@ -141,6 +147,21 @@ class CanvasState:
     loop and is not surfaced to `callback_on_step_end`. Do not read more into
     `converged` than the entropy-bound reading it actually is.
 
+    **`converged=False` is NOT "this run failed" (issue #22 honesty
+    finding)**: the pipeline's own `confidence`/`eos_early_stop` adaptive
+    stopping (see `run_diffusion`'s docstring) can halt the loop once the
+    answer is confidently decided while some low-stakes canvas position
+    (commonly padding/trailing filler) is still short of the entropy bound
+    — observed live at `committed_fraction=0.9961` (255/256) on a clean,
+    correct, EOS-terminated run. `converged` reads `False` on exactly that
+    screenshot. If the question being asked is "did the run finish
+    honestly" rather than "did the entropy schedule bottom out on every
+    single position," read `turn_closed` (EOS actually committed) and
+    `answer_tokens` (how much answer that EOS closed off) instead — or the
+    `finished_honestly` property below, which states that combination
+    directly. `converged` keeps its narrow, literal meaning; it is not
+    being redefined here.
+
     Scope: single-example. P1's `run_diffusion` drives one prompt (batch 1);
     deriving a `CanvasState` from a batched frame raises via
     `DiffusionFrame.committed_fraction` rather than blending examples.
@@ -210,3 +231,22 @@ class CanvasState:
     `turn_closed=False` is the all-thought/empty-answer specimen; a large
     `answer_tokens` with `turn_closed=False` is the budget-truncated
     specimen — same field pair, different failure shape."""
+
+    @property
+    def finished_honestly(self) -> bool:
+        """The single reassurance field for "did this run actually finish
+        well" (issue #22 honesty finding): `turn_closed` alone, restated
+        under the name people reach for `converged` expecting to find it.
+
+        `converged` intentionally does NOT answer this question (see its
+        own docstring) — it can read `False` on a clean, correct,
+        adaptive-stopped run (observed live: 255/256 committed, EOS emitted,
+        answer complete) because the pipeline's `confidence`/
+        `eos_early_stop` early-stopping can halt before every last canvas
+        position individually clears the entropy bound. `turn_closed`,
+        which checks for a real committed EOS in the answer ids, is
+        unaffected by that gap — that IS the "finished honestly" signal.
+        This property adds no new information (`turn_closed` already carries
+        it); it exists so the question "did it finish?" has an honestly-named
+        home instead of pulling readers toward `converged` by default."""
+        return self.turn_closed

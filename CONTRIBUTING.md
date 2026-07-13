@@ -43,6 +43,14 @@ PRs are welcome. A few things keep the pack coherent — the full picture is in
   engine is testable without a running ComfyUI.
 - **Keep the canvas light.** On-graph notes are glances, not documentation —
   depth belongs in the docs.
+- **No knob-tuning guides.** README, node docs, and sample-workflow
+  annotations state what a knob *is* (referencing what Google's model card
+  says it does) and what its grounded default is — not a recommended-position
+  recipe or a tuning manual. Status/footprint honesty (e.g. "this needs a
+  ≥48GB card today") belongs in the docs; "here's the setting that works
+  best for X" doesn't. The instrument exists so people can find that out by
+  watching the commit-front themselves (issue #22 docs-posture decision,
+  2026-07-13).
 
 Don't sweat perfection: open a draft, start a discussion, and we'll shape it
 together.

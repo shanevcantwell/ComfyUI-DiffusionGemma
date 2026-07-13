@@ -65,7 +65,12 @@ def _format_summary(trace, curve: list[float], corroboration) -> str:
     caption fix only — the underlying value and its docstring
     (dgemma/types.py `DiffusionFrame.committed_fraction`) were already
     correct; this propagates that existing meaning to the one operator-facing
-    text surface that didn't say it."""
+    text surface that didn't say it.
+
+    Tri-state verdict (issue #22): the vacuous case (zero observed
+    transitions) prints its own line, distinct from genuine "evidence
+    against a fixed sentinel" — printing the same "supported" wording on
+    zero evidence is exactly the overclaim ADR-CDG-001 forbids."""
     lines = [
         f"scheduler={trace.scheduler_name} config={trace.scheduler_config}",
         f"steps={len(curve)}",
@@ -73,8 +78,13 @@ def _format_summary(trace, curve: list[float], corroboration) -> str:
         "canvas/block boundary; this is block advancement, not re-melt): "
         + ", ".join(f"{value:.4f}" for value in curve),
     ]
-    if corroboration.no_fixed_sentinel:
+    if corroboration.verdict == "evidence_against_sentinel":
         lines.append("mask-token corroboration: no fixed sentinel (uniform-state renoise supported)")
+    elif corroboration.verdict == "vacuous":
+        lines.append(
+            "mask-token corroboration: vacuous (no mid-renoise transitions observed — "
+            "neither supports nor contradicts uniform-state renoise)"
+        )
     else:
         lines.append(
             "mask-token corroboration: FIXED SENTINEL CANDIDATE id="

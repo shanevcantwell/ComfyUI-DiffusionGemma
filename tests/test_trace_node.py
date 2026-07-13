@@ -48,7 +48,7 @@ def test_render_calls_sampling_functions_and_wraps_results(monkeypatch):
 
     def fake_corroborate_no_mask_token(trace):
         captured["corroboration_trace"] = trace
-        return MaskTokenCorroboration(no_fixed_sentinel=True)
+        return MaskTokenCorroboration(verdict="evidence_against_sentinel")
 
     monkeypatch.setattr("nodes.trace.build_commit_heatmap", fake_build_commit_heatmap)
     monkeypatch.setattr("nodes.trace.build_avalanche_curve", fake_build_avalanche_curve)
@@ -89,7 +89,7 @@ def test_render_defaults_cell_px_to_6(monkeypatch):
     monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])
     monkeypatch.setattr(
         "nodes.trace.corroborate_no_mask_token",
-        lambda trace: MaskTokenCorroboration(no_fixed_sentinel=True),
+        lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
     )
 
     node = DGemmaTrace()
@@ -131,7 +131,7 @@ def test_render_labels_committed_fraction_as_block_local(monkeypatch):
     monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0, 0.0, 1.0])
     monkeypatch.setattr(
         "nodes.trace.corroborate_no_mask_token",
-        lambda trace: MaskTokenCorroboration(no_fixed_sentinel=True),
+        lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
     )
 
     node = DGemmaTrace()
@@ -147,13 +147,33 @@ def test_render_reports_fixed_sentinel_candidate_in_summary(monkeypatch):
     monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])
     monkeypatch.setattr(
         "nodes.trace.corroborate_no_mask_token",
-        lambda trace: MaskTokenCorroboration(no_fixed_sentinel=False, candidate_sentinel_id=99),
+        lambda trace: MaskTokenCorroboration(verdict="sentinel_found", candidate_sentinel_id=99),
     )
 
     node = DGemmaTrace()
     _, summary = node.render(canvas_trace=_FakeTrace())
 
     assert "FIXED SENTINEL CANDIDATE id=99" in summary
+
+
+def test_render_reports_vacuous_verdict_distinctly_in_summary(monkeypatch):
+    """Issue #22: zero observed transitions must NOT print the same
+    "supported" wording genuine evidence earns — the vacuous case gets its
+    own line, so the summary can't overclaim corroboration on zero
+    evidence."""
+    monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
+    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr(
+        "nodes.trace.corroborate_no_mask_token",
+        lambda trace: MaskTokenCorroboration(verdict="vacuous"),
+    )
+
+    node = DGemmaTrace()
+    _, summary = node.render(canvas_trace=_FakeTrace())
+
+    assert "vacuous" in summary
+    assert "supported" not in summary
+    assert "FIXED SENTINEL CANDIDATE" not in summary
 
 
 def test_heatmap_to_image_degenerate_empty_heatmap_does_not_raise(monkeypatch):
@@ -163,7 +183,7 @@ def test_heatmap_to_image_degenerate_empty_heatmap_does_not_raise(monkeypatch):
     monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [])
     monkeypatch.setattr(
         "nodes.trace.corroborate_no_mask_token",
-        lambda trace: MaskTokenCorroboration(no_fixed_sentinel=True),
+        lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
     )
 
     node = DGemmaTrace()
