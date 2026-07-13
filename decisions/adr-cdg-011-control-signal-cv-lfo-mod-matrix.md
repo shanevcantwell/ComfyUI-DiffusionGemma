@@ -23,8 +23,10 @@ per-step control in sequence, each comment correcting the shape of the last:
 1. **The mechanism already exists.** `EntropyBoundScheduler.step()` reads
    `entropy_bound`, `t_min`, `t_max` fresh from `self.config` on **every**
    call (`scheduling_entropy_bound.py:148-149,154`) — nothing is baked into
-   arrays at `set_timesteps` time. A step-end callback that mutates
-   `pipe.scheduler.config` changes what the *next* step's call reads. Setting
+   arrays at `set_timesteps` time. A step-end callback that changes
+   `pipe.scheduler.config` values changes what the *next* step's call reads
+   (mechanism note, post-grounding: the write is `register_to_config`
+   whole-dict replacement, not an in-place set — see Decision 4). Setting
    `t_min = t_max = T_desired` each step degenerates the anneal formula to an
    exact per-step temperature — this is the mechanism, not a proposal for a
    new one.
@@ -90,11 +92,22 @@ would desync from the mutation exactly as #20 describes.
    gives it units, so the binding — not the generator node — is the
    enforcement point.
 
-4. **The engine walker mutates only `scheduler.config` values that `step()`
-   reads fresh; it never mutates `num_inference_steps`.** Grounded directly
-   in the #35 comment: `entropy_bound`, `t_min`, `t_max` are read fresh from
-   `self.config` on every `step()` call, so live mutation of exactly those
-   values is what makes per-step control possible with no scheduler change.
+4. **The engine walker changes only `scheduler.config` values that `step()`
+   reads fresh — applied via `register_to_config(**kwargs)` whole-dict
+   replacement, never an in-place attribute set — and it never touches
+   `num_inference_steps`.** Grounded directly in the #35 comment:
+   `entropy_bound`, `t_min`, `t_max` are read fresh from `self.config` on
+   every `step()` call, so per-step replacement of exactly those values is
+   what makes per-step control possible with no scheduler change. The write
+   mechanism is pinned by PR #44's gate verification against the installed
+   `diffusers==0.39.0` sources: `ConfigMixin.config` is a `FrozenDict` whose
+   `__setattr__`/`__setitem__` raise once frozen
+   (`configuration_utils.py:77-85`); the only real write path is
+   `register_to_config(**kwargs)`, which rebuilds the internal dict
+   wholesale as a new `FrozenDict` (`configuration_utils.py:143-158`) — or
+   an equivalent engine-owned write that `step()` reads fresh. The intent is
+   unchanged (per-step values are read fresh at step time); only the
+   mechanism is now stated honestly.
    `num_inference_steps` is excluded by design and rejected at ingress if a
    binding names it as a target: mutating it mid-run would desync the
    scheduler's cached `predictor_steps`/`_num_timesteps`
@@ -313,6 +326,13 @@ by implementation ahead of that pass.
 - Issue #20 (closed) — `anneal_temperature` schedule-denominator desync
   mechanism; the regression this ADR's `num_inference_steps` exclusion
   forecloses by construction.
+- PR #44 (merged) — FrozenDict ground truth for Decision 4's write
+  mechanism, verified against the installed `diffusers==0.39.0` sources:
+  `ConfigMixin.config` is a `FrozenDict` whose `__setattr__`/`__setitem__`
+  raise once frozen (`configuration_utils.py:77-85`); the only write path is
+  `register_to_config(**kwargs)` whole-dict replacement
+  (`configuration_utils.py:143-158`). Mirrored by `tests/conftest.py`'s
+  `FakeFrozenConfig`.
 - ADR-CDG-001 — native socket types; the "lying sigmas" prohibition Option B
   is checked against.
 - ADR-CDG-004 — drive seam; `run_diffusion` signature this ADR widens.
