@@ -12,9 +12,15 @@ monospace font assumed present — the font search degrading to
 """
 from __future__ import annotations
 
+import pytest
 import torch
 
-from nodes.frames_image import _load_font, _wrap_text, render_frames_to_image_batch
+from nodes.frames_image import (
+    _block_local_captions,
+    _load_font,
+    _wrap_text,
+    render_frames_to_image_batch,
+)
 
 
 def _frames(num_frames: int = 3) -> list[str]:
@@ -119,6 +125,134 @@ class TestHeadlessFontFallback:
 
         assert images.shape[0] == 2
         assert images.dtype == torch.float32
+
+
+class TestNCanvasCaptions:
+    """ADR-CDG-009 (N-canvas reframe) / issue #26, #35 F7: the flipbook caption
+    is the N-ary `"canvas k/N · step i/M"` form keyed to a per-image canvas
+    index, NOT a hardcoded two-canvas or single-boundary assumption.
+
+    Parametrized over N — including the degenerate N=1, which must render
+    normal captions and NO boundary treatment (zero dividers). Two is the
+    observed case (thinking + answer), not the structural limit."""
+
+    def test_n1_single_canvas_captions_and_no_boundary(self):
+        """N=1: every frame keyed to canvas 0 → `canvas 1/1 · step i/M`, and
+        no divider is inserted (batch length == frame count, unchanged)."""
+        canvas_indices = [0, 0, 0, 0]
+        captions = _block_local_captions(canvas_indices)
+
+        assert captions == [
+            "canvas 1/1 · step 1/4",
+            "canvas 1/1 · step 2/4",
+            "canvas 1/1 · step 3/4",
+            "canvas 1/1 · step 4/4",
+        ]
+        # Every caption reports N == 1 — no spurious second canvas.
+        assert all("canvas 1/1" in c for c in captions)
+
+    def test_n2_two_canvas_captions_reset_step_at_boundary(self):
+        """N=2 (the observed thinking+answer case): block-local step resets to
+        1 at the single boundary; canvas number advances 1→2."""
+        # canvas 0 has 3 steps, canvas 1 has 2 steps.
+        canvas_indices = [0, 0, 0, 1, 1]
+        captions = _block_local_captions(canvas_indices)
+
+        assert captions == [
+            "canvas 1/2 · step 1/3",
+            "canvas 1/2 · step 2/3",
+            "canvas 1/2 · step 3/3",
+            "canvas 2/2 · step 1/2",
+            "canvas 2/2 · step 2/2",
+        ]
+
+    def test_n3_three_canvas_captions(self):
+        """N=3: two boundaries, block-local step resets at each; N reported
+        as 3 throughout — proves 2 is not baked in anywhere."""
+        canvas_indices = [0, 0, 1, 2, 2, 2]
+        captions = _block_local_captions(canvas_indices)
+
+        assert captions == [
+            "canvas 1/3 · step 1/2",
+            "canvas 1/3 · step 2/2",
+            "canvas 2/3 · step 1/1",
+            "canvas 3/3 · step 1/3",
+            "canvas 3/3 · step 2/3",
+            "canvas 3/3 · step 3/3",
+        ]
+
+    def test_non_contiguous_canvas_ids_ranked_by_first_seen(self):
+        """A future mid-schedule start could yield non-zero-based / skipping
+        canvas ids; N and k are computed over the distinct values present,
+        ranked first-seen, so the caption stays honest."""
+        canvas_indices = [5, 5, 9]
+        captions = _block_local_captions(canvas_indices)
+
+        assert captions == [
+            "canvas 1/2 · step 1/2",
+            "canvas 1/2 · step 2/2",
+            "canvas 2/2 · step 1/1",
+        ]
+
+    @pytest.mark.parametrize(
+        "canvas_indices, expected_transitions",
+        [
+            ([0, 0, 0], 0),            # N=1 → zero boundaries, ZERO dividers
+            ([0, 0, 1, 1], 1),         # N=2 → one boundary
+            ([0, 1, 2], 2),            # N=3 → two boundaries
+            ([0, 0, 1, 2, 2, 2], 2),   # N=3, uneven block sizes
+        ],
+    )
+    def test_transition_count_is_n_minus_one(self, canvas_indices, expected_transitions):
+        """The divider-count invariant (ADR-CDG-009): num_transitions == N-1,
+        so N=1 → 0. This pins the count the (held) divider-frame design will
+        insert, and guarantees the degenerate N=1 case renders NO divider."""
+        transitions = sum(
+            1 for a, b in zip(canvas_indices, canvas_indices[1:]) if a != b
+        )
+        distinct = len(set(canvas_indices))
+        assert transitions == expected_transitions
+        assert transitions == distinct - 1  # N-1, N=1 → 0
+
+    def test_render_batch_length_unchanged_no_divider_frames_yet(self):
+        """The shipped slice ships CAPTIONS only — synthetic divider frames are
+        held design (ADR-CDG-009 §2). So batch length is still len(frames) for
+        every N, INCLUDING that N=1 renders no extra frame. When the divider
+        design ratifies, this becomes len(frames)+num_transitions and N=1 stays
+        len(frames) (+0)."""
+        for canvas_indices in ([0, 0, 0], [0, 0, 1, 1], [0, 1, 2]):
+            frames = _frames(num_frames=len(canvas_indices))
+            images = render_frames_to_image_batch(
+                frames, width=200, font_size=14, canvas_indices=canvas_indices
+            )
+            assert images.shape[0] == len(frames)
+
+    def test_render_accepts_canvas_indices_without_crashing(self):
+        """End-to-end: passing the per-image key produces a valid batch (the
+        caption path is pixel-opaque, so correctness of the string is asserted
+        against `_block_local_captions` above; here we prove the render path
+        itself is wired and doesn't raise)."""
+        frames = _frames(num_frames=5)
+        images = render_frames_to_image_batch(
+            frames, width=256, font_size=16, canvas_indices=[0, 0, 0, 1, 1]
+        )
+        assert images.shape[0] == 5
+        assert images.dtype == torch.float32
+
+    def test_mismatched_canvas_indices_length_rejected(self):
+        """A per-image key that isn't parallel to frames is a caller bug that
+        would silently mis-caption — reject at the door, don't launder it."""
+        frames = _frames(num_frames=3)
+        with pytest.raises(ValueError, match="parallel"):
+            render_frames_to_image_batch(frames, canvas_indices=[0, 1])
+
+    def test_canvas_indices_none_falls_back_to_flat_caption(self):
+        """Backward compatibility: without the per-image key, the flat
+        `step i/total` caption path is unchanged (callers without frame
+        metadata, existing behavior)."""
+        frames = _frames(num_frames=3)
+        images = render_frames_to_image_batch(frames, canvas_indices=None)
+        assert images.shape[0] == 3
 
 
 class TestWrapText:

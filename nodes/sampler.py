@@ -260,10 +260,16 @@ class DGemmaSampler:
             on_frame=_build_on_frame(unique_id),
         )
         frames = decode_frames(model.processor, canvas_trace.frames)
+        # Per-image canvas-index key (ADR-CDG-009 §2, #35 F7): one canvas_idx
+        # per decoded frame, parallel to `frames`, so the flipbook caption is
+        # the N-canvas `canvas k/N · step i/M` form keyed per image rather than
+        # a flat running index reconstructed by a fragile 1:1 zip.
+        canvas_indices = [frame.canvas_idx for frame in canvas_trace.frames]
         frames_image = render_frames_to_image_batch(
             frames,
             width=FRAMES_IMAGE_WIDTH,
             font_size=FRAMES_IMAGE_FONT_SIZE,
             caption_step_index=FRAMES_IMAGE_CAPTION_STEP_INDEX,
+            canvas_indices=canvas_indices,
         )
         return (text, canvas_state, canvas_trace, frames, frames_image)

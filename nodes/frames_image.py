@@ -130,8 +130,56 @@ def _rasterize_frame(
     return image
 
 
+def _block_local_captions(canvas_indices: list[int]) -> list[str]:
+    """Given a per-frame `canvas_idx` key (one entry per rendered frame, in
+    order), produce the N-canvas caption for each frame: `"canvas k/N · step
+    i/M"`, where `k` is the 1-based canvas number, `N` the total distinct
+    canvas count in this run, `i` the 1-based block-local step within that
+    canvas, and `M` that canvas's own step count (ADR-CDG-009 §2).
+
+    N-ary by construction — the caption is derived from the per-image canvas
+    key, never from a hardcoded boundary count. The degenerate N=1 case (every
+    entry `0`) reads `"canvas 1/1 · step i/M"` with **no boundary treatment**;
+    the general N≥2 case increments `k` at each `canvas_idx` change. Boundaries
+    are inferred generically the same way `_FrameCollector` infers them
+    (a non-increasing `canvas_idx` cannot occur here since the key is monotone
+    non-decreasing by capture order, so a *change* in value is a boundary),
+    with no assumption that there is exactly one.
+
+    Robust to a `canvas_indices` that is not zero-based or contiguous (e.g. a
+    future mid-schedule start): `N` and `k` are computed over the *distinct*
+    canvas values actually present, ranked in first-seen order, so the caption
+    stays honest even if the raw indices skip.
+    """
+    # Rank distinct canvas ids by first appearance → 1-based canvas number `k`.
+    order: dict[int, int] = {}
+    for cidx in canvas_indices:
+        if cidx not in order:
+            order[cidx] = len(order) + 1
+    total_canvases = len(order)
+
+    # Per-canvas step count `M`, and running per-canvas step position `i`.
+    per_canvas_len: dict[int, int] = {}
+    for cidx in canvas_indices:
+        per_canvas_len[cidx] = per_canvas_len.get(cidx, 0) + 1
+
+    captions: list[str] = []
+    seen: dict[int, int] = {}
+    for cidx in canvas_indices:
+        seen[cidx] = seen.get(cidx, 0) + 1
+        k = order[cidx]
+        i = seen[cidx]
+        m = per_canvas_len[cidx]
+        captions.append(f"canvas {k}/{total_canvases} · step {i}/{m}")
+    return captions
+
+
 def render_frames_to_image_batch(
-    frames: list[str], width: int = 512, font_size: int = 20, caption_step_index: bool = True
+    frames: list[str],
+    width: int = 512,
+    font_size: int = 20,
+    caption_step_index: bool = True,
+    canvas_indices: list[int] | None = None,
 ) -> torch.Tensor:
     """Rasterize `frames` (one already-decoded step each, in order — e.g.
     `DGemmaSampler`'s own `frames` `STRING` output) into a ComfyUI `IMAGE`
@@ -140,12 +188,37 @@ def render_frames_to_image_batch(
     frame shares identical `(H, W)` — the batch-dim requirement — rather
     than each frame picking its own size and needing a later resize pass.
 
+    `canvas_indices` (ADR-CDG-009 §2, N-canvas reframe): an optional per-image
+    key carrying each frame's `canvas_idx` (parallel to `frames`, one entry
+    each). When provided, the caption becomes the N-canvas form
+    `"canvas k/N · step i/M"` — block-local numbering keyed to the canvas index
+    *per image* (the #35 F7 `CONSERVE-DATA-BOUNDARY` move: the image↔canvas
+    correspondence is carried explicitly, not reconstructed by a fragile 1:1
+    positional zip). This is N-ary by construction: N=1 (every entry `0`) reads
+    `"canvas 1/1 · step i/M"` with no boundary treatment, N≥2 numbers each
+    block; no code path assumes exactly one boundary. When `canvas_indices` is
+    `None` the caption falls back to the flat `"step idx/total"` form (callers
+    without frame metadata, and existing behavior). `caption_step_index=False`
+    suppresses captions entirely, regardless of `canvas_indices`.
+
+    NOTE (ADR-CDG-009 §2, held design): synthetic **divider frames** between
+    canvases are deliberately NOT inserted here — that encoding (background
+    color, whether a non-denoising frame belongs in the `images` batch) is an
+    open ratification question. This function ships the caption/per-image-key
+    slice only; batch length stays `len(frames)` (no `+num_transitions` yet).
+
     `[]` input (no captured frames) yields a `(0, 1, 1, 3)` tensor rather
     than fabricating a placeholder frame — an honest empty batch, mirroring
     `nodes/trace.py`'s degenerate-input handling.
     """
     if not frames:
         return torch.zeros((0, 1, 1, 3), dtype=torch.float32)
+
+    if canvas_indices is not None and len(canvas_indices) != len(frames):
+        raise ValueError(
+            "render_frames_to_image_batch: canvas_indices must be parallel to "
+            f"frames (got {len(canvas_indices)} indices for {len(frames)} frames)."
+        )
 
     font = _load_font(font_size)
     total = len(frames)
@@ -154,9 +227,19 @@ def render_frames_to_image_batch(
     line_h = _line_height(font)
     height = 2 * _MARGIN + max_lines * line_h
 
+    if canvas_indices is not None:
+        block_captions = _block_local_captions(canvas_indices)
+    else:
+        block_captions = None
+
     images = []
     for idx, text in enumerate(frames):
-        caption = f"step {idx + 1}/{total}" if caption_step_index else None
+        if not caption_step_index:
+            caption = None
+        elif block_captions is not None:
+            caption = block_captions[idx]
+        else:
+            caption = f"step {idx + 1}/{total}"
         image = _rasterize_frame(text, width=width, height=height, font=font, caption=caption)
         images.append(np.asarray(image, dtype=np.uint8))
 

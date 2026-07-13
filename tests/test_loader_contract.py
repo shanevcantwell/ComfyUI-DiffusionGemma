@@ -395,7 +395,17 @@ def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkey
     this is the one test in this file proving the actual rendering, not just
     that it was called.
     """
+    # The trace carries one frame per decoded string, each with its own
+    # `canvas_idx` — the production 1:1 invariant (`decode_frames` maps over
+    # `canvas_trace.frames`, and the flipbook's per-image canvas key is derived
+    # from the same list, ADR-CDG-009 §2). Two canvases here (0,0 → 1): the
+    # observed thinking+answer case, exercising the N-canvas caption path.
+    class _StubFrame:
+        def __init__(self, canvas_idx):
+            self.canvas_idx = canvas_idx
+
     sentinel_trace = _StubTrace()
+    sentinel_trace.frames = (_StubFrame(0), _StubFrame(0), _StubFrame(1))
     decoded_frames = ["noise noise noise", "partial coherent text", "the sky is blue"]
 
     def fake_run_diffusion(model, prompt, **kwargs):
