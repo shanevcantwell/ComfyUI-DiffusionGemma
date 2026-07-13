@@ -19,13 +19,13 @@ take apart.
 > through this pack**. A real quantized load path is tracked in
 > [issue #4](../../issues/4).
 >
-> Where it's headed lives in the [roadmap](plan.md).
+> Where it's headed lives in the [roadmap](ROADMAP.md).
 
 | Phase | What landed | Evidence |
 |-------|-------------|----------|
 | P0 — recon & spec | ADRs 001–003, build plan | [decisions/](decisions/) |
-| P1 — vertical slice | `DGemmaLoader` + `DGemmaSampler`, prompt→text + validity readout | plan.md P1 evidence (3 live PASSes) |
-| P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | plan.md P2 evidence; entropy_bound sweep |
+| P1 — vertical slice | `DGemmaLoader` + `DGemmaSampler`, prompt→text + validity readout | 3 live PASSes (recorded in-repo) |
+| P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | live PASS + entropy_bound sweep |
 | P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, live per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
 
 ## What it is — meaning annealed out of noise
@@ -160,13 +160,11 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 | **[VISION.md](VISION.md)** | *Why it might matter* — the questions the instrument was built to ask, each tagged `[established]` / `[hypothesis]` / `[open]`. Speculative by design, cited throughout. |
 | **[ROADMAP.md](ROADMAP.md)** | *Where it's headed* — the forward view in two tracks: engineering seam work (issue #35) and the liquid-phase research program. Pointer-heavy; VISION holds the *why*, `decisions/` the *decided*. |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Contributor-facing map — how the pieces fit and why. |
-| **[plan.md](plan.md)** | The 6-phase build roadmap with per-phase evidence. |
 | **[decisions/](decisions/)** | ADRs — *why* the load-bearing choices were made. |
 | **[ADR-CDG-001](decisions/adr-cdg-001-native-socket-types.md)** | Native socket types instead of reusing `SIGMAS`/`LATENT`. |
 | **ADR-CDG-002 → 004** | Access path: load via transformers, **drive via the Diffusers pipeline** (004 amends 002). |
 | **ADR-CDG-005** | `CANVAS_STATE` is a resumable save-state, not a display snapshot. |
 | **[ADR-CDG-006](decisions/adr-cdg-006-advanced-sampler-step-window-resume.md)** | `DGemmaSamplerAdvanced` — step-windowed, chainable/resumable sampler (**proposed**, not yet built). |
-| **[loose-ends.md](loose-ends.md)** | Tactical decisions below the ADR bar. |
 
 ## Come explore
 
