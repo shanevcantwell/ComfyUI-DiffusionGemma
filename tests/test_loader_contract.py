@@ -8,6 +8,16 @@ import nothing from `comfy` at module level (this venv has no `comfy` package
 at all, so any such import would already have raised at collection time —
 the second test below is belt-and-suspenders on the same invariant
 `tests/test_seam.py` checks from the `dgemma/` side).
+
+Issue #17 — `DGemmaLoader`'s `repo_id` free-text STRING widget was replaced
+with a `model_name` dropdown populated from local `diffusion_models` +
+`text_encoders` directories (`nodes.loader.list_local_model_dirs`), resolved
+to a full path (`nodes.loader.resolve_local_model_dir`) and always loaded
+with `local_files_only=True` — no network fetch, ever, from this node. The
+free-standing `local_files_only` widget is gone: with no `repo_id` left in
+the picture there is nothing for it to toggle (`dgemma.model.load_model`
+itself still accepts the parameter unchanged, exercised directly in
+`tests/test_model_load.py`).
 """
 from __future__ import annotations
 
@@ -16,6 +26,7 @@ import sys
 import pytest
 import torch
 
+import nodes.loader as loader_module
 from nodes.loader import DGemmaLoader
 from nodes.sampler import DGemmaSampler
 
@@ -42,11 +53,43 @@ def test_nodes_modules_do_not_import_comfy():
     assert not any(m == "comfy" or m.startswith("comfy.") for m in sys.modules)
 
 
-def test_loader_input_types_declares_repo_id_and_quant():
+def test_loader_input_types_declares_model_name_and_quant():
     spec = DGemmaLoader.INPUT_TYPES()
-    assert "repo_id" in spec["required"]
+    assert "model_name" in spec["required"]
     assert "quant" in spec["required"]
     assert spec["required"]["quant"][0] == ["none"]
+
+
+def test_loader_input_types_model_name_is_a_dropdown_not_free_text(monkeypatch):
+    """Issue #17: `model_name` must be a COMBO (a bare list of options), not
+    the old free-text `STRING` widget — the whole point of the retrofit is
+    that a user picks from what's actually on disk instead of typing an HF
+    repo_id."""
+    monkeypatch.setattr(loader_module, "list_local_model_dirs", lambda: ["some-local-model"])
+
+    spec = DGemmaLoader.INPUT_TYPES()
+
+    assert spec["required"]["model_name"] == (["some-local-model"],)
+
+
+def test_loader_input_types_model_name_degrades_to_empty_list_outside_comfyui():
+    """Outside ComfyUI (this test's own venv — no `folder_paths` package),
+    `list_local_model_dirs` must degrade to an empty list rather than raising,
+    so `INPUT_TYPES` (called at node-registration time) never crashes node
+    discovery just because nothing is on disk yet / ComfyUI isn't present."""
+    assert loader_module.folder_paths is None
+    spec = DGemmaLoader.INPUT_TYPES()
+    assert spec["required"]["model_name"] == ([],)
+
+
+def test_loader_input_types_no_longer_declares_repo_id_or_local_files_only():
+    """The free-text repo_id STRING and the standalone local_files_only
+    BOOLEAN are both gone (issue #17) — the dropdown replaces repo_id, and
+    local_files_only is now hardcoded True inside `load()` rather than a
+    user-facing toggle (there is no repo_id left for it to gate)."""
+    spec = DGemmaLoader.INPUT_TYPES()
+    assert "repo_id" not in spec["required"]
+    assert "local_files_only" not in spec["required"]
 
 
 def test_loader_quant_selector_does_not_offer_nf4_or_int8():
@@ -68,13 +111,6 @@ def test_loader_quant_default_is_none_not_nf4():
     assert spec["required"]["quant"][1]["default"] == "none"
 
 
-def test_loader_input_types_declares_local_files_only():
-    """local_files_only stays off (network download) by default — only an
-    explicit opt-in restricts resolution to the local HF cache."""
-    spec = DGemmaLoader.INPUT_TYPES()
-    assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
-
-
 def test_loader_declarations():
     assert DGemmaLoader.RETURN_TYPES == ("DGEMMA_MODEL",)
     assert DGemmaLoader.FUNCTION == "load"
@@ -85,41 +121,77 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     sentinel = object()
     captured = {}
 
+    def fake_resolve(name):
+        captured["resolve_arg"] = name
+        return "/models/diffusion_models/some-local-model"
+
     def fake_load_model(repo_id, quant, local_files_only):
         captured["repo_id"] = repo_id
         captured["quant"] = quant
         captured["local_files_only"] = local_files_only
         return sentinel
 
+    monkeypatch.setattr("nodes.loader.resolve_local_model_dir", fake_resolve)
     monkeypatch.setattr("nodes.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    result = node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+    result = node.load(model_name="some-local-model", quant="none")
 
     assert result == (sentinel,)
     assert captured == {
-        "repo_id": "google/diffusiongemma-26B-A4B-it",
+        "resolve_arg": "some-local-model",
+        "repo_id": "/models/diffusion_models/some-local-model",
         "quant": "none",
         "local_files_only": True,
     }
 
 
-def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
-    """A graph built before this widget existed (or a caller that only passes
-    the required kwargs) must still get the download-permitting default, not
-    a TypeError."""
+def test_loader_always_passes_local_files_only_true(monkeypatch):
+    """Issue #17: the dropdown only ever offers already-resolved local
+    directories, so there is never a bare repo_id left to fetch from the
+    network — `local_files_only=True` is unconditional, not a widget."""
     captured = {}
 
-    def fake_load_model(repo_id, quant, local_files_only):
-        captured["local_files_only"] = local_files_only
-        return object()
+    monkeypatch.setattr(
+        "nodes.loader.resolve_local_model_dir", lambda name: "/models/text_encoders/some-local-model"
+    )
+    monkeypatch.setattr(
+        "nodes.loader.load_model",
+        lambda repo_id, quant, local_files_only: captured.setdefault("local_files_only", local_files_only),
+    )
 
-    monkeypatch.setattr("nodes.loader.load_model", fake_load_model)
+    DGemmaLoader().load(model_name="some-local-model", quant="none")
+
+    assert captured["local_files_only"] is True
+
+
+def test_loader_raises_clean_error_on_unresolvable_model_name(monkeypatch):
+    """Issue #17 acceptance criterion: an empty/invalid selection must fail
+    the node cleanly (no silent pull, no raw KeyError/None propagating into
+    `load_model`) — `load_model` must not even be called."""
+    monkeypatch.setattr("nodes.loader.resolve_local_model_dir", lambda name: None)
+    load_model_called = []
+    monkeypatch.setattr("nodes.loader.load_model", lambda **kwargs: load_model_called.append(kwargs))
 
     node = DGemmaLoader()
-    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+    with pytest.raises(RuntimeError, match="could not resolve model_name"):
+        node.load(model_name="", quant="none")
 
-    assert captured["local_files_only"] is False
+    assert load_model_called == []
+
+
+def test_loader_raises_clean_error_on_missing_model_name(monkeypatch):
+    """Same as above but for a name that simply isn't present under either
+    configured folder (e.g. stale dropdown selection after the file moved)."""
+    monkeypatch.setattr("nodes.loader.resolve_local_model_dir", lambda name: None)
+    load_model_called = []
+    monkeypatch.setattr("nodes.loader.load_model", lambda **kwargs: load_model_called.append(kwargs))
+
+    node = DGemmaLoader()
+    with pytest.raises(RuntimeError, match="no-longer-on-disk"):
+        node.load(model_name="no-longer-on-disk", quant="none")
+
+    assert load_model_called == []
 
 
 def test_sampler_declarations():
