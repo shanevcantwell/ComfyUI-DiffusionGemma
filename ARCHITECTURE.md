@@ -342,7 +342,7 @@ names its test / type / review surface and its status.
 | Declarative payloads only into `run_diffusion` (no surface-built closures/hooks) | Ingress validation (schedule length == steps; values in binding range; ids in-vocab; fail on unknown) + the composite holding only engine-built participants | `NOT-YET-IMPLEMENTED` — ADR-CDG-010/011 ingress clauses. |
 | `num_inference_steps` non-mutable mid-run | Ingress reject (guards #20's `predictor_steps`/`_num_timesteps` desync) | `NOT-YET-IMPLEMENTED` — ADR-CDG-011. |
 | `DiffusionFrame` extension discipline (additive-optional, heavy-field retention policy) | Optional-with-defaults fields; retention policy for heavy `DISTRIBUTION` | `NOT-YET-IMPLEMENTED` — #35 R6 / F3 (rides research rung 4). |
-| Shared fake-pipeline/scheduler fixture (N steps, mutable `config`, hook-recording model, `{"canvas":…}` application) | `tests/conftest.py` fixture (gates R1/R5 testing) | `NOT-YET-IMPLEMENTED` — #35 R4 (lands first). |
+| Shared fake-pipeline/scheduler fixture (N steps, mutable `config`, hook-recording model, `{"canvas":…}` application) | `tests/conftest.py:fake_pipeline_factory` (`FakeEntropyBoundScheduler`, `HookRecordingModel`, `FakeDiffusionGemmaPipeline`); self-tests in `tests/test_conftest_fake_pipeline.py` | **In force.** #35 R4. "Mutable `config`" resolved against the real `diffusers` `FrozenDict` (write-raises; mutation only via `register_to_config`, verified against the installed-wheel source) — see `tests/conftest.py`'s module docstring. |
 | Frames↔images index correspondence not untagged | Per-image frame-key tag or explicit no-zip contract (`CONSERVE-DATA-BOUNDARY`) | `NOT-YET-IMPLEMENTED` — #35 F7/F9, reconciled in ADR-009 / PR #31 ratification. |
 
 ---
