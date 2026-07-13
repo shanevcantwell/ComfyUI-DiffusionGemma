@@ -39,6 +39,13 @@ Repository = "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+# ADR-CDG-008 Phase 2: surfaces/mcp/ is a PEER surface, not core — the `mcp`
+# SDK is therefore optional, exactly like ComfyUI itself is absent-by-design
+# from this pack's core dependencies (`tests/test_seam.py`). A ComfyUI-only
+# install (the `dependencies` list above) never needs this extra; only
+# `surfaces/mcp/server.py` (and `python -m surfaces.mcp.server` / the
+# `comfyui-diffusiongemma-mcp` script below) requires it.
+mcp = ["mcp>=1.0.0"]
 
 # ComfyUI Registry metadata (comfy-cli / registry.comfy.org).
 # PublisherId minted 2026-07-05 (operator, registry.comfy.org — immutable).
