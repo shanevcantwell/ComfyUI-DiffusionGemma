@@ -1,4 +1,4 @@
-"""nodes/loader.py — DGemmaLoader: thin ComfyUI adapter (ADR-CDG-003).
+"""surfaces/comfyui/loader.py — DGemmaLoader: thin ComfyUI adapter (ADR-CDG-003).
 
 Unpacks widget inputs, calls one `dgemma.*` function, wraps the result in a
 tuple. No logic lives here — if a `for` loop or a loading decision ever
@@ -43,15 +43,24 @@ import os
 # root __init__.py — no blanket try/except, which masks real failures).
 # ComfyUI loads the pack as a package named after its directory path
 # (`/srv/dev/ComfyUI/nodes.py:2233,2241`) and never puts the pack root on
-# sys.path, so this module's __package__ is "<pack>.nodes" (dotted) and only
-# the relative `..dgemma` can resolve. Under pytest/standalone the repo root
-# is on sys.path and this module is top-level "nodes" (no dot), so only the
-# absolute form can resolve. Observed violation: graph smoke test 2026-07-05
-# (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py.
+# sys.path, so this module's __package__ is "<pack>.surfaces.comfyui"
+# (dotted) and only the relative import can resolve. This module now lives
+# two levels under the pack root (surfaces/comfyui/, was one level under
+# nodes/), so the relative climb to dgemma/ is THREE dots, not two
+# (ADR-CDG-008 Phase 1 / issue #52 risk R-1 — the riskiest step named in the
+# plan: pytest's absolute `else` branch below would mask a wrong relative
+# depth here, since only the real ComfyUI loader path exercises this
+# branch). Under pytest/standalone the repo root is on sys.path and this
+# module is top-level "surfaces.comfyui" (no leading dot chain reachable),
+# so only the absolute form can resolve. Observed violation: graph smoke
+# test 2026-07-05 (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py
+# and tests/test_dual_context_import.py (the R-1 tripwires).
 if __package__ and "." in __package__:
-    from ..dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from ...dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from .socket_types import DGEMMA_MODEL
 else:
     from dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
 # Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
 # until weights actually live under ComfyUI model dirs. See the module
@@ -213,7 +222,7 @@ class DGemmaLoader:
             spec["optional"] = {"local_model_dir": (list_local_model_dirs(),)}
         return spec
 
-    RETURN_TYPES = ("DGEMMA_MODEL",)
+    RETURN_TYPES = (DGEMMA_MODEL,)
     RETURN_NAMES = ("model",)
     FUNCTION = "load"
     CATEGORY = "DiffusionGemma"
