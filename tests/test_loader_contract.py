@@ -165,7 +165,14 @@ def test_sampler_input_types_declares_all_p2_widgets():
     # routes the live per-step push (plan.md Phase 3 (a)) to the right node.
     assert spec["hidden"] == {"unique_id": "UNIQUE_ID"}
     assert spec["required"]["model"] == ("DGEMMA_MODEL",)
-    assert spec["required"]["thinking"] == ("BOOLEAN", {"default": False})
+    # Issue #22 honesty finding: `thinking` carries an on-widget (hover)
+    # tooltip marking it experimental — the injected-message path is
+    # pinned one token short of native `enable_thinking=True`
+    # (tests/test_chat_template_thinking.py) and behavioral impact is
+    # unverified. Default must stay unchanged; the tooltip is additive.
+    assert spec["required"]["thinking"][0] == "BOOLEAN"
+    assert spec["required"]["thinking"][1]["default"] is False
+    assert "EXPERIMENTAL" in spec["required"]["thinking"][1]["tooltip"]
     # Grounded defaults (plan.md Phase 2 / CLAUDE.md).
     assert spec["required"]["num_inference_steps"][1]["default"] == 48
     assert spec["required"]["t_min"][1]["default"] == pytest.approx(0.4)

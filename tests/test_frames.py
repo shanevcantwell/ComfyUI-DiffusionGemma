@@ -472,3 +472,35 @@ class TestDeriveCanvasState:
         assert state.converged is True
         assert state.turn_closed is False
         assert state.answer_tokens == 4
+
+    def test_finished_honestly_true_on_adaptive_stopped_run_despite_not_converged(self):
+        """[Issue #22 honesty finding] The exact screenshot people share:
+        adaptive stopping (pipeline `confidence`/`eos_early_stop`) halts
+        once EOS is confidently committed while some other canvas position
+        is still short of the entropy bound (observed live: 255/256,
+        committed_fraction=0.9961). `converged` reads False here — that is
+        its documented, narrow, honest behavior, NOT a bug — but
+        `finished_honestly` must read True, because the turn actually
+        closed on a real EOS."""
+        state = derive_canvas_state(
+            text="hello", canvas_ids=[1, 2, 999],
+            frames=[_frame(committed_fraction_per_example=(0.9961,))], steps_used=48,
+            eos_token_id=999,
+        )
+
+        assert state.converged is False
+        assert state.turn_closed is True
+        assert state.finished_honestly is True
+
+    def test_finished_honestly_false_when_turn_never_closed(self):
+        """`finished_honestly` tracks `turn_closed`, independent of
+        `converged` — a fully-committed canvas with no EOS anywhere
+        (specimen (ii)) is converged but did NOT finish honestly."""
+        state = derive_canvas_state(
+            text="hello", canvas_ids=[1, 2, 3, 4],
+            frames=[_frame(committed_fraction_per_example=(1.0,))], steps_used=4,
+            eos_token_id=999,
+        )
+
+        assert state.converged is True
+        assert state.finished_honestly is False

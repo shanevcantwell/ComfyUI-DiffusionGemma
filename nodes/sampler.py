@@ -187,7 +187,31 @@ class DGemmaSampler:
                     {"default": DEFAULT_CONFIDENCE, "min": 0.0, "max": 1.0, "step": 0.001},
                 ),
                 "gen_length": ("INT", {"default": DEFAULT_GEN_LENGTH, "min": 1, "max": 8192}),
-                "thinking": ("BOOLEAN", {"default": False}),
+                # EXPERIMENTAL (issue #22 honesty finding, in the widget
+                # itself, not just a docstring): the injected system-turn
+                # path is pinned by tests/test_chat_template_thinking.py to
+                # be exactly one token short of native
+                # `enable_thinking=True` (the template's `| trim` eats the
+                # newline after `<|think|>`, id 107) — the ONLY reachable
+                # path through `pipeline.__call__`, see dgemma.loop's
+                # `thinking` docstring. Token parity is structurally
+                # unreachable via message content. Behavioral impact of that
+                # one-token gap is UNVERIFIED — no E2E thinking-mode run has
+                # been done (needs the real 26B weights on GPU). This toggle
+                # ships as a documented, honest experiment, not a confirmed
+                # feature.
+                "thinking": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "EXPERIMENTAL: injects the <|think|> control token via a "
+                            "system turn, one token short of native enable_thinking=True "
+                            "(structurally unreachable gap, see dgemma.loop docstring). "
+                            "Behavioral effect unverified — no E2E run on real weights yet."
+                        ),
+                    },
+                ),
             },
             "hidden": {
                 # Standard ComfyUI hidden-input idiom (grepped against the

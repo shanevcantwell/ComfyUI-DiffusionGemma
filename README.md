@@ -11,6 +11,14 @@ take apart.
 > **live per-step view** of the canvas denoising as it runs, a **picture
 > flipbook** of the whole process, and a **trace node** (commit heatmap +
 > summary) to read what happened. Verified on real weights across two GPUs.
+>
+> **VRAM footprint today: ~50GB bf16 + CPU spill, needs a ≥48GB card.**
+> `quant="none"` is the only load path (bitsandbytes can't touch this
+> model's fused MoE experts — see "What works today" below); the model
+> card's ~18GB quantized / consumer-GPU footprint is **not yet reachable
+> through this pack**. A real quantized load path is tracked in
+> [issue #4](../../issues/4).
+>
 > Where it's headed lives in the [roadmap](plan.md).
 
 | Phase | What landed | Evidence |
@@ -64,7 +72,10 @@ You can't catch that by reading the final text. You can watch it happen here.
   `steps_used`, `turn_closed` (did the model actually end its turn, vs. run out
   of canvas), `answer_tokens` (pre-EOS count — trailing canvas-fill excluded),
   `thought` (channel content when thinking is on). A wrong-knob run *tells you*
-  it's wrong instead of handing you plausible garbage.
+  it's wrong instead of handing you plausible garbage. If you're asking "did
+  this run finish?", read `turn_closed` (or the `finished_honestly` property),
+  not `converged` — adaptive stopping can legitimately halt with
+  `converged=False` on a clean, correct run.
 - **Live view** — while the sampler runs, its node paints the canvas denoising
   step by step (`web/live_view.js`, fed by per-step server events; one event per
   step, verified 1:1 against `steps_used`).
