@@ -1,6 +1,13 @@
 # ADR-CDG-012 — MITM the AR/diffusion seam: a `KV_CACHE` socket + `DGemmaEncode`/`DGemmaDenoise` node pair
 
-**Status**: proposed
+**Status**: accepted (ratified by independent design-gate review, 2026-07-13;
+the operator sets requirements and holds a standing veto but is not an approver
+per this repo's process convention — the design-gate review makes the
+ratification call. The DV.3a socket-string-home wording was corrected on the
+ratification commit to agree with ARCHITECTURE.md rule 4 / §D.0 —
+`IDENTITY⊥ENVELOPE`: socket string minted surface-side, dataclass identity
+core-side — resolving the plan's §Q-4 in favor of the in-force enforcement
+surface.)
 **Date**: 2026-07-13
 **Related**: ADR-CDG-001 (native socket types — this ADR's fingerprint/ingress
 rule is a direct instance of "payloads mean what they say"), ADR-CDG-005
@@ -456,17 +463,24 @@ decomposed into three *distinct* enforcement surfaces, because "effortless" is
 not one mechanism:
 
 **DV.3a — invalid connections are unwirable at the graph level.** The new
-sockets are **native `DGEMMA_*` types** minted in `dgemma/types.py`
-(`DGEMMA_KV_CACHE` per §D.0, plus any surgery/provenance socket the node set
-introduces), extending ADR-CDG-001's discipline to this ADR's sockets. ComfyUI
-refuses a wire between incompatible native types at the canvas, so a user
-*cannot* connect a cache output to a canvas input by mistake — the invalid
-graph is unbuildable, not merely discouraged. **Failure this prevents:** a
-mis-wire that type-checks as `*`/`STRING` and fails deep in `run_diffusion`
-instead of at the wire — the ADR-CDG-001 "lying socket" failure on the new
-axis. **Enforcement surface:** the socket strings live in `dgemma/types.py`
-(SSoT), asserted present and distinct by a node-contract test — the same shape
-as the existing native-type contract tests.
+sockets are **native `DGEMMA_*` types** whose socket *string* is minted
+surface-side in `surfaces/comfyui/socket_types.py` and whose *identity* — the
+payload dataclass — lives in `dgemma/types.py` (`IDENTITY⊥ENVELOPE`,
+ARCHITECTURE.md rule 4; the socket string is envelope, the dataclass is
+identity, per §D.0). The `DGEMMA_KV_CACHE` string (plus any surgery/provenance
+socket the node set introduces) is added to the existing mint; the `KVCache`/
+`Provenance`/`EditOp` dataclasses land in `dgemma/types.py`. This extends
+ADR-CDG-001's discipline to this ADR's sockets. ComfyUI refuses a wire between
+incompatible native types at the canvas, so a user *cannot* connect a cache
+output to a canvas input by mistake — the invalid graph is unbuildable, not
+merely discouraged. **Failure this prevents:** a mis-wire that type-checks as
+`*`/`STRING` and fails deep in `run_diffusion` instead of at the wire — the
+ADR-CDG-001 "lying socket" failure on the new axis. **Enforcement surface:** the
+socket string is minted in `surfaces/comfyui/socket_types.py` (the rule-4
+`ONE-MINT` home, swept by `tests/test_socket_mint.py`'s grep-gate) and the
+payload identity in `dgemma/types.py` (SSoT); the string is asserted present and
+distinct by the extended node-contract test — the same shape as the existing
+native-type contract tests.
 
 **DV.3b — every ingress failure message is self-remedying.** Each V1–V6 reject
 (§D.3) raises a message that names **both** the violated precondition **and**
