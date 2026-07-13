@@ -123,6 +123,25 @@ def test_render_end_to_end_scaled_image_dimensions():
     assert image.shape == (1, 2 * 4, 3 * 4, 3)
 
 
+def test_render_labels_committed_fraction_as_block_local(monkeypatch):
+    """ADR-CDG-009 / issue #26: the summary must say `committed_fraction` is
+    block-local (resets at each canvas boundary), not just print bare
+    numbers a reader could misread as a global-progress sawtooth/re-melt."""
+    monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
+    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0, 0.0, 1.0])
+    monkeypatch.setattr(
+        "nodes.trace.corroborate_no_mask_token",
+        lambda trace: MaskTokenCorroboration(no_fixed_sentinel=True),
+    )
+
+    node = DGemmaTrace()
+    _, summary = node.render(canvas_trace=_FakeTrace())
+
+    assert "block-local" in summary
+    assert "canvas/block boundary" in summary
+    assert "1.0000, 0.0000, 1.0000" in summary
+
+
 def test_render_reports_fixed_sentinel_candidate_in_summary(monkeypatch):
     monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
     monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])

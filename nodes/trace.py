@@ -52,11 +52,26 @@ def _format_summary(trace, curve: list[float], corroboration) -> str:
     mask-token corroboration verdict, so the empirical check (dgemma/
     sampling.py's own docstring on ADR-CDG-004's documentary "no MASK"
     confirmation) is actually visible on the graph, not just in a unit
-    test."""
+    test.
+
+    The `committed_fraction` label is explicit about block-local scope
+    (ADR-CDG-009, issue #26): the value is `DiffusionFrame.committed_fraction`,
+    which is a per-block reading (`accepted_index.float().mean(dim=-1)` over
+    the ACTIVE block only, dgemma/loop.py's `_FrameCollector`) — it resets
+    toward 0 at every `canvas_idx` boundary, not just at the start of the
+    whole run. Labeling it plainly "committed_fraction" reads as a global
+    progress metric and makes the block-boundary reset look like the canvas
+    re-melted, which is exactly the misreading issue #26 reports. This is a
+    caption fix only — the underlying value and its docstring
+    (dgemma/types.py `DiffusionFrame.committed_fraction`) were already
+    correct; this propagates that existing meaning to the one operator-facing
+    text surface that didn't say it."""
     lines = [
         f"scheduler={trace.scheduler_name} config={trace.scheduler_config}",
         f"steps={len(curve)}",
-        "committed_fraction per step: " + ", ".join(f"{value:.4f}" for value in curve),
+        "committed_fraction per step (block-local — resets near 0 at each "
+        "canvas/block boundary; this is block advancement, not re-melt): "
+        + ", ".join(f"{value:.4f}" for value in curve),
     ]
     if corroboration.no_fixed_sentinel:
         lines.append("mask-token corroboration: no fixed sentinel (uniform-state renoise supported)")
