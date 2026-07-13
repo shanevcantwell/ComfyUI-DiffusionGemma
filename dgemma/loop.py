@@ -252,6 +252,8 @@ from diffusers import DiffusionGemmaPipeline, EntropyBoundScheduler  # noqa: E40
 
 from .composite import DiffusionCancelled, StepEndComposite  # noqa: E402
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
+from .ingress import validate_ingress  # noqa: E402
+from .payloads import Constraints, ControlSignals  # noqa: E402
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame  # noqa: E402
 
 # Grounded defaults (CLAUDE.md / plan.md — first local run, Q4_K_M).
@@ -538,6 +540,29 @@ def derive_canvas_state(
     )
 
 
+def resolve_vocab_size(processor: Any) -> int | None:
+    """Resolve a vocab size for `dgemma.ingress.validate_constraints`'s C3
+    check (issue #64 §3.4), off `processor`'s tokenizer.
+
+    Same tokenizer-unwrap path `resolve_thought_channel_ids` uses
+    (`getattr(processor, "tokenizer", processor)`). Tries `len(tokenizer)`
+    first (the usual `PreTrainedTokenizerBase.__len__`), then
+    `tokenizer.vocab_size`. Returns `None` — a named degradation, not a
+    raise — when neither is available (e.g. a bare stub in a unit test that
+    exposes no vocab at all), mirroring `resolve_thought_channel_ids`'s own
+    stub fallback: C3 is skipped rather than this resolver inventing a size.
+    """
+    tokenizer = getattr(processor, "tokenizer", processor)
+    try:
+        return len(tokenizer)
+    except TypeError:
+        pass
+    vocab_size = getattr(tokenizer, "vocab_size", None)
+    if isinstance(vocab_size, int):
+        return vocab_size
+    return None
+
+
 def resolve_thought_channel_ids(processor: Any) -> tuple[int, int]:
     """Resolve the (start, end) thought-channel delimiter ids from `processor`.
 
@@ -752,6 +777,9 @@ def run_diffusion(
     on_frame: Callable[[DiffusionFrame], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     logit_hook: ForwardHookFn | None = None,
+    constraints: "Constraints | None" = None,
+    control_signals: "ControlSignals | None" = None,
+    capture: Any = None,
 ) -> tuple[str, CanvasState, CanvasTrace]:
     """Drive one prompt through the block-diffusion denoising loop.
 
@@ -842,14 +870,28 @@ def run_diffusion(
     one pipeline call below, via `dgemma.hooks.install_logit_shaping_hook` —
     the ONLY sanctioned installation path for a hook on this door (the only
     logit-shaping door per issue #28: a callback-returned `{"logits": ...}`
-    is silently discarded by the installed pipeline). `None` (today's only
-    real call shape — no `constraints=` ingress exists yet) installs
-    nothing and leaves zero hooks registered, trivially satisfying
-    `STATELESS-CORE`'s "no hook survives a `run_diffusion` call" (rule 6):
-    the context manager's `try/finally` guarantees teardown on the pipeline
-    call's clean return, on `DiffusionCancelled` (caught below), and on any
-    other exception raised mid-run — the hook is torn down before this
-    function's own exception handling (or return) is reached in every case.
+    is silently discarded by the installed pipeline). `None` when
+    `constraints=` is also `None` installs nothing and leaves zero hooks
+    registered, trivially satisfying `STATELESS-CORE`'s "no hook survives a
+    `run_diffusion` call" (rule 6): the context manager's `try/finally`
+    guarantees teardown on the pipeline call's clean return, on
+    `DiffusionCancelled` (caught below), and on any other exception raised
+    mid-run — the hook is torn down before this function's own exception
+    handling (or return) is reached in every case. Passing BOTH
+    `constraints=` and `logit_hook=` is rejected at ingress (H1, below) —
+    two logit-mask sources on one door (ADR-CDG-010 D5).
+
+    `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011, issue #64
+    Phase 1): declarative payloads, validated at ingress
+    (`dgemma.ingress.validate_ingress`) and — in THIS phase only —
+    otherwise ignored: no participant is built from them yet
+    (`PinParticipant`/`WalkerParticipant`/the logit-mask hook builder land in
+    Phases 3/4). A validated payload therefore changes nothing about this
+    call's behavior beyond the reject paths; a run with a valid payload
+    behaves identically to a run with `None` (the Phase 1 regression floor,
+    issue #64 §6). Each is validated-then-ignored independently: an invalid
+    payload still raises (the reject paths are live now), it just isn't yet
+    turned into engine behavior when valid.
 
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
@@ -860,10 +902,28 @@ def run_diffusion(
 
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
-    `EntropyBoundScheduler` a nonsensical temperature trajectory).
+    `EntropyBoundScheduler` a nonsensical temperature trajectory), or if
+    ingress validation of `constraints`/`control_signals`/`capture`/the
+    `constraints`+`logit_hook` combination fails (see
+    `dgemma.ingress.validate_ingress`'s error register).
     """
     if t_min >= t_max:
         raise ValueError(f"t_min must be < t_max, got t_min={t_min!r} t_max={t_max!r}.")
+
+    # vocab_size resolution (issue #64 §3.4): same tokenizer path
+    # `resolve_thought_channel_ids` uses. `None` when unavailable (e.g. a
+    # bare test stub) — validate_constraints degrades by skipping C3 rather
+    # than this call site inventing a size.
+    vocab_size = resolve_vocab_size(dgemma_model.processor)
+    validate_ingress(
+        constraints,
+        control_signals,
+        capture,
+        logit_hook,
+        gen_length=gen_length,
+        num_inference_steps=num_inference_steps,
+        vocab_size=vocab_size,
+    )
 
     scheduler = EntropyBoundScheduler(
         entropy_bound=entropy_bound, t_max=t_max, t_min=t_min, num_inference_steps=num_inference_steps
