@@ -36,6 +36,7 @@ tools/flipbook/out/
 .vscode/
 .idea/
 .DS_Store
+.claude/
 
 # Agent-ops residue (kept locally, never shipped in the public tree)
 handoffs/
@@ -43,3 +44,4 @@ CLAUDE.md
 plan.md
 loose-ends.md
 test-coverage-plan.md
+
