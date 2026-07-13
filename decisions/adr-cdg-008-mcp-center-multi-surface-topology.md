@@ -199,7 +199,7 @@ the *only* option that lets a test assert the boundary.
       settle when the relocation phase is planned (a `plan` pass over this ADR),
       before any file moves. **Resolved 2026-07-13 → `consumers/`.** See the
       amendment below (transcribed from issue #55 §1, the Phase 3+4 plan pass).
-- [ ] **Does `CanvasTrace` (`dgemma/types.py`) stay in the core, or move to a
+- [x] **Does `CanvasTrace` (`dgemma/types.py`) stay in the core, or move to a
       shared contract module the consumers import?** It is the emitted canonical
       type, so it plausibly stays core-side as the contract surface both the core
       and its consumers depend on. **Resolution trigger:** decide alongside the
@@ -209,11 +209,13 @@ the *only* option that lets a test assert the boundary.
       functions/dataclass; `CanvasTrace` and the rest of `dgemma/types.py` stay
       in `dgemma/`, unmoved, as verified by `dgemma/loop.py`'s imports before
       execution (it imports nothing from `sampling`).
-- [ ] **Is this refactor large enough to need a `decompose-problem` /
+- [x] **Is this refactor large enough to need a `decompose-problem` /
       `plan` pass before execution?** The roadmap below is sequenced but not
       step-level. **Resolution:** yes — recommend a `plan` pass over Phases 1–4
       before touching `__init__.py`'s discovery contract, given the loader-context
-      fragility (ADR-CDG-003).
+      fragility (ADR-CDG-003). **Satisfied** — issue #52 (Phases 1–2) and issue
+      #55 (Phases 3–4) each ran their own `plan` pass before execution, per this
+      ADR's own amendment notes above.
 
 **Resolution plan:** all three are settled during a `plan` pass over the roadmap
 below; none blocks *recording* this direction, and none should be resolved by
@@ -393,6 +395,14 @@ verifiable when it lands. **Nothing here is executed by this decision record.**
    its conformance table cites the landed, enforced state rather than an
    aspiration. *Verifiable when it lands:* every strong-register claim in
    ARCHITECTURE.md is licensed by a cited enforcement surface (template gates 1–2).
+
+   **Executed on `docs/roadmap-cdg008-p5-doc-pass` (Phase 5):** this is the
+   final doc pass closing Track A — flips every ARCHITECTURE.md row/claim still
+   describing Phases 3+4 as pending (already landed as of merge `e2aefd1`, PR
+   #56, ahead of this branch), fixes this ADR's own two cosmetic Open-Question
+   checkboxes (both already resolved in prose but left `[ ]`), and sweeps
+   `docs/*.md` for other Phase-3/4/OQ#1 staleness. See the PR this note ships
+   with for the full file list.
 
 ## Supersession Relationships
 
