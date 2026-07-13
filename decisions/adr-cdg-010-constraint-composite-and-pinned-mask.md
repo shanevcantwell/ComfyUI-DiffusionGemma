@@ -1,6 +1,6 @@
 # ADR-CDG-010 — Constraints as a two-mechanism model: logit mask + canvas re-assertion, composed through an engine-owned ordered composite
 
-**Status**: proposed
+**Status**: accepted (ratified 2026-07-13, PR #43)
 **Date**: 2026-07-13
 **Related**: ADR-CDG-003 (node-engine seam — the core/adapter split this
 composite lives core-side of), ADR-CDG-004 (drive seam — `run_diffusion`'s
@@ -176,7 +176,7 @@ on one ordering (see "Cross-references").
 |---|---|---|---|
 | 1 — constraints use both mechanisms | a `constraints=` payload always installs both a logit mask and a re-assertion write, never one alone | Composite-participant test asserting both effects for one constraint entry, over R4's shared fake-pipeline fixture | `NOT-YET-IMPLEMENTED` — #35 R1, gated on R4 |
 | 2 — declarative payloads only | `run_diffusion(constraints=...)` accepts a payload, not a callable; ingress rejects a passed callable/hook | Ingress type/shape validation (constraint ids in-vocab; fail on unknown) | `NOT-YET-IMPLEMENTED` — ADR-CDG-010/011 ingress clause, ARCHITECTURE.md enforcement-surface table |
-| 3 — fixed composite order (capture < β-rebuild < pin; capture before any writer) | two identical constraint runs produce identically-ordered composite effects; capture never reads post-pin state | Ordered-composite test over R4's shared fixture (`tests/conftest.py`), asserting the exact operation order via the fixture's recording model/scheduler | `NOT-YET-IMPLEMENTED` — #35 R1 (over R4's fixture); ARCHITECTURE.md enforcement-surface table |
+| 3 — fixed composite order (capture < β-rebuild < pin; capture before any writer) | two identical constraint runs produce identically-ordered composite effects; capture never reads post-pin state | Ordered-composite test over R4's shared fixture (`tests/conftest.py`): `tests/test_step_end_composite.py:TestFixedOrdering`, `TestOrderingIsStructural`, asserting the exact operation order via the fixture's recording model/scheduler | **In force** — #35 R1 (over R4's fixture), `dgemma/composite.py:StepEndComposite`; ARCHITECTURE.md enforcement-surface table |
 | 3 — live view is not a participant | `on_frame` never blocks or reorders canvas-writers; removing all `on_frame` observers changes no canvas output | Existing read-only-observer contract (`_FrameCollector`'s docstring, `dgemma/loop.py`); no new test needed beyond today's `on_frame` exception-propagation coverage — flagged here as inherited, not newly created | **In force** (`nodes/sampler.py:114-161`, `dgemma/loop.py:477`) |
 | 4 — `pinned_mask` per frame | every `DiffusionFrame` in `CanvasTrace` carries a `pinned_mask` field distinguishing constraint-asserted cells from model-committed ones | `DiffusionFrame` field addition (`dgemma/types.py`) + a trace-honesty test asserting a pinned cell's `pinned_mask` is `True` regardless of the scheduler's own commit reading that step | `NOT-YET-IMPLEMENTED` — #35 R1/R6 (rides `DiffusionFrame` extension discipline) |
 | 5 — hook installs only via R5 | no `register_forward_hook` call for constraints exists outside the R5 context manager; no hook survives a `run_diffusion` call | R5 lifecycle context-manager test, clean **and** raising | `NOT-YET-IMPLEMENTED` — #35 R5 (F4); ARCHITECTURE.md enforcement-surface table |
