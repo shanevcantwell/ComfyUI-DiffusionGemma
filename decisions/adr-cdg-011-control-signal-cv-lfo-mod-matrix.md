@@ -1,6 +1,6 @@
 # ADR-CDG-011 — Control signals as CV/LFO: declarative payloads, units-at-binding, `scheduler.config`-only mutation
 
-**Status**: proposed
+**Status**: accepted (ratified 2026-07-13, PR #43)
 **Date**: 2026-07-13
 **Related**: ADR-CDG-004 (drive seam — `run_diffusion`'s signature is what
 this ADR widens), ADR-CDG-008 (MCP-center topology — Correction 1's

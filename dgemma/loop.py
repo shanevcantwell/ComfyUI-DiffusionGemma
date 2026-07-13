@@ -16,6 +16,7 @@ from typing import Any, Callable, Literal
 import torch
 from diffusers import DiffusionGemmaPipeline, EntropyBoundScheduler
 
+from .composite import DiffusionCancelled, StepEndComposite
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame
 
 # Grounded defaults (CLAUDE.md / plan.md — first local run, Q4_K_M).
@@ -507,6 +508,7 @@ def run_diffusion(
     thinking: bool = False,
     keep_frames: Literal["last", "all"] = "all",
     on_frame: Callable[[DiffusionFrame], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[str, CanvasState, CanvasTrace]:
     """Drive one prompt through the block-diffusion denoising loop.
 
@@ -563,6 +565,35 @@ def run_diffusion(
     `_FrameCollector`'s docstring): a callback that must never kill the run
     guards itself, as the node layer's display-only closure does.
 
+    `should_cancel` (issue #38, folded into R1's composer spec per the #35
+    handoff): a zero-argument, surface-neutral predicate checked once per
+    step by `dgemma.composite.StepEndComposite`, AFTER that step's capture
+    (ADR-CDG-010 cancellation amendment 2026-07-13, PR #45) — surface-
+    agnostic by construction (ARCHITECTURE.md rule 1): a ComfyUI surface
+    wires this to `comfy.model_management`'s interrupt check, an MCP surface
+    wires it to its own abort signal, and this module never imports either.
+    When the predicate reports `True`, the composite raises
+    `DiffusionCancelled`, caught here to return the PARTIAL
+    `(text, CanvasState, CanvasTrace)` built from every frame captured so
+    far — INCLUDING the cancelled step's own committed frame, the run's
+    exact truncation point (the scheduler has already committed that step
+    by `callback_on_step_end` time; see `dgemma/composite.py`'s module
+    docstring) — evidence is returned, not raised away (#38's "a cancelled
+    experiment run is still data" clause). `None` (default) means no
+    cancellation wiring; the run always completes or raises a real error,
+    exactly today's behavior.
+
+    The single `callback_on_step_end` slot passed to the pipeline is a
+    `dgemma.composite.StepEndComposite` (ADR-CDG-010 Decision 3 + its
+    cancellation amendment), not the collector directly — the composite's
+    fixed order is `capture -> cancellation check -> beta-rebuild -> pin`;
+    only `capture` (this collector) and the cancellation seam are wired
+    today, so the composite's behavior here is otherwise identical to
+    invoking the collector alone. Beta-rebuild/pin
+    participants (ADR-CDG-010) and the control-signal walker
+    (ADR-CDG-011) are `NOT-YET-IMPLEMENTED` — R1 lands the ordered scaffold
+    they slot into, not their bodies.
+
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
     the scheduler's class name and the entropy/temperature config passed to
@@ -599,6 +630,7 @@ def run_diffusion(
         keep_frames=keep_frames,
         on_frame=on_frame,
     )
+    step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel)
 
     if thinking:
         prompt_kwargs: dict = {
@@ -610,18 +642,90 @@ def run_diffusion(
     else:
         prompt_kwargs = {"prompt": prompt}
 
-    output = pipeline(
-        **prompt_kwargs,
-        gen_length=gen_length,
+    try:
+        output = pipeline(
+            **prompt_kwargs,
+            gen_length=gen_length,
+            num_inference_steps=num_inference_steps,
+            confidence_threshold=confidence,
+            generator=generator,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+        )
+    except DiffusionCancelled:
+        # #38 partial-return semantics: return the evidence already
+        # captured rather than raising it away. Under the capture-first
+        # amendment the last captured frame IS the cancelled step's own
+        # committed frame — the run's exact truncation point — and its
+        # canvas stands in for the pipeline's (never-produced)
+        # `output.sequences` — same excision/decode path as the completed
+        # case, so a cancelled run's `CanvasState`/`CanvasTrace` are built
+        # the identical way a completed run's are, not a special-cased
+        # shape.
+        #
+        # No-frames guard: unreachable through the composite's own flow
+        # (capture precedes the cancellation check, and the collector
+        # always appends a frame before returning), kept as defensive
+        # honesty against a `DiffusionCancelled` raised from anywhere else
+        # in the pipeline call — with zero evidence, re-raising is honest
+        # and `_build_result` would otherwise mint a fabricated-empty
+        # `CanvasState` (or die in `derive_canvas_state` with a less
+        # truthful error).
+        if not collector.frames:
+            raise
+        sequences = collector.frames[-1].canvas
+        # `DiffusionFrame.canvas` may be 1-D `[canvas_len]` or 2-D
+        # `[batch, canvas_len]` (same shape ambiguity `decode_frames`
+        # resolves, `dgemma/loop.py`'s `decode_frames` docstring) — the
+        # completed path always hands `_build_result` a 1-D sequence
+        # (`output.sequences[0]`), so the cancelled path normalizes the
+        # same way rather than introducing a second shape contract.
+        if hasattr(sequences, "dim") and sequences.dim() == 2:
+            sequences = sequences[0]
+        return _build_result(
+            dgemma_model=dgemma_model,
+            pipeline=pipeline,
+            scheduler=scheduler,
+            sequences=sequences,
+            collector=collector,
+            entropy_bound=entropy_bound,
+            t_min=t_min,
+            t_max=t_max,
+            num_inference_steps=num_inference_steps,
+        )
+
+    return _build_result(
+        dgemma_model=dgemma_model,
+        pipeline=pipeline,
+        scheduler=scheduler,
+        sequences=output.sequences[0],
+        collector=collector,
+        entropy_bound=entropy_bound,
+        t_min=t_min,
+        t_max=t_max,
         num_inference_steps=num_inference_steps,
-        confidence_threshold=confidence,
-        generator=generator,
-        callback_on_step_end=collector.on_step_end,
-        callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
     )
 
+
+def _build_result(
+    *,
+    dgemma_model: DGemmaModel,
+    pipeline: Any,
+    scheduler: Any,
+    sequences: Any,
+    collector: "_FrameCollector",
+    entropy_bound: float,
+    t_min: float,
+    t_max: float,
+    num_inference_steps: int,
+) -> tuple[str, CanvasState, CanvasTrace]:
+    """Shared tail of `run_diffusion`'s completed and cancelled paths:
+    thought-channel excision, decode, `CanvasState`/`CanvasTrace`
+    construction — identical for both so a cancelled run's returned shape is
+    not a special case a caller has to branch on (#38: "return what exists"
+    means the same contract, populated with less)."""
     start_id, end_id = resolve_thought_channel_ids(dgemma_model.processor)
-    excision = excise_thought_channel(output.sequences[0], start_id, end_id)
+    excision = excise_thought_channel(sequences, start_id, end_id)
 
     text = _decode_ids(dgemma_model.processor, excision.remaining_ids, pipeline.eos_token_id)
     # Decode and label-strip each excised span independently (the "thought\n"

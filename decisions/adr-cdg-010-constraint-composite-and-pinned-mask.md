@@ -1,6 +1,6 @@
 # ADR-CDG-010 — Constraints as a two-mechanism model: logit mask + canvas re-assertion, composed through an engine-owned ordered composite
 
-**Status**: proposed
+**Status**: accepted (ratified 2026-07-13, PR #43)
 **Date**: 2026-07-13
 **Related**: ADR-CDG-003 (node-engine seam — the core/adapter split this
 composite lives core-side of), ADR-CDG-004 (drive seam — `run_diffusion`'s
@@ -131,6 +131,57 @@ on one ordering (see "Cross-references").
    `run_diffusion` call builds its pin state fresh from that call's
    `constraints=` payload; nothing persists it for the next call.
 
+## Amendment — cancellation position in the composite order (2026-07-13, PR #45)
+
+Decision 3 fixes the canvas-writer order (capture < β-rebuild < pin) but
+predates issue #38's fold-in of a per-step cancellation check into the same
+composite, so it is silent on where that check runs. R1's implementation
+(PR #45) initially placed cancellation **first** (before capture); the gate
+review adjudicated the position and the seat decided the opposite. The
+ratified order is:
+
+    capture -> cancellation check -> β-rebuild -> pin
+
+**Why capture-then-cancel.** The composite fires at `callback_on_step_end` —
+*after* the scheduler's `step()` has committed the step's canvas
+(`pipeline_diffusion_gemma.py:365-371` → `:404-407`). At the moment the
+cancellation check could trip, the current step's frame is therefore
+**committed evidence, not an in-flight partial**. Capturing before the check
+means a cancelled run's partial `CanvasTrace` retains its exact truncation
+point: the committed frame of the very step the caller cancelled on — often
+the most diagnostically interesting frame (it is the state the caller was
+looking at when they decided to stop). This is #38's "a cancelled experiment
+run is still data" taken at full strength, and it aligns with the pack's
+instrumentation-first evidence posture (cf. #46).
+
+**Alternative considered — cancel-first (rejected).** Checking cancellation
+before capture saves one capture on the abandoned step. That optimizes a
+cost (one frame's capture) the pack's own values would gladly pay, and it
+silently discards a *committed* frame — a small lying-by-omission in the
+trace: the run's record ends one step before where the run actually stopped.
+Rejected in the 2026-07-13 gate adjudication (PR #45 review comment).
+
+**What survives from the cancel-first rationale:** cancellation still
+precedes every canvas-writer, so no β-rebuild/pin pass runs for a step whose
+result will never be used — only the evidence side of the cancelled step
+completes.
+
+**Partial-return contract** (engine-side, landed in R1): on
+`DiffusionCancelled`, `run_diffusion` returns the same
+`(text, CanvasState, CanvasTrace)` shape as a completed run, built from all
+captured frames including the truncation-point frame; with zero captured
+frames (unreachable through the composite's own flow, defensively guarded)
+it re-raises rather than fabricating an empty `CanvasState`. Note
+`CanvasState` here is the P3 validity object — ADR-CDG-005's full resumable
+save-state is still implementation-pending; the partial return is honest
+about where the run stopped, which is the property this amendment fixes.
+
+Enforcement surface: `tests/test_step_end_composite.py:TestCancellationSeam`
+(capture-then-cancel, writer gating) and
+`tests/test_run_diffusion_cancel.py` (truncation-frame inclusion,
+no-evidence re-raise). Record trail: PR #45 (implementation + gate review
+comment), issue #38 (decided-position comment).
+
 ## Rationale
 
 ### Positive Consequences
@@ -176,8 +227,9 @@ on one ordering (see "Cross-references").
 |---|---|---|---|
 | 1 — constraints use both mechanisms | a `constraints=` payload always installs both a logit mask and a re-assertion write, never one alone | Composite-participant test asserting both effects for one constraint entry, over R4's shared fake-pipeline fixture | `NOT-YET-IMPLEMENTED` — #35 R1, gated on R4 |
 | 2 — declarative payloads only | `run_diffusion(constraints=...)` accepts a payload, not a callable; ingress rejects a passed callable/hook | Ingress type/shape validation (constraint ids in-vocab; fail on unknown) | `NOT-YET-IMPLEMENTED` — ADR-CDG-010/011 ingress clause, ARCHITECTURE.md enforcement-surface table |
-| 3 — fixed composite order (capture < β-rebuild < pin; capture before any writer) | two identical constraint runs produce identically-ordered composite effects; capture never reads post-pin state | Ordered-composite test over R4's shared fixture (`tests/conftest.py`), asserting the exact operation order via the fixture's recording model/scheduler | `NOT-YET-IMPLEMENTED` — #35 R1 (over R4's fixture); ARCHITECTURE.md enforcement-surface table |
+| 3 — fixed composite order (capture < β-rebuild < pin; capture before any writer) | two identical constraint runs produce identically-ordered composite effects; capture never reads post-pin state | Ordered-composite test over R4's shared fixture (`tests/conftest.py`): `tests/test_step_end_composite.py:TestFixedOrdering`, `TestOrderingIsStructural`, asserting the exact operation order via the fixture's recording model/scheduler | **In force** — #35 R1 (over R4's fixture), `dgemma/composite.py:StepEndComposite`; ARCHITECTURE.md enforcement-surface table |
 | 3 — live view is not a participant | `on_frame` never blocks or reorders canvas-writers; removing all `on_frame` observers changes no canvas output | Existing read-only-observer contract (`_FrameCollector`'s docstring, `dgemma/loop.py`); no new test needed beyond today's `on_frame` exception-propagation coverage — flagged here as inherited, not newly created | **In force** (`nodes/sampler.py:114-161`, `dgemma/loop.py:477`) |
+| Amendment — cancellation position (capture before cancellation; cancellation before any writer) | a cancelled step's committed truncation-point frame is captured before the cancel check raises; no canvas-writer runs on a cancelled step; partial return includes that frame | `tests/test_step_end_composite.py:TestCancellationSeam`; `tests/test_run_diffusion_cancel.py` | **In force** — PR #45 (amendment 2026-07-13) |
 | 4 — `pinned_mask` per frame | every `DiffusionFrame` in `CanvasTrace` carries a `pinned_mask` field distinguishing constraint-asserted cells from model-committed ones | `DiffusionFrame` field addition (`dgemma/types.py`) + a trace-honesty test asserting a pinned cell's `pinned_mask` is `True` regardless of the scheduler's own commit reading that step | `NOT-YET-IMPLEMENTED` — #35 R1/R6 (rides `DiffusionFrame` extension discipline) |
 | 5 — hook installs only via R5 | no `register_forward_hook` call for constraints exists outside the R5 context manager; no hook survives a `run_diffusion` call | R5 lifecycle context-manager test, clean **and** raising | `NOT-YET-IMPLEMENTED` — #35 R5 (F4); ARCHITECTURE.md enforcement-surface table |
 | 6 — `CONSTRAINTS` minted once | no inline `DGEMMA_*` / constraint-shape literal outside the R2 mint module | Grep-gate test asserting against the module object | `NOT-YET-IMPLEMENTED` — #35 R2 |
