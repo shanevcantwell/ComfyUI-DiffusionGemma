@@ -33,6 +33,7 @@ design question, not a missing loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from .types import CanvasTrace
 
@@ -93,16 +94,32 @@ def build_avalanche_curve(trace: CanvasTrace) -> list[float]:
 @dataclass
 class MaskTokenCorroboration:
     """Result of `corroborate_no_mask_token` — item (c), the empirical
-    corroboration of ADR-CDG-004's documentary "no MASK" confirmation."""
+    corroboration of ADR-CDG-004's documentary "no MASK" confirmation.
 
-    no_fixed_sentinel: bool
-    """`True` iff more than one distinct token id was observed among
-    positions caught mid-renoise (evidence for uniform-state renoise,
-    `mask_token_id=None`). `False` iff every such position held exactly one
-    repeated id (the signature an absorbing MASK scheme would leave)."""
+    Tri-state `verdict` (issue #22 honesty finding, 2026-07-13): the
+    original two-state shape (`no_fixed_sentinel: bool`) folded "genuinely
+    varied evidence FOR uniform-state renoise" and "zero observed
+    transitions, hence no evidence either way" into the same `True` value —
+    a trace with no mid-renoise transitions at all (e.g. a single-frame or
+    fully-converged-on-arrival trace) would print the same "uniform-state
+    renoise supported" verdict as a trace that actually exhibited varying
+    prior values. That is exactly the lying-payload shape ADR-CDG-001
+    forbids: a summary claiming corroboration on zero evidence. `verdict`
+    keeps the three outcomes distinct instead of collapsing two of them."""
+
+    verdict: Literal["evidence_against_sentinel", "vacuous", "sentinel_found"]
+    """`"evidence_against_sentinel"`: more than one distinct prior-value id
+    was observed among positions caught mid-renoise — genuine evidence FOR
+    uniform-state renoise (`mask_token_id=None`), a fixed sentinel is
+    contradicted. `"vacuous"`: zero transitions were observed at all (no
+    same-block frame pair had any position change) — nothing to corroborate
+    OR contradict the no-mask hypothesis with; silent on the question, not
+    supportive of it. `"sentinel_found"`: every observed transition's prior
+    value was the same single repeated id — the signature an absorbing-MASK
+    scheme would leave."""
 
     candidate_sentinel_id: int | None = None
-    """Set iff `no_fixed_sentinel` is `False` — the one repeated id found."""
+    """Set iff `verdict == "sentinel_found"` — the one repeated id found."""
 
 
 def corroborate_no_mask_token(trace: CanvasTrace) -> MaskTokenCorroboration:
@@ -136,6 +153,14 @@ def corroborate_no_mask_token(trace: CanvasTrace) -> MaskTokenCorroboration:
     them risked polluting this check with the heatmap's own "first frame of
     a block reports all positions as changed" convention, which is a
     completeness choice for rendering, not evidence about token identity).
+
+    Tri-state return (issue #22): zero observed transitions is `"vacuous"`,
+    NOT folded into the same verdict as genuinely varied evidence — a trace
+    with nothing to diff (e.g. one frame, or every position already
+    committed by the first captured step) has no evidence either way and
+    must say so, rather than reporting the same "no fixed sentinel" verdict
+    a trace with real varying transitions would earn. See
+    `MaskTokenCorroboration`'s docstring for the three outcomes.
     """
     observed: set[int] = set()
     prev_positions: list[int] | None = None
@@ -149,9 +174,10 @@ def corroborate_no_mask_token(trace: CanvasTrace) -> MaskTokenCorroboration:
         prev_positions = positions
         prev_canvas_idx = frame.canvas_idx
 
+    if not observed:
+        return MaskTokenCorroboration(verdict="vacuous")
     if len(observed) == 1:
-        return MaskTokenCorroboration(no_fixed_sentinel=False, candidate_sentinel_id=next(iter(observed)))
-    # Zero observed changes is vacuous (nothing to contradict the no-mask
-    # hypothesis with) and folds into the same "no fixed sentinel found" verdict
-    # as genuinely varying evidence.
-    return MaskTokenCorroboration(no_fixed_sentinel=True)
+        return MaskTokenCorroboration(
+            verdict="sentinel_found", candidate_sentinel_id=next(iter(observed))
+        )
+    return MaskTokenCorroboration(verdict="evidence_against_sentinel")

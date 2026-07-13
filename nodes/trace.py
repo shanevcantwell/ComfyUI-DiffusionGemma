@@ -52,14 +52,24 @@ def _format_summary(trace, curve: list[float], corroboration) -> str:
     mask-token corroboration verdict, so the empirical check (dgemma/
     sampling.py's own docstring on ADR-CDG-004's documentary "no MASK"
     confirmation) is actually visible on the graph, not just in a unit
-    test."""
+    test.
+
+    Tri-state verdict (issue #22): the vacuous case (zero observed
+    transitions) prints its own line, distinct from genuine "evidence
+    against a fixed sentinel" — printing the same "supported" wording on
+    zero evidence is exactly the overclaim ADR-CDG-001 forbids."""
     lines = [
         f"scheduler={trace.scheduler_name} config={trace.scheduler_config}",
         f"steps={len(curve)}",
         "committed_fraction per step: " + ", ".join(f"{value:.4f}" for value in curve),
     ]
-    if corroboration.no_fixed_sentinel:
+    if corroboration.verdict == "evidence_against_sentinel":
         lines.append("mask-token corroboration: no fixed sentinel (uniform-state renoise supported)")
+    elif corroboration.verdict == "vacuous":
+        lines.append(
+            "mask-token corroboration: vacuous (no mid-renoise transitions observed — "
+            "neither supports nor contradicts uniform-state renoise)"
+        )
     else:
         lines.append(
             "mask-token corroboration: FIXED SENTINEL CANDIDATE id="

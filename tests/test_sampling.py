@@ -131,9 +131,17 @@ class TestBuildAvalancheCurve:
 
 
 class TestCorroborateNoMaskToken:
-    def test_visibly_varying_uncommitted_positions_report_no_fixed_sentinel(self):
+    """Tri-state `verdict` (issue #22): the vacuous case (zero observed
+    transitions) must NOT collapse into the same verdict as genuinely
+    varied evidence — a `MaskTokenCorroboration` reporting "no fixed
+    sentinel (uniform-state renoise supported)" on zero evidence is exactly
+    the lying-payload overclaim ADR-CDG-001 forbids. All three states are
+    exercised below."""
+
+    def test_visibly_varying_uncommitted_positions_report_evidence_against_sentinel(self):
         """Uniform-state renoise signature: the pre-transition values a
-        still-unaccepted position held vary across steps."""
+        still-unaccepted position held vary across steps — genuine evidence
+        AGAINST a fixed sentinel, not merely the absence of evidence for one."""
         frames = [
             _frame(0, 0, [10, 20, 30, 40], 0.0),
             _frame(0, 1, [11, 20, 31, 40], 0.5),  # positions 0,2 changed FROM 10,30
@@ -144,7 +152,7 @@ class TestCorroborateNoMaskToken:
         result = corroborate_no_mask_token(trace)
 
         assert isinstance(result, MaskTokenCorroboration)
-        assert result.no_fixed_sentinel is True
+        assert result.verdict == "evidence_against_sentinel"
         assert result.candidate_sentinel_id is None
 
     def test_positions_pinned_to_one_constant_flag_a_candidate_sentinel(self):
@@ -160,16 +168,35 @@ class TestCorroborateNoMaskToken:
 
         result = corroborate_no_mask_token(trace)
 
-        assert result.no_fixed_sentinel is False
+        assert result.verdict == "sentinel_found"
         assert result.candidate_sentinel_id == 99
 
-    def test_no_changes_observed_is_vacuously_no_fixed_sentinel(self):
+    def test_no_changes_observed_is_vacuous_not_evidence_against_sentinel(self):
         """Nothing ever changed (degenerate/synthetic single-frame or fully
-        static trace) — no evidence to contradict the no-mask hypothesis."""
+        static trace) — no evidence to corroborate OR contradict the
+        no-mask hypothesis with. Before issue #22 this collapsed into the
+        same verdict as genuinely varied evidence; the tri-state keeps
+        "no evidence" honestly distinct from "evidence found"."""
         frames = [_frame(0, 0, [1, 2, 3], 1.0)]
         trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
 
         result = corroborate_no_mask_token(trace)
 
-        assert result.no_fixed_sentinel is True
+        assert result.verdict == "vacuous"
+        assert result.candidate_sentinel_id is None
+
+    def test_multi_frame_no_transitions_within_block_is_also_vacuous(self):
+        """A multi-frame trace where every same-block pair happens to hold
+        steady (no position ever changes) is the same vacuous case as the
+        single-frame one — the emptiness of `observed`, not the frame
+        count, is what determines the verdict."""
+        frames = [
+            _frame(0, 0, [1, 2, 3], 0.5),
+            _frame(0, 1, [1, 2, 3], 0.5),  # identical canvas, nothing changed
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        result = corroborate_no_mask_token(trace)
+
+        assert result.verdict == "vacuous"
         assert result.candidate_sentinel_id is None
