@@ -119,6 +119,39 @@ bridging recompute, or (B) interpolation produces off-manifold degradation rathe
 *Build-from / distinguish:* `MasaCtrl` (2304.08465, mechanism) × `Models Take Notes at Prefill` (2606.17107,
 composable-KV framing) — ours differs by diffusion-LM-native + steering + interpolation.
 
+### H0-renoise — β-viscosity renoise: drawing held positions from their own distribution opens a liquid basin uniform noise skips
+
+*(Pre-registered 2026-07-13, before any observation. The cheapest falsification in the program —
+runs on today's callback plus one `torch.where`, no vendoring. The scheduler already computes
+`sampled_tokens` for every position each step and discards them at rejected positions; a β-mixture
+renoise reweights that discard. Grounded in the 2026-07-13 intervention-surface sweep, `concept.md`
+Addendum item 5; VISION §3.3's renoise axis.)*
+
+*Prediction.* With renoise at held positions drawn from the **top-k of the step's own distribution**
+(a β<1 mixture against uniform) instead of uniform noise, held positions stay **mobile-but-coherent**:
+their per-step draws cluster in a **small, semantically-related candidate set** (liquid), where uniform
+renoise **sublimates** — boils the position straight to structureless polyglot steam (the banked
+2026-07-06 null). β is the viscosity knob: β→1 (uniform) reproduces the sublimation; β<1 should open
+and hold the intermediate basin.
+
+*Pre-stated failure mode — self-collapse.* The model was trained to denoise **uniform** noise. Feeding
+it plausible-but-uncommitted tokens as renoise may read as *signal* rather than noise: entropy drops
+everywhere, the commit rule sees false confidence, and the cascade fires prematurely — the cloud
+**crystallizes instead of holding.** This is the specific, anticipated way β<1 could destroy the very
+liquid it was meant to open.
+
+*Falsified if* the β-sweep shows only the **two existing phases** — immediate collapse (self-collapse,
+above) or steam (β too close to uniform) — with **no held intermediate** at any β. Then uniform-state
+renoise has no viscosity axis and the liquid basin is not reachable by shaping the renoise
+distribution.
+
+*Note — one protocol, two questions.* This is the **same mechanism as issue #6's adversarial-renoise
+question, inverted.** #6 asked whether *plausible noise fools the entropy-bound commit rule* (framed as
+an attack); the self-collapse branch above **is exactly that failure** — plausible noise fooling the
+commit rule into premature crystallization. One β-sweep protocol answers both: read as viscosity
+control it is H0-renoise; read as an attack it is #6. A confirmation here is a control knob; the
+self-collapse branch is #6's "yes, plausible noise fools the rule."
+
 ## Room for observations
 
 Append-only. Never retro-fit a prediction to a result. Verdict ∈ {untested, observed, falsified,
@@ -127,3 +160,4 @@ held}.
 | date | H0 | setup (steps / t / entropy_bound / threshold / held positions) | observation | verdict |
 |---|---|---|---|---|
 | — | — | — | (none yet) | untested |
+| — | H0-renoise | — | (pre-registered 2026-07-13; not yet run) | untested |

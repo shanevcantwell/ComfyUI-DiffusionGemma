@@ -322,3 +322,69 @@ steam = the banked null) as well as the target (liquid), which crystal does not.
   (`design-docs/experiments/README.md`).
 - **Graduation trigger:** a confirmed H0 → an ADR in `decisions/` (a socket type and/or scheduler
   seam from the seam inventory). Until then it incubates here.
+
+---
+
+## Addendum (2026-07-13) — intervention surface grounded; the mechanisms are real
+
+The 2026-07-13 intervention-surface sweep (grounded against the pipeline/scheduler source, banked
+in issues #23 / #28 / #35 / #36) changes this note's standing on one axis: the mechanisms the two
+faces require are no longer *reachable-in-principle* — they are **located in source**, and the
+record's biggest implementability question is closed. Pointer-only below; the derivations live in
+the cited issue comments.
+
+1. **Knob liveness is proven — every EB scalar is live-mutable per step.**
+   `EntropyBoundScheduler.step()` reads `entropy_bound`, `t_min`, `t_max` fresh from `self.config`
+   on *every* call; nothing is baked at `set_timesteps` time. A step-end callback mutates
+   `pipe.scheduler.config` and the change takes the next step. **Exact per-step temperature falls
+   out:** `t_min = t_max = v` degenerates the anneal formula to `v`. The only guard rail is
+   `num_inference_steps` (mutate it mid-run and the pipeline's cached step counts desync — #20's
+   mechanism). Source: #23 comments (2026-07-13). This is H0-control's drive mechanism, in hand —
+   no vendoring.
+
+2. **The logit door — the per-position heat field the control face required.**
+   The pipeline has no `logits_processor` param, but a `register_forward_hook` on `pipe.model`
+   (reachable from the callback's `pipe` arg, or engine-installed before the run) mutates the
+   returned `.logits` the commit rule consumes, and propagation is coherent — self-conditioning
+   carries `pred_logits` derived from the *same* mutated tensor, so no split-brain between
+   constraint and conditioning. **Flatten the logits ⇒ hold a position liquid; sharpen ⇒ commit
+   early.** This closes the record's biggest open implementability question: the per-position heat
+   field is a forward hook, not a wish. Sealed alternatives named honestly (`self_conditioning_logits`,
+   `argmax_history`, `cur_input_ids` are `__call__`-scope locals; returning `{"logits": ...}` from
+   the callback is silently discarded — the hook is the *only* logit door). Source: #28 comment
+   (2026-07-13).
+
+3. **Where the liquid actually lives.** The liquid is carried by the **self-conditioning channel**
+   (`pred_logits`) over the **fixed prefill KV** — not by the canvas. The canvas is the
+   **measurement register**: rejected positions are renoised each step (`torch.randint` over the
+   full vocab) and the scheduler is stateless, so a held position's mobility is read *off the
+   distribution*, not off canvas persistence. This is why the observation face needs the widened
+   callback (DISTRIBUTION capture): the liquid is observable there and nowhere in committed state.
+
+4. **Equilibrate-then-quench is a canvas-scale protocol under H0-control.** A **hold phase**
+   (an ADSR-style envelope on temperature / entropy_bound / β, driven by the per-step knob mutation
+   of (1)) holds the canvas in the liquid basin; then a **quench** cools it to commitment.
+   Because the held state is a `CANVAS_STATE` (ADR-CDG-005), **N quenches can fork from one held
+   state** — the multi-sample-from-one-equilibrium move #36's comment names as belonging on the
+   one contract, not the graph loop.
+
+5. **β-viscosity renoise / the superposition cloze — nearly free.** The scheduler *already*
+   computes `sampled_tokens` for **every** position each step and discards them at rejected
+   positions; a β-mixture renoise (draw held positions from top-k of the step's own distribution,
+   weight β against uniform) is essentially **one `torch.where`**. β is the **viscosity knob** —
+   the VISION §3.3 convergence named directly (uniform renoise → structureless polyglot soup;
+   β<1 → a cloud of near-meanings). This also **inverts #6**: #6 asked whether *plausible noise
+   fools the commit rule* (an adversarial attack); read as an instrument, that same plausible-noise
+   renoise *is* the viscosity term — attack becomes control surface. (One β-sweep protocol answers
+   both; see `experiment.md` H0-renoise.)
+
+6. **Architecture reviewed for this load — verdict and the constraints it fixed.** The 2026-07-13
+   Opus-tier review (#35) returned **"needs targeted refactors first, not a redesign"**: the bones
+   (CDG-003 seam, fake-pipeline testing, native-socket discipline) survive, ~a week of seam work.
+   Two constraints this addendum's mechanisms must respect, both firmed by the review's delta pass:
+   the composite of engine participants (β-renoise, walker, pin, capture) is **composer-ordered**
+   (capture pre-pin, pin last writer); and `run_diffusion` widens by **declarative payloads only**
+   (`constraints=` / `control_signals=` / `capture=`, validated at ingress) — **never
+   surface-built closures or hooks** (the callback's `pipe.model` reachability is explicitly *not*
+   a sanctioned installation path; engine-installed hooks ride the R5 lifecycle manager). See #35
+   and [`ARCHITECTURE.md`](../../../ARCHITECTURE.md).
