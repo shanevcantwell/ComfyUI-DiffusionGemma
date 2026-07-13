@@ -141,6 +141,109 @@ class DiffusionFrame:
 
 
 @dataclass
+class EditOp:
+    """One tier-2 perturbation op (ADR-CDG-012 §D.0, `Provenance.edit_script`
+    member). The against-distribution edit-script entry: what was done to a
+    `KVCache` when no single minting sequence reproduces it anymore (ADR
+    §5, §1). Tier-2 surgery (`dgemma/kv_surgery.py`) is out of Phase 1 scope
+    (issue #62 ratification, Q-1: tier-2 deferred) — this dataclass lands now
+    because `Provenance.edit_script` needs its element type decided once,
+    but no op-producing code exists yet in Phase 1.
+    """
+
+    op: str
+    """One of `"splice"` | `"ablate"` | `"scale"` | `"ablate_full_attention"`
+    (ADR-CDG-012 §5) — a closed, ADR-named vocabulary, not a caller-invented
+    string. Phase 1 does not construct any `EditOp`; the field exists so
+    tier-2 (Phase 5) has a decided shape to append to."""
+
+    params: dict
+    """Op-specific parameters (layer indices, source cache id, scale factor,
+    ...) — shape depends on `op`; not further typed here (ADR-CDG-012 §5
+    leaves per-op parameter shape to the tier-2 surgery implementation)."""
+
+
+@dataclass
+class Provenance:
+    """The mint record (ADR-CDG-012 §1, §D.0): the record that keeps a
+    `KVCache` non-lying (`EMIT-CANONICAL / PARSE-AT-THE-DOOR` applied to a
+    live cache object instead of a tensor payload). Rides every `KV_CACHE`
+    crossing (node-to-node, disk) as part of the `KVCache` payload, and —
+    identity only, never the tensors — on `CanvasTrace.injected_cache_provenance`
+    (OUT-3) when a run was driven with an injected cache.
+
+    Tier 1 (the only tier Phase 1 constructs test fixtures for; tier-2
+    surgery itself is Phase-5/out-of-scope per issue #62 Q-1): `minting_sequence`
+    is present, `edit_script` is empty. Tier 2: `minting_sequence` is `None`,
+    `edit_script` is non-empty (no single prefill reproduces a perturbed
+    cache — the tensors are the only reproduction path once perturbed).
+
+    `minting_sequence is None and edit_script == ()` is the ILLEGAL orphan
+    state (§D.0) — a cache with no reproduction path at all, unreproducible
+    and unauditable. `validate_kv_cache_ingress`'s V5 check
+    (`dgemma/kv_cache.py`) rejects it at every `KV_CACHE` ingress door.
+    """
+
+    minting_sequence: "tuple[int, ...] | None"
+    """Token ids the encoder consumed to produce this cache — present for
+    tier 1, `None` once perturbed (tier 2, no single prefill reproduces it)."""
+
+    edit_script: "tuple[EditOp, ...]"
+    """`()` for tier 1; the splice/ablate/scale ops for tier 2 (non-empty
+    exactly when `minting_sequence` is `None`, except the illegal orphan
+    state where both are empty/`None` — V5 rejects that combination)."""
+
+    model_repo_id: str
+    """Which model minted this cache (`DGemmaModel.repo_id`) — V4 checks
+    this against the loaded model at ingress."""
+
+    tokenizer_fingerprint: str
+    """Which vocab minted this cache — V4 checks alignment against the
+    loaded model's tokenizer, preventing a cache minted under one tokenizer
+    from conditioning a canvas on token ids that mean something else under
+    another (ADR-CDG-012 §D.0, "orphan-provenance poisoning, vocab flavor")."""
+
+
+@dataclass
+class KVCache:
+    """The `DGEMMA_KV_CACHE` socket payload (ADR-CDG-012 §D.0). A live cache
+    object plus the mint metadata that keeps it honest — the same shape as
+    `CanvasTrace`/`CanvasState` (a live object + mint identity).
+
+    The socket *string* `DGEMMA_KV_CACHE` is surface-side envelope
+    (`surfaces/comfyui/socket_types.py`, ARCHITECTURE.md rule 4,
+    `IDENTITY⊥ENVELOPE`); this dataclass is the core-side identity that
+    string carries — Phase 1 lands only this dataclass and its ingress
+    validator, not the socket mint (Phase 3, per the ADR-CDG-012
+    implementation plan).
+    """
+
+    cache: Any
+    """The live per-layer K/V store (`transformers.DynamicCache`). Per layer
+    `i`: `key_cache[i]`, `value_cache[i]` each a tensor of shape `(batch,
+    num_kv_heads, seq_len, head_dim)`, dtype matching the loaded model
+    (bfloat16 in production), on the model's device. Layer count must equal
+    the loaded model's decoder-layer count (V1)."""
+
+    cumulative_length: "tuple[int, ...]"
+    """Per-layer running committed length — the ADR-CDG-012 grounding
+    report's ranked-#1 blocker (`cache_utils.py:254`, mask offsets computed
+    from it at `:270`). One entry per layer; a consumer NEVER hand-tracks
+    this (V3 checks it is present, one-per-layer, non-negative)."""
+
+    geometry: dict
+    """The geometry fingerprint (ADR-CDG-012 §2): `layer_types` pattern
+    (which layers are full-attention vs. sliding), `sliding_window` size,
+    `batch`, `dtype`, per-layer-type RoPE params. What ingress validates
+    against the loaded model's config (V2) — the mandatory check that
+    forecloses silent mis-masking from a geometry mismatch."""
+
+    provenance: Provenance
+    """The mint record (see `Provenance` above) — V4 (vocab/repo alignment)
+    and V5 (non-orphan) check this at ingress."""
+
+
+@dataclass
 class CanvasTrace:
     """The complete per-step record of one `run_diffusion` call — the
     `CANVAS_TRACE` socket payload (ADR-CDG-001), consumed post-hoc by
@@ -182,6 +285,25 @@ class CanvasTrace:
     ADR-CDG-014 Decision 1) — never an empty tensor standing in for "no
     ids". A consumer reads absence honestly rather than treating `None` as
     a zero-length canvas."""
+
+    injected_cache_provenance: "Provenance | None" = None
+    """OUT-3 (ADR-CDG-012 §D.2): identity-only record that this run was
+    driven with an injected `KVCache` (`run_diffusion(kv_cache=...)`, Phase
+    2). Carries the envelope's IDENTITY — the `Provenance` record (minting
+    sequence / edit-script / model+tokenizer identity) — NEVER the cache
+    tensors themselves (those already have their own OUT-1/save-node home;
+    duplicating them here would violate OUT-1's one-live-cache-at-a-time
+    retention policy, ADR-CDG-012 §D.2).
+
+    `None` for every non-injected run — unchanged default (additive-optional
+    per #35 R6 discipline, the same discipline `raw_canvas_ids` above
+    follows). Phase 1 lands this field with no populating call site yet
+    (`run_diffusion` gains no `kv_cache` parameter until Phase 2); it exists
+    now so the trace shape is decided once. Without it, a fossil-wave
+    ablation study's trace could not say whether the run it analyzed was
+    conditioned on an injected/perturbed cache — a conclusion that looks
+    grounded but isn't (ADR-CDG-012 Negative Consequences, "orphan-cache
+    poisoning downstream conclusions")."""
 
 
 @dataclass
