@@ -273,7 +273,9 @@ ahead of that pass.
   comment's Corrections 1–3.
 - Issue #28 — logit-mask seam grounding (`register_forward_hook` on
   `pipe.model`; entropy-honest masking; canvas re-assertion requirement).
-- Issue #26 — root cause for full-vocabulary renoise on rejected positions.
+- Issue #26 — root cause (the callback sees only the current canvas),
+  corroborated in #28's grounding comment, which directly observed the
+  full-vocabulary `torch.randint` renoise on rejected positions.
 - ADR-CDG-001 — native socket types; the scheduler-relative commit-semantics
   addendum this ADR's `pinned_mask` clause extends to constraint-relative
   semantics.

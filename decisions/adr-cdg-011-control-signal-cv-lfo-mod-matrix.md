@@ -7,9 +7,11 @@ this ADR widens), ADR-CDG-008 (MCP-center topology — Correction 1's
 `STATELESS-CORE` posture the same-in/same-out clause enforces), ADR-CDG-010
 (constraint composite — the ordered composite slot this ADR's walker shares;
 §"Cross-references" below), Issue #35 (architecture review — the drafting
-spec both this ADR and ADR-CDG-010 transcribe), Issue #20 (closed — the
-`num_inference_steps` desync mechanism this ADR's ingress reject forecloses
-by design)
+spec both this ADR and ADR-CDG-010 transcribe), Issue #23 (per-step control
+grounding — the `scheduler.config` fresh-read mechanism, the one-shot-executor
+constraint, and the CV/LFO reframe this ADR's clauses transcribe), Issue #20
+(closed — the `num_inference_steps` desync mechanism this ADR's ingress
+reject forecloses by design)
 
 ---
 
@@ -304,13 +306,13 @@ by implementation ahead of that pass.
   same-in/same-out F5 handle.
 - Issue #23 — per-step scheduling mechanism grounding
   (`scheduler.config` read-fresh-per-call; `num_inference_steps` guard rail;
-  effective-telemetry requirement); its CV/LFO reframe comment (2026-07-13,
-  "Primitive reframe").
+  effective-telemetry requirement); its "Interface grounding" comment
+  (ComfyUI execution-model: one-shot topological executor,
+  `SIGMAS`/`model_options` prior art); its CV/LFO reframe comment
+  (2026-07-13, "Primitive reframe").
 - Issue #20 (closed) — `anneal_temperature` schedule-denominator desync
   mechanism; the regression this ADR's `num_inference_steps` exclusion
   forecloses by construction.
-- Issue #26 — ComfyUI execution-model grounding (one-shot topological
-  executor; `SIGMAS`/`model_options` prior art).
 - ADR-CDG-001 — native socket types; the "lying sigmas" prohibition Option B
   is checked against.
 - ADR-CDG-004 — drive seam; `run_diffusion` signature this ADR widens.
