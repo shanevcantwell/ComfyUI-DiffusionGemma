@@ -66,6 +66,7 @@ import pytest
 import torch
 
 from dgemma.model import DEFAULT_REPO_ID
+from dgemma.types import DGemmaModel, EditOp, KVCache, Provenance
 
 
 def weights_cached(repo_id: str = DEFAULT_REPO_ID) -> bool:
@@ -477,3 +478,222 @@ def fake_pipeline(fake_pipeline_factory: Callable[..., FakePipelineFactory]) -> 
     """Convenience fixture: the default-configured `fake_pipeline_factory()`
     build, for tests that don't need to vary the knobs."""
     return fake_pipeline_factory()
+
+
+# --- ADR-CDG-012 Phase 1 (issue #62 §L): synthetic KV_CACHE fixture ---------
+#
+# The ADR permits the AR-source cache used by tests to be synthetic — no real
+# weights needed to exercise `validate_kv_cache_ingress`'s V1-V6 branches or
+# any later fake-pipeline-driven KV_CACHE test (Phase 2/3). Scaled-down
+# geometry (1 full-attention layer / 5 sliding, N=6) mirrors the real model's
+# 5-full/25-sliding pattern (`configuration_diffusion_gemma.py`,
+# `sliding_window_pattern = 6`) at a size cheap enough for a unit test.
+
+
+class FakeDynamicCache:
+    """Mirrors `transformers.DynamicCache`'s surface the KV_CACHE channel
+    touches (ADR-CDG-012 §D.0): per-layer `key_cache[i]`/`value_cache[i]`
+    tensors of shape `(batch, num_kv_heads, seq_len, head_dim)`, plus
+    `get_seq_length()`. Small CPU tensors — a controllable stand-in for
+    ingress-validation tests, not a numerical cache reimplementation.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        batch: int = 1,
+        num_kv_heads: int = 2,
+        seq_len: int = 4,
+        head_dim: int = 8,
+        dtype: torch.dtype = torch.bfloat16,
+        device: str = "cpu",
+    ) -> None:
+        shape = (batch, num_kv_heads, seq_len, head_dim)
+        self.key_cache = [torch.zeros(shape, dtype=dtype, device=device) for _ in range(num_layers)]
+        self.value_cache = [torch.zeros(shape, dtype=dtype, device=device) for _ in range(num_layers)]
+
+    def get_seq_length(self, layer_idx: int = 0) -> int:
+        return self.key_cache[layer_idx].shape[2]
+
+
+class FakeDGemmaModelConfig:
+    """Exposes the `.config` surface `geometry_from_model`
+    (`dgemma/kv_cache.py`) reads: `num_hidden_layers`, `layer_types` (the
+    N-full/N-sliding pattern, scaled down for the fake), `sliding_window`,
+    `rope_parameters` — grounded against the real installed
+    `DiffusionGemmaTextConfig` field names (`configuration_diffusion_gemma.py`),
+    not invented.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_hidden_layers: int = 6,
+        sliding_window_pattern: int = 6,
+        sliding_window: int = 16,
+    ) -> None:
+        self.num_hidden_layers = num_hidden_layers
+        self.sliding_window = sliding_window
+        self.layer_types = [
+            "sliding_attention" if bool((i + 1) % sliding_window_pattern) else "full_attention"
+            for i in range(num_hidden_layers)
+        ]
+        self.rope_parameters = {
+            "sliding_attention": {"rope_type": "default", "rope_theta": 10_000.0},
+            "full_attention": {
+                "rope_type": "proportional",
+                "partial_rotary_factor": 0.25,
+                "rope_theta": 1_000_000.0,
+            },
+        }
+
+
+class _FakeInnerModel:
+    def __init__(self, config: FakeDGemmaModelConfig) -> None:
+        self.config = config
+
+
+class _FakeTokenizer:
+    def __init__(self, vocab_size: int = 32) -> None:
+        self.vocab_size = vocab_size
+
+
+class _FakeProcessor:
+    def __init__(self, vocab_size: int = 32) -> None:
+        self.tokenizer = _FakeTokenizer(vocab_size=vocab_size)
+
+
+def fake_dgemma_model(
+    *,
+    repo_id: str = "fake/dgemma-test",
+    num_hidden_layers: int = 6,
+    sliding_window: int = 16,
+    vocab_size: int = 32,
+    dtype: str = "bfloat16",
+    device: str = "cpu",
+) -> DGemmaModel:
+    """Builds a `DGemmaModel` whose `.model.config` and `.processor` expose
+    exactly the surface `dgemma.kv_cache.geometry_from_model` /
+    `tokenizer_fingerprint` / `validate_kv_cache_ingress` read — the fake
+    twin of a real `load_model()` result, sized for a unit test."""
+    config = FakeDGemmaModelConfig(num_hidden_layers=num_hidden_layers, sliding_window=sliding_window)
+    return DGemmaModel(
+        model=_FakeInnerModel(config),
+        processor=_FakeProcessor(vocab_size=vocab_size),
+        device=device,
+        dtype=dtype,
+        repo_id=repo_id,
+        quant="none",
+    )
+
+
+def synthetic_kv_cache(
+    dgemma_model: DGemmaModel,
+    *,
+    tier: int = 1,
+    minting_sequence: "tuple[int, ...] | None" = (1, 2, 3),
+    edit_script: "tuple[EditOp, ...]" = (),
+    mismatch: str | None = None,
+) -> KVCache:
+    """Builds a `KVCache` payload with geometry/provenance matching
+    `dgemma_model` by default (a full ingress pass) — or deliberately
+    mismatched along one axis when `mismatch=` names which V-check should
+    fail, so each `test_kv_cache_ingress.py` raise test gets a targeted
+    fixture without hand-rolling a broken `KVCache` per test.
+
+    `mismatch` values (each maps to the V-check it defeats):
+    - `"layer_count"` (V1): cache has one fewer layer than the model expects.
+    - `"geometry"` (V2): `sliding_window` disagrees with the model's.
+    - `"vocab"` (V4): `provenance.tokenizer_fingerprint`/`model_repo_id` point
+      at a different model.
+    - `"cumulative_length_ragged"` (V3): `cumulative_length` has too few
+      entries.
+    - `"cumulative_length_negative"` (V3): one entry is negative.
+    - `"dtype_device"` (V6): cache tensors are fp32-on-CPU against a
+      bf16-labeled model.
+    - `"orphan"` (V5): `minting_sequence=None` and `edit_script=()` together
+      (the illegal state), overriding whatever the caller passed for either.
+
+    `tier=1` (default): `minting_sequence` set, `edit_script` empty. `tier=2`:
+    `minting_sequence=None`, `edit_script` must be supplied non-empty (tier-2
+    surgery itself is Phase 5/out of scope — this fixture only shapes the
+    *data*, per issue #62 Q-1).
+    """
+    from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint
+
+    config = dgemma_model.model.config
+    num_layers = config.num_hidden_layers
+
+    cache_layers = num_layers - 1 if mismatch == "layer_count" else num_layers
+    cache = FakeDynamicCache(
+        num_layers=cache_layers,
+        dtype=torch.float32 if mismatch == "dtype_device" else torch.bfloat16,
+        device="cpu",
+    )
+
+    geometry = geometry_from_model(dgemma_model)
+    if mismatch == "geometry":
+        geometry = dict(geometry)
+        geometry["sliding_window"] = geometry["sliding_window"] + 1
+
+    if mismatch == "cumulative_length_ragged":
+        cumulative_length: tuple[int, ...] = tuple([0] * (cache_layers - 1)) if cache_layers > 0 else ()
+    elif mismatch == "cumulative_length_negative":
+        cumulative_length = tuple([0] * (cache_layers - 1) + [-1]) if cache_layers > 0 else (-1,)
+    else:
+        cumulative_length = tuple([0] * cache_layers)
+
+    if tier == 2 and mismatch != "orphan":
+        minting_sequence = None
+        if not edit_script:
+            edit_script = (EditOp(op="ablate_full_attention", params={}),)
+
+    if mismatch == "orphan":
+        minting_sequence = None
+        edit_script = ()
+
+    if mismatch == "vocab":
+        model_repo_id = "fake/some-other-model"
+        fingerprint = "fake/some-other-model:999"
+    else:
+        model_repo_id = dgemma_model.repo_id
+        fingerprint = tokenizer_fingerprint(dgemma_model)
+
+    provenance = Provenance(
+        minting_sequence=minting_sequence,
+        edit_script=tuple(edit_script),
+        model_repo_id=model_repo_id,
+        tokenizer_fingerprint=fingerprint,
+    )
+
+    return KVCache(
+        cache=cache,
+        cumulative_length=cumulative_length,
+        geometry=geometry,
+        provenance=provenance,
+    )
+
+
+@pytest.fixture
+def dgemma_model_factory() -> Callable[..., DGemmaModel]:
+    """Factory fixture: builds a fresh fake `DGemmaModel` per call (§L)."""
+    return fake_dgemma_model
+
+
+@pytest.fixture
+def synthetic_kv_cache_factory(
+    dgemma_model_factory: Callable[..., DGemmaModel],
+) -> Callable[..., tuple[DGemmaModel, KVCache]]:
+    """Factory fixture: `(model_kwargs=None, **cache_kwargs) ->
+    (dgemma_model, kv_cache)` — a matching model + cache pair by default, or
+    deliberately mismatched via `mismatch=` (see `synthetic_kv_cache`'s
+    docstring). Returns the model alongside the cache since every V-check
+    needs both to validate against."""
+
+    def _build(*, model_kwargs: dict | None = None, **cache_kwargs: Any) -> tuple[DGemmaModel, KVCache]:
+        model = fake_dgemma_model(**(model_kwargs or {}))
+        cache = synthetic_kv_cache(model, **cache_kwargs)
+        return model, cache
+
+    return _build
