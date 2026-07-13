@@ -251,8 +251,10 @@ _check_diffusers_structure()
 from diffusers import DiffusionGemmaPipeline, EntropyBoundScheduler  # noqa: E402
 
 from .composite import DiffusionCancelled, StepEndComposite  # noqa: E402
+from .constraints_hook import build_logit_mask_hook  # noqa: E402
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
 from .ingress import validate_ingress  # noqa: E402
+from .participants import PinParticipant  # noqa: E402
 from .payloads import Constraints, ControlSignals  # noqa: E402
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame  # noqa: E402
 
@@ -982,13 +984,16 @@ def run_diffusion(
     The single `callback_on_step_end` slot passed to the pipeline is a
     `dgemma.composite.StepEndComposite` (ADR-CDG-010 Decision 3 + its
     cancellation amendment), not the collector directly — the composite's
-    fixed order is `capture -> cancellation check -> beta-rebuild -> pin`;
-    only `capture` (this collector) and the cancellation seam are wired
-    today, so the composite's behavior here is otherwise identical to
-    invoking the collector alone. Beta-rebuild/pin
-    participants (ADR-CDG-010) and the control-signal walker
-    (ADR-CDG-011) are `NOT-YET-IMPLEMENTED` — R1 lands the ordered scaffold
-    they slot into, not their bodies.
+    fixed order is `capture -> cancellation check -> beta-rebuild -> pin`.
+    `capture` and the cancellation seam are always wired; `pin` is wired
+    (issue #64 Phase 3) with a fresh `PinParticipant` whenever `constraints=`
+    carries at least one pin, `()` otherwise — so a run with no constraints
+    still builds an empty `pin=` tuple and the composite's behavior is
+    identical to invoking the collector alone, exactly as before this phase.
+    The beta-rebuild participant (ADR-CDG-010) and the control-signal walker
+    (ADR-CDG-011) remain `NOT-YET-IMPLEMENTED` — Phases 4/5 land those
+    bodies; this phase only fills the `pin` slot the R1 scaffold already
+    exposed.
 
     `logit_hook` (#35 R5, F4; ADR-CDG-010 Decision 5): an optional forward
     hook installed on `dgemma_model.model` for exactly the duration of the
@@ -1011,14 +1016,27 @@ def run_diffusion(
     validate_ingress`). No participant is built from `control_signals=`/
     `capture=` yet (`WalkerParticipant`/the capture-tier knobs land in later
     phases) — those two remain validated-then-ignored beyond the reject
-    paths this phase. `constraints=` gains ONE Phase-2 effect ahead of the
-    Phase-3 `PinParticipant`: its pins drive each frame's `pinned_mask`
-    (`DiffusionFrame.pinned_mask`, ADR-CDG-010 D4) — no canvas write happens
-    yet (no pin participant exists), so a run with `constraints=` still
-    produces byte-identical `text`/`canvas`/telemetry to the same run with
-    `constraints=None`; only the trace's `pinned_mask` field differs. An
-    invalid payload of any of the three still raises at ingress regardless of
-    phase.
+    paths this phase. `constraints=` is now LIVE end-to-end (issue #64 Phase
+    3, ADR-CDG-010's two-mechanism givens): when it carries at least one pin,
+    `run_diffusion` (a) builds `dgemma.constraints_hook.build_logit_mask_hook`
+    from the pins and installs it via the existing `logit_hook=`/
+    `install_logit_shaping_hook` path — masking each pinned position's
+    logits to its `token_id` so that cell reads ~zero entropy and commits
+    first (Decision 1(a)); and (b) constructs a
+    `dgemma.participants.PinParticipant` and wires it into the composite's
+    `pin=` slot (Decision 3's LAST writer), re-asserting every pin's
+    `token_id` at its `position` on every step regardless of what the
+    scheduler accepted (Decision 1(b)) — the mechanism that guarantees *what
+    conditions* the next forward pass, since a real scheduler step renoises
+    every rejected position over the full vocabulary (no absorbing mask,
+    ADR-CDG-001) and a given re-checked only at ingress would drift the
+    first time its cell isn't accepted. `Constraints(pins=())`/`None`
+    installs neither the hook nor the participant (empty == no-op,
+    `dgemma/payloads.py`) — byte-identical to today's no-`constraints=`
+    behavior. An invalid payload of any of the three still raises at
+    ingress regardless of phase; `constraints=` + `logit_hook=` together
+    still raise at ingress (H1) even now that `constraints=` builds its own
+    hook internally — the two-source-on-one-door reject is unconditional.
 
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
@@ -1032,8 +1050,13 @@ def run_diffusion(
     `DiffusionFrame` also carries `entropy` (ADR-CDG-014 Decision 3/4, issue
     #14): per-position predictive entropy derived from that step's pre-pin
     `logits`, always populated (Tier 0's always-on default); `pinned_mask`
-    (ADR-CDG-010 D4, issue #64 Phase 2): `True` at every supplied
-    `Constraints` pin position, `None` when no constraints were given; and
+    (ADR-CDG-010 D4, issue #64 Phase 2/3): `True` at every supplied
+    `Constraints` pin position — now the positions `PinParticipant` actually
+    (re-)writes every step (Phase 3), consistent with the Phase 2
+    static-from-`Constraints.pins` derivation because a hard pin's position
+    set never changes step to step (see `DiffusionFrame.pinned_mask`'s
+    docstring for the scope guard) — `None` when no constraints were given;
+    and
     `effective_entropy_bound`/`effective_t_min`/`effective_t_max`
     (ADR-CDG-011 clause 7, issue #64 Phase 2): the `entropy_bound`/`t_min`/
     `t_max` values `scheduler.config` actually held at that callback — the
@@ -1065,6 +1088,23 @@ def run_diffusion(
         vocab_size=vocab_size,
     )
 
+    # Constraints -> the two-mechanism givens (ADR-CDG-010 Decision 1, issue
+    # #64 Phase 3). Both mechanisms are built from the SAME validated
+    # `constraints.pins` and both are no-ops when `constraints` is `None` or
+    # carries no pins (`Constraints()`/`Constraints(pins=())`) — "empty ==
+    # no-op" (`dgemma/payloads.py`), so a run with an empty/`None`
+    # `constraints=` builds neither the hook nor the pin participant and is
+    # byte-identical to today's no-`constraints=` behavior.
+    #
+    # H1 (validated above) already forecloses `constraints=` AND
+    # `logit_hook=` both being given, so building the hook here and passing
+    # it through the same `logit_hook` name below can never collide with a
+    # caller-supplied one.
+    pin_participants: tuple = ()
+    if constraints is not None and constraints.pins:
+        logit_hook = build_logit_mask_hook(constraints.pins, vocab_size=vocab_size)
+        pin_participants = (PinParticipant(constraints=constraints),)
+
     scheduler = EntropyBoundScheduler(
         entropy_bound=entropy_bound, t_max=t_max, t_min=t_min, num_inference_steps=num_inference_steps
     )
@@ -1088,7 +1128,7 @@ def run_diffusion(
         on_frame=on_frame,
         constraints=constraints,
     )
-    step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel)
+    step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel, pin=pin_participants)
 
     if thinking:
         prompt_kwargs: dict = {

@@ -27,6 +27,7 @@ import torch
 from dgemma.composite import DiffusionCancelled
 from dgemma.hooks import install_logit_shaping_hook
 from dgemma.loop import run_diffusion
+from dgemma.payloads import Constraints, Pin
 from dgemma.types import DGemmaModel
 
 
@@ -247,3 +248,81 @@ class TestRunDiffusionHookLifecycle:
         # Two independent install/remove cycles, not one hook reused.
         assert built.model.install_log == [0, 1]
         assert built.model.removal_log == [0, 1]
+
+
+class TestRunDiffusionHookLifecycleWithConstraints:
+    """Issue #64 Phase 3 extension: the SAME zero-hooks-after-run invariant,
+    now exercised with a `constraints=` payload (the ENGINE-BUILT hook
+    `dgemma.constraints_hook.build_logit_mask_hook`, installed through the
+    exact same `install_logit_shaping_hook` path a caller-supplied
+    `logit_hook=` uses) rather than a hand-supplied `logit_hook=`. Proves
+    the two-mechanism given's hook half — not just the earlier bare
+    `logit_hook=` shape above — is torn down clean, cancelled, and raising,
+    matching the task brief's "extend test_hook_lifecycle.py — zero hooks
+    after clean/cancelled/raising runs WITH a constraints payload"."""
+
+    def test_clean_run_with_constraints_installs_and_tears_down(self, monkeypatch, fake_pipeline_factory):
+        built = fake_pipeline_factory()
+        _install_hook_lifecycle_fakes(monkeypatch, num_steps=3)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        run_diffusion(_model_with_hook_recording(built.model), "hi", constraints=constraints)
+
+        # The engine-built hook actually installed (proves constraints=
+        # really drives the hook path, not a vacuous no-op) and tore down
+        # cleanly.
+        assert built.model.install_log == [0]
+        assert built.model.live_hook_count == 0
+
+    def test_cancelled_run_with_constraints_still_tears_down_the_hook(self, monkeypatch, fake_pipeline_factory):
+        built = fake_pipeline_factory()
+        _install_hook_lifecycle_fakes(monkeypatch, num_steps=5)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        text, canvas_state, canvas_trace = run_diffusion(
+            _model_with_hook_recording(built.model),
+            "hi",
+            should_cancel=lambda: True,
+            constraints=constraints,
+        )
+
+        assert canvas_trace.frames  # cancelled but evidence-bearing, per #38
+        assert built.model.install_log == [0]
+        assert built.model.live_hook_count == 0
+
+    def test_raising_run_with_constraints_still_tears_down_the_hook(self, monkeypatch, fake_pipeline_factory):
+        built = fake_pipeline_factory()
+        _install_hook_lifecycle_fakes(monkeypatch, num_steps=5, raise_on_step=2)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        with pytest.raises(RuntimeError, match="simulated mid-run failure"):
+            run_diffusion(
+                _model_with_hook_recording(built.model),
+                "hi",
+                constraints=constraints,
+            )
+
+        assert built.model.install_log == [0]
+        assert built.model.live_hook_count == 0
+
+    def test_constraints_and_logit_hook_together_still_rejected_at_ingress(
+        self, monkeypatch, fake_pipeline_factory
+    ):
+        """H1 (ADR-CDG-010 D5) still applies even though `constraints=`
+        builds its own hook internally: the two-source-on-one-door reject
+        is unconditional, checked BEFORE any hook is installed — zero hooks
+        on this reject path too."""
+        built = fake_pipeline_factory()
+        _install_hook_lifecycle_fakes(monkeypatch, num_steps=3)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        with pytest.raises(ValueError, match="cannot both be given"):
+            run_diffusion(
+                _model_with_hook_recording(built.model),
+                "hi",
+                constraints=constraints,
+                logit_hook=lambda mod, inp, out: None,
+            )
+
+        assert built.model.install_log == []
+        assert built.model.live_hook_count == 0
