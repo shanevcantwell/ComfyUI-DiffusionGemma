@@ -13,9 +13,9 @@ program). It is deliberately pointer-heavy and holds no content of its own:
   built to ask, each tagged `[established]` / `[hypothesis]` / `[open]`.
 - **[`decisions/`](decisions/)** holds the *decided* — the ADRs, the load-bearing
   choices and their trade-offs.
-- **[`plan.md`](plan.md)** holds the *closed-phase evidence* — phases P0–P3, each
-  with its per-phase PASS record. That ledger is done and stays put; this file
-  does not restate it.
+- **`plan.md`** holds the *closed-phase evidence* — phases P0–P3, each with its
+  per-phase PASS record. That ledger is done and stays put (it lives in the working
+  tree, not the published tree); this file does not restate it.
 
 Two independent `R`-namespaces appear below and must not be conflated:
 **Track A's R1–R6 are engineering refactors** (issue #35); **Track B's R0–R6 are
@@ -134,7 +134,7 @@ Parallel and conditional tracks:
   `experiment.md` (the five falsifiable H0s + append-only observation table).
 - **[`decisions/`](decisions/)** — the ADRs; ADR-CDG-008 (topology), ADR-CDG-010 /
   011 (in ratification, the constraint + control seams).
-- **[`plan.md`](plan.md)** — closed-phase evidence, P0–P3.
+- **`plan.md`** — closed-phase evidence, P0–P3 (working-tree only, not published).
 - **Issues** — engineering: #35 (architecture review + R1–R6). Research and
   grounding: #23 (per-step control / mod-matrix), #28 (Sudoku-class flagship +
   logit-mask seam), #36 (loop-cache sweep hazard), #14 / #11 (the DISTRIBUTION

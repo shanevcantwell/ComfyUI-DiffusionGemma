@@ -166,14 +166,29 @@ Verified against primary sources (Google "explained" page, vLLM integration blog
   components. Verbatim: *"Rather than using separate models, a single backbone dynamically
   toggles between two modes."* Causal self-attention for **prefill** (writes the KV cache),
   bidirectional self-attention over the **full 256-token canvas** for **denoise** (reads that
-  cache). No cross-attention module, no block-local sub-windowing.
+  cache). No cross-attention module, no block-local sub-windowing. The "shared weights" claim is
+  now literal at the parameter level: **the encoder and decoder weights are *tied* per layer** —
+  q/k/v/o projections, embeddings, and norms (`modeling_diffusion_gemma.py:1481-1491`). "One
+  backbone, two modes" is not a framing convenience; the same tensors serve both attention modes.
 - **The cache is written once per block, read-only during denoise.** This *verifies the
   feasibility win*: holding a position liquid = re-running denoise steps over a fixed prefill
   cache; the prompt is never recomputed. Cheap.
+- **Cross-block mechanics — DG is AR at block scale, diffusion within the block.** The encoder
+  **runs twice per block** (vLLM integration blog): a committed block is **causally re-encoded**
+  into the KV cache, not appended from its denoise states. Denoise never feeds the cache
+  directly — a block crystallizes, then that crystallized text is re-encoded through the causal
+  path to become conditioning for the next block. The consequence for this program: **the liquid
+  window is architecturally bounded at one canvas.** Within a 256-token block, denoise is fully
+  bidirectional and the liquid can span it; across blocks, the channel is the causally-encoded
+  cache and nothing else. Block N+1 conditions on block N's *committed* text, never on block N's
+  liquid.
 - **Training provenance is UNCONFIRMED.** Google claims architectural lineage ("based on",
   "builds upon Gemma-4") but never a training-initialization ("initialized from" / "fine-tuned
   from" an AR checkpoint). Whether the weights are AR-adapted or trained-from-scratch on this
-  architecture is not documented — treat as open, not as "adapted from AR Gemma-4."
+  architecture is not documented — treat as open, not as "adapted from AR Gemma-4." Provenance
+  footnote (suggestive, still UNCONFIRMED): Google's own explainer phrases the toggle as the AR
+  path *"isn't used natively but fine-tuned to support the different tasks"* — a data point
+  consistent with AR-adaptation, not a confirmation of it. Do not lean on it as sourcing.
 
 ## Limitation — the causal-prefill variety ceiling (H0-substrate)
 
@@ -227,6 +242,42 @@ realized-token snapshots per timestep; **no per-position distribution/confidence
   surfaced *visibly more churn* — one A/B pair on one prompt (caveated, could be prompt artifact),
   but it points the predicted direction: **the threshold is a liquid-window lever.**
 
+### Second empirical pass — the first operator knob-sweep on the instrument (issue #40, 2026-07-13)
+
+The first sweep run *on the built instrument* (`EntropyBoundScheduler`, `t=[0.4,0.8]`, 48 steps, prompt
+"Write about the ocean using only D words," only `entropy_bound` varied across 10 points, 0.01→0.10) adds
+five findings that touch this record directly. Full data and heatmaps in issue #40; pointers here:
+
+- **Liquid sighted at `committed_fraction=1.0` — the dimension↔diversity distinction made concrete.** A
+  fully-committed canvas is *not* a spent one: the sweep shows structure still varying at cf=1.0 across
+  runs. This sharpens the "variety" open question above — **co-liquidity (how many positions are
+  simultaneously mobile) is a different axis from cross-run diversity**, and cf=1.0 can hide the latter.
+  A canvas can read "done" on the scalar while its trajectory still carried the freedom the program wants
+  to read.
+- **`committed_fraction` is a lying convergence signal — quantified at n=10.** Every run shows a large
+  **step-2 re-melt** (committed_fraction collapses, e.g. 0.5195 → 0.2539, before the monotone climb): the
+  model routinely discards ~half its step-1 commitments as the *standard opening move*, not an occasional
+  curiosity. This is direct corroboration that committed-state-only logging (the DG-runs gate above) hides
+  the real dynamics — the scalar reports monotone-ish progress over a canvas that is visibly breathing. The
+  step-2 re-melt is a **free, robust observable** every hold-and-release protocol (roadmap R2) will interact
+  with.
+- **Constraint-blind freezing / the fossil mechanism.** All 10 outputs open with a verbatim knob-invariant
+  preamble; the lipogram's most consistent violation ("waves") lives *inside* that fossil — a constraint
+  failure that froze early and was **never renegotiated at any knob value**. Constraint adherence visibly
+  begins only ~step 5-7, after the polyglot melt clears, at *every* bound value. This is prior evidence for
+  H0-control's difficulty: **early-frozen structure is very stable** — pinning against it (or melting it) is
+  the real test, not a corollary.
+- **Nested-prefix step-1 structure.** If the sweep was seed-fixed (see the gap below), the step-1 acceptances
+  are **nested prefixes of one entropy-sorted order**, making the whole sweep a naturally controlled
+  commit-order-causality experiment: all downstream divergence is traceable to *which extra positions froze*.
+  This is a free experimental design the instrument produced incidentally — but it hangs on the seed question.
+- **Telemetry gap: seed not logged.** The knob-invariant preamble *suggests* a fixed seed across the sweep,
+  but **seed is not recorded in the log properties** — so the nested-prefix reading above is unconfirmed.
+  This is a concrete, cheap instrumentation fix (log the seed) that would upgrade the sweep from suggestive
+  to a controlled experiment. Banked here as the empirical-grounding twin of the DG-runs "no per-position
+  distribution logged" gate: **the instrument's own telemetry is still lossy in ways that block the reads we
+  want.**
+
 ## Polyphonic prefill (H0-cache) — turn the confound into a control surface
 
 Operator move (2026-07-12): rather than *remove* the causal prefill to escape the variety ceiling
@@ -252,6 +303,49 @@ mutual-blindness caveat and needs no bridging recompute; likely *more* on-manifo
 framings. *Risk:* off-topic drift may distract rather than enrich (empirical; interacts with the `thinking`
 toggle and #9's "thinking can consume the whole canvas"). Covered by H0-cache's novelty umbrella; a
 dedicated "self-generated/high-temp context as conditioning" prior-art check is deferred, not run.
+
+*Feedstock leverage is **total**, and the pipeline mechanics make it cheap (delta 2026-07-13):* the
+cross-block re-encode (see Architecture, "DG is AR at block scale") means **the KV cache is the *sole*
+cross-block conditioning channel** — nothing but the causally-encoded cache carries information into the
+next canvas. So shaping the feedstock is not one lever among several; it is *the* lever on what a fresh
+canvas condenses from. And the mechanics keep it in reach: **prefill never samples.** The prefill pass
+only *encodes* — heat lives in feedstock **generation**, not in the encode. That decouples authorship from
+encoding: **any AR model can author the run-on text** (a hotter, wilder, or differently-tuned model than
+DG), and DG then encodes that text with *its own* weights into a cache the canvas can read. Two feedstock
+knobs fall out of this:
+- **EOS-suppression as a feedstock lengthener.** Suppressing the end-of-sequence token during feedstock
+  *generation* makes the AR author run on further, producing a longer, richer associative field to
+  prefill from — a direct dial on how much feedstock the canvas has to distill.
+- **In-canvas EOS masking** — a *separate* knob, applied inside the denoise loop via the CDG-010 logit
+  hook (not during feedstock generation): mask EOS in the canvas distribution to keep positions from
+  committing to end-of-turn early. Interacts with #9's "thinking can consume the whole canvas" budget
+  question — the two EOS knobs pull in opposite pipeline stages and should not be conflated.
+
+*Feedstock geometry — how much, through what, weighted how (delta 2026-07-13, grounded from the cached
+checkpoint's `config.json`):*
+- **No num_KV:num_token ratio caps this — the ceiling is a quarter-million tokens.** `max_position_embeddings
+  = 262,144`; the canvas is 256, so the conditioning cache can be ~**261,888 tokens** — a >1000:1
+  conditioning:generation ratio. The upper bound on "what a canvas can diffuse from" is genuinely enormous;
+  feedstock is not scarce by architecture.
+- **Long range is a 5-layer channel, not the whole stack.** `layer_types` splits **25 sliding_attention**
+  (window ~1K, θ=10K) against **5 full_attention** (proportional RoPE, `partial_rotary_factor` 0.25, θ=1M;
+  `global_head_dim=512` vs 256 local). Distant feedstock reaches the canvas **only through the 5 global
+  layers**; the 25 sliding layers give canvas positions a recency-weighted view of the feedstock **tail**.
+  Two design consequences: **feedstock ordering matters — put what should dominate at the end** (the sliding
+  window sees the tail hardest), and **AR-style recency survives into bidirectional mode via the window
+  pattern**, not via causality. The tail-dominance the sliding layers impose is the geometry knob under the
+  feedstock-ordering lever above.
+- **VRAM estimate (verify hybrid-cache behavior before leaning on it).** If the sliding layers use a bounded
+  hybrid cache, long-cache cost is dominated by the 5 global layers: ≈ **80 KB/token** (8 KV heads × 512
+  head_dim × K+V × bf16 × 5 global layers) ⇒ ~**8 GB per 100K feedstock tokens**. A 50–100K-token hot
+  run-on feedstock is plausibly runnable on the RTX-8000 with quantized weights. This assumes the sliding
+  layers don't hold a full-length cache — **confirm the hybrid-cache behavior before the estimate is load-bearing.**
+- **Open empirical question (the experiment, not a blocker):** whether denoise-mode conditioning *uses* very
+  long caches well is unknown — the fine-tuning distribution of cache lengths is undocumented. The ceiling is
+  architectural headroom, not a demonstrated capability.
+- *Incidental (feedstock-adjacent):* `cyankiwi/diffusiongemma-26B-A4B-it-AWQ-INT4` is already present in the
+  HF hub cache — #4's lead quantized-checkpoint candidate is downloaded, so a quantized run of the above is
+  not gated on a fetch.
 
 **Novelty (2026-07-12 scan, cross-verified):** the diffusion-LM-native, training-free, multi-prefill
 cache assembly *for steering* is **apparently novel** — adjacent work exists on every side, nothing at
