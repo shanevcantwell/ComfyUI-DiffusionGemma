@@ -26,6 +26,20 @@ class FakeSchedulerOutput:
     accepted_index: torch.Tensor
 
 
+@dataclass
+class FakeScheduler:
+    """Mimics the ONE attribute `_FrameCollector` reads off a real scheduler
+    (`EntropyBoundScheduler`/`BlockRefinementScheduler`): `.num_inference_steps`.
+
+    Mutable on purpose (issue #20): `_FrameCollector` reads `.num_inference_steps`
+    lazily on every callback, exactly so a test can mutate this fake mid-run
+    to simulate `set_timesteps` rescaling the effective denominator away from
+    the value the collector was originally handed — see
+    `TestFrameCollectorEffectiveDenominator`."""
+
+    num_inference_steps: int
+
+
 def _callback_kwargs(accepted: list[list[bool]], canvas_value: int = 0) -> dict:
     """Build callback kwargs from a per-example acceptance matrix
     (`accepted[i][j]` = example i, block position j)."""
@@ -71,7 +85,7 @@ class TestAnnealTemperature:
 
 class TestFrameCollector:
     def test_committed_fraction_math(self):
-        collector = _FrameCollector(num_inference_steps=4, t_min=0.4, t_max=0.8, keep_frames="all")
+        collector = _FrameCollector(scheduler=FakeScheduler(4), t_min=0.4, t_max=0.8, keep_frames="all")
         collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True, False, False]]))
         assert collector.frames[0].committed_fraction == pytest.approx(0.5)
         assert collector.frames[0].committed_fraction_per_example == pytest.approx((0.5,))
@@ -80,7 +94,7 @@ class TestFrameCollector:
         """Review finding (2026-07-05): mean over the block dim ONLY. A
         batch-blended scalar would silently claim 0.5 for a batch where one
         example committed everything and the other nothing."""
-        collector = _FrameCollector(num_inference_steps=4, t_min=0.4, t_max=0.8, keep_frames="all")
+        collector = _FrameCollector(scheduler=FakeScheduler(4), t_min=0.4, t_max=0.8, keep_frames="all")
         collector.on_step_end(
             None, 0, 0,
             _callback_kwargs([[True, True, True, True], [False, False, False, False]]),
@@ -97,7 +111,7 @@ class TestFrameCollector:
         NaN, and NaN reads as not-converged downstream — pin the honest
         behavior: surface degenerate input, never launder it into a validity
         field."""
-        collector = _FrameCollector(num_inference_steps=4, t_min=0.4, t_max=0.8)
+        collector = _FrameCollector(scheduler=FakeScheduler(4), t_min=0.4, t_max=0.8)
         kwargs = {
             "scheduler_output": FakeSchedulerOutput(accepted_index=torch.empty((1, 0), dtype=torch.bool)),
             "canvas": torch.empty((1, 0), dtype=torch.long),
@@ -112,7 +126,7 @@ class TestFrameCollector:
         `step_idx` (and the `t`/`temperature` derived from it), not the
         0-based loop position, or cross-run traces would be silently
         incomparable."""
-        collector = _FrameCollector(num_inference_steps=48, t_min=0.4, t_max=0.8, keep_frames="all")
+        collector = _FrameCollector(scheduler=FakeScheduler(48), t_min=0.4, t_max=0.8, keep_frames="all")
         collector.on_step_end(None, 0, 20, _callback_kwargs([[True] * 4]))
         collector.on_step_end(None, 1, 21, _callback_kwargs([[True] * 4]))
 
@@ -126,7 +140,7 @@ class TestFrameCollector:
         canvas (`pipeline_diffusion_gemma.py:356`, nested in the canvas loop
         at `:318`), so once gen_length > canvas_length two frames can share
         `(step_idx, t, temperature)`. `canvas_idx` must distinguish them."""
-        collector = _FrameCollector(num_inference_steps=3, t_min=0.4, t_max=0.8, keep_frames="all")
+        collector = _FrameCollector(scheduler=FakeScheduler(3), t_min=0.4, t_max=0.8, keep_frames="all")
         # Canvas 0: steps 0,1,2 — then canvas 1: steps 0,1 (early-stopped).
         for global_step, step_idx in enumerate([0, 1, 2, 0, 1]):
             collector.on_step_end(None, global_step, step_idx, _callback_kwargs([[True] * 4]))
@@ -139,7 +153,7 @@ class TestFrameCollector:
         assert step0_frames[0].canvas_idx != step0_frames[1].canvas_idx
 
     def test_keep_frames_last_retains_only_latest(self):
-        collector = _FrameCollector(num_inference_steps=4, t_min=0.4, t_max=0.8, keep_frames="last")
+        collector = _FrameCollector(scheduler=FakeScheduler(4), t_min=0.4, t_max=0.8, keep_frames="last")
         for step_idx in range(4):
             collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * 4]))
 
@@ -148,7 +162,7 @@ class TestFrameCollector:
         assert collector.steps_used == 4  # counted regardless of retention policy
 
     def test_keep_frames_all_retains_every_step(self):
-        collector = _FrameCollector(num_inference_steps=4, t_min=0.4, t_max=0.8, keep_frames="all")
+        collector = _FrameCollector(scheduler=FakeScheduler(4), t_min=0.4, t_max=0.8, keep_frames="all")
         for step_idx in range(4):
             collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * 4]))
 
@@ -163,7 +177,7 @@ class TestFrameCollector:
         got appended to `collector.frames`."""
         seen: list[DiffusionFrame] = []
         collector = _FrameCollector(
-            num_inference_steps=3, t_min=0.4, t_max=0.8, keep_frames="all", on_frame=seen.append
+            scheduler=FakeScheduler(3), t_min=0.4, t_max=0.8, keep_frames="all", on_frame=seen.append
         )
         for step_idx in range(3):
             collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * 4]))
@@ -182,7 +196,7 @@ class TestFrameCollector:
             raise RuntimeError("user callback bug")
 
         collector = _FrameCollector(
-            num_inference_steps=1, t_min=0.4, t_max=0.8, keep_frames="all", on_frame=exploding
+            scheduler=FakeScheduler(1), t_min=0.4, t_max=0.8, keep_frames="all", on_frame=exploding
         )
         with pytest.raises(RuntimeError, match="user callback bug"):
             collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))
@@ -191,7 +205,7 @@ class TestFrameCollector:
     def test_on_frame_none_is_a_silent_no_op(self):
         """Default (`on_frame=None`): capture proceeds exactly as before —
         no live-push consumer is required for the collector to work."""
-        collector = _FrameCollector(num_inference_steps=1, t_min=0.4, t_max=0.8)
+        collector = _FrameCollector(scheduler=FakeScheduler(1), t_min=0.4, t_max=0.8)
         collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))  # must not raise
         assert collector.steps_used == 1
 
@@ -200,9 +214,92 @@ class TestFrameCollector:
         `callback_outputs.pop("canvas", canvas)` at the pipeline call site
         leaves the canvas untouched. Constraint injection (P5) is a different
         callback."""
-        collector = _FrameCollector(num_inference_steps=1, t_min=0.4, t_max=0.8)
+        collector = _FrameCollector(scheduler=FakeScheduler(1), t_min=0.4, t_max=0.8)
         result = collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))
         assert result == {}
+
+
+class TestFrameCollectorEffectiveDenominator:
+    """Issue #20: `anneal_temperature`'s denominator must be the scheduler's
+    EFFECTIVE `num_inference_steps` — the value AFTER `set_timesteps`, which
+    a corrector scheduler (`pipeline_diffusion_gemma.py:284-297`,
+    `predictor_steps != num_inference_steps` whenever `corrector_steps > 0`)
+    rescales away from the user-requested count — never a value snapshotted
+    at collector-construction time, before the pipeline has had a chance to
+    call `set_timesteps`."""
+
+    def test_frame_t_tracks_scheduler_effective_value_not_requested(self):
+        """The corrector-divergent case: the scheduler starts life
+        constructed with the user's `num_inference_steps` (48, mirroring
+        `EntropyBoundScheduler.__init__` setting `self.num_inference_steps`
+        directly from the ctor kwarg — `scheduling_entropy_bound.py:84`),
+        then `set_timesteps` rescales it to a smaller `predictor_steps`
+        (e.g. 32) BEFORE the pipeline's per-step loop starts firing
+        callbacks — exactly the ordering grounded in
+        `pipeline_diffusion_gemma.py:284-297,356`. A collector reading a
+        stale ctor-time snapshot would anneal against 48; the fix reads
+        `scheduler.num_inference_steps` fresh each callback and must anneal
+        against the effective 32."""
+        scheduler = FakeScheduler(num_inference_steps=48)
+        collector = _FrameCollector(scheduler=scheduler, t_min=0.4, t_max=0.8, keep_frames="all")
+
+        # Simulate `set_timesteps(predictor_steps=32, ...)` running at
+        # pipeline entry, before the first `on_step_end` callback fires.
+        scheduler.num_inference_steps = 32
+
+        # step_idx=10 (not 0): `t`'s fraction is `(N - step_idx) / N`, which
+        # equals 1.0 at step_idx=0 for ANY denominator — a step 0 assertion
+        # couldn't distinguish "read 32" from "read the stale 48". A
+        # mid-schedule step is required to actually witness the divergence.
+        collector.on_step_end(None, 0, 10, _callback_kwargs([[True] * 4]))
+
+        expected_t, expected_temperature = anneal_temperature(
+            step_idx=10, num_inference_steps=32, t_min=0.4, t_max=0.8
+        )
+        frame = collector.frames[0]
+        assert frame.t == pytest.approx(expected_t)
+        assert frame.temperature == pytest.approx(expected_temperature)
+        # Pin the divergence itself: annealing against the stale
+        # user-requested 48 would have produced a different reading.
+        stale_t, _ = anneal_temperature(step_idx=10, num_inference_steps=48, t_min=0.4, t_max=0.8)
+        assert frame.t != pytest.approx(stale_t)
+
+    def test_frame_t_tracks_denominator_change_mid_run(self):
+        """The denominator is read lazily PER CALLBACK, not cached once at
+        the first step — pins that a mid-run rescale (however it might
+        occur) is honestly reflected frame-by-frame rather than baked in
+        from the first observed value."""
+        scheduler = FakeScheduler(num_inference_steps=10)
+        collector = _FrameCollector(scheduler=scheduler, t_min=0.4, t_max=0.8, keep_frames="all")
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * 4]))
+        scheduler.num_inference_steps = 5
+        collector.on_step_end(None, 1, 1, _callback_kwargs([[True] * 4]))
+
+        expected_t0, _ = anneal_temperature(step_idx=0, num_inference_steps=10, t_min=0.4, t_max=0.8)
+        expected_t1, _ = anneal_temperature(step_idx=1, num_inference_steps=5, t_min=0.4, t_max=0.8)
+        assert collector.frames[0].t == pytest.approx(expected_t0)
+        assert collector.frames[1].t == pytest.approx(expected_t1)
+
+    def test_non_corrector_path_unchanged_requested_equals_effective(self):
+        """Today's only scheduler (`EntropyBoundScheduler`, no
+        `corrector_steps`): `set_timesteps` is called with
+        `predictor_steps == num_inference_steps`
+        (`pipeline_diffusion_gemma.py:288-290`), so the effective value never
+        diverges from the requested one — this pins the fix as a no-op for
+        the current single-scheduler default, matching `TestAnnealTemperature`'s
+        existing spot-checks."""
+        scheduler = FakeScheduler(num_inference_steps=48)
+        collector = _FrameCollector(scheduler=scheduler, t_min=0.4, t_max=0.8, keep_frames="all")
+
+        collector.on_step_end(None, 0, 24, _callback_kwargs([[True] * 4]))
+
+        expected_t, expected_temperature = anneal_temperature(
+            step_idx=24, num_inference_steps=48, t_min=0.4, t_max=0.8
+        )
+        frame = collector.frames[0]
+        assert frame.t == pytest.approx(expected_t)
+        assert frame.temperature == pytest.approx(expected_temperature)
 
 
 class _FakeTokenizer:

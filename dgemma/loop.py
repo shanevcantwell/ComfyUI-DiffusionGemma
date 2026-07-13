@@ -107,8 +107,33 @@ class _FrameCollector:
     Pure with respect to the diffusers pipeline: reads only the callback's
     own contract (`pipe, global_step, step_idx, callback_kwargs`) plus the
     scheduler config values needed for `anneal_temperature`, so it is
-    unit-testable with a fake `scheduler_output` and no real pipeline
-    (`tests/test_frames.py`).
+    unit-testable with a fake `scheduler_output` (and, for the denominator,
+    a fake scheduler exposing a `num_inference_steps` attribute) and no real
+    pipeline (`tests/test_frames.py`).
+
+    `num_inference_steps` (issue #20): NOT the user-requested value — a
+    scheduler-like object read *lazily*, once per callback, via
+    `.num_inference_steps`. Grounded against the installed diffusers 0.39.0
+    pipeline (`pipeline_diffusion_gemma.py:280-297`): `set_timesteps(
+    predictor_steps, ...)` runs at pipeline entry, before the per-step loop
+    (`:356`) that fires `callback_on_step_end`, and `EntropyBoundScheduler.
+    set_timesteps` (`scheduling_entropy_bound.py:87-91`) — and
+    `BlockRefinementScheduler.set_timesteps`, `scheduling_block_refinement.py
+    :83-100` — both reassign `self.num_inference_steps = num_inference_steps`
+    there, the exact attribute `step()`'s inlined anneal formula divides by
+    (`scheduling_entropy_bound.py:153`). So by the first callback the
+    scheduler's own attribute already holds the *effective* denominator
+    (`predictor_steps`, which differs from the user's `num_inference_steps`
+    whenever a corrector scheduler folds `corrector_steps` sweeps into the
+    same budget — `pipeline_diffusion_gemma.py:284-290`). Reading it lazily
+    (not caching the value at collector-construction time, before the
+    pipeline has called `set_timesteps`) is required: the collector is built
+    by `run_diffusion` before `pipeline(...)` runs (this module, below), so a
+    constructor-time snapshot would still be the stale user-requested count.
+    Plain `EntropyBoundScheduler` (no `corrector_steps`) leaves
+    `predictor_steps == num_inference_steps`, so this path is unchanged for
+    today's only scheduler — the bug is latent, not yet observable, exactly
+    per ADR-CDG-001's greenfield-exception framing (CLAUDE.md).
 
     `keep_frames="last"` (P1 default) retains only the most recent frame —
     memory policy, not a change in what gets computed per step; `"all"`
@@ -141,7 +166,13 @@ class _FrameCollector:
     step_idx is nonzero still registers as a new block.
     """
 
-    num_inference_steps: int
+    scheduler: Any
+    """Object exposing a `.num_inference_steps` attribute (the real
+    `EntropyBoundScheduler`/`BlockRefinementScheduler`, or a fake in tests) —
+    read fresh on every callback, never cached, so the collector always
+    reflects the scheduler's *effective* post-`set_timesteps` value (issue
+    #20; see this class's docstring)."""
+
     t_min: float
     t_max: float
     keep_frames: Literal["last", "all"] = "last"
@@ -179,7 +210,7 @@ class _FrameCollector:
             self._canvas_idx += 1
         self._prev_step_idx = step_idx
 
-        t, temperature = anneal_temperature(step_idx, self.num_inference_steps, self.t_min, self.t_max)
+        t, temperature = anneal_temperature(step_idx, self.scheduler.num_inference_steps, self.t_min, self.t_max)
         # Mean over the block dim ONLY — one fraction per example, never a
         # batch-blended scalar (review finding, 2026-07-05).
         committed_per_example = tuple(accepted_index.float().mean(dim=-1).tolist())
@@ -555,8 +586,14 @@ def run_diffusion(
     if seed is not None:
         generator = torch.Generator(device=dgemma_model.device).manual_seed(seed)
 
+    # `scheduler` (not `num_inference_steps`) — the collector reads
+    # `scheduler.num_inference_steps` lazily per-callback, so it always sees
+    # the effective post-`set_timesteps` value the pipeline mutates this same
+    # object with at call entry, not the user-requested count snapshotted
+    # here before that call runs (issue #20; see `_FrameCollector`'s
+    # docstring for the full grounding).
     collector = _FrameCollector(
-        num_inference_steps=num_inference_steps,
+        scheduler=scheduler,
         t_min=t_min,
         t_max=t_max,
         keep_frames=keep_frames,
@@ -617,7 +654,19 @@ def run_diffusion(
             "entropy_bound": entropy_bound,
             "t_min": t_min,
             "t_max": t_max,
-            "num_inference_steps": num_inference_steps,
+            # Issue #20: record BOTH, distinctly named, rather than picking
+            # one and silently dropping the other. `requested` is what the
+            # caller asked for; `effective` is `scheduler.num_inference_steps`
+            # AFTER the pipeline's `set_timesteps` call — the actual anneal
+            # denominator every frame's `t`/`temperature` was computed
+            # against (same value `_FrameCollector` now reads lazily; see its
+            # docstring). They are equal for today's only scheduler
+            # (`EntropyBoundScheduler`, no `corrector_steps`) and diverge
+            # only for a future corrector scheduler — a trace that kept only
+            # `requested` would then silently misreport the schedule that
+            # actually produced its own frames (ADR-CDG-001 addendum).
+            "num_inference_steps_requested": num_inference_steps,
+            "num_inference_steps_effective": scheduler.num_inference_steps,
         },
     )
     return text, canvas_state, canvas_trace

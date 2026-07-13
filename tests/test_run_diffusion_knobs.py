@@ -92,6 +92,14 @@ def _install_fakes(monkeypatch, captured: dict, sequence: list[int]):
     class FakeScheduler:
         def __init__(self, **kwargs):
             captured["scheduler_kwargs"] = kwargs
+            # Mirrors the real `EntropyBoundScheduler.__init__`
+            # (`scheduling_entropy_bound.py:84`): sets `self.num_inference_steps`
+            # from the ctor kwarg. The pipeline never calls `set_timesteps` in
+            # these fakes (no real pipeline internals here), so this ctor-time
+            # value stands in for the "effective" one throughout — these tests
+            # cover requested==effective; the corrector-divergent case lives
+            # in `tests/test_frames.py` (issue #20).
+            self.num_inference_steps = kwargs["num_inference_steps"]
 
     class FakePipeline:
         def __init__(self, model, scheduler, processor):
@@ -281,6 +289,8 @@ class TestCanvasTrace:
         class EntropyBoundScheduler:  # noqa: N801 — matching the real class's own __name__ on purpose
             def __init__(self, **kwargs):
                 captured["scheduler_kwargs"] = kwargs
+                # See `_install_fakes`'s FakeScheduler — same real-scheduler mirror.
+                self.num_inference_steps = kwargs["num_inference_steps"]
 
         class FakePipeline:
             def __init__(self, model, scheduler, processor):
@@ -307,7 +317,11 @@ class TestCanvasTrace:
             "entropy_bound": 0.3,
             "t_min": 0.2,
             "t_max": 0.6,
-            "num_inference_steps": 7,
+            # requested == effective here: this fake never rescales
+            # `num_inference_steps` (no `set_timesteps` call) — the
+            # divergent-corrector case is `tests/test_frames.py` (issue #20).
+            "num_inference_steps_requested": 7,
+            "num_inference_steps_effective": 7,
         }
         assert len(canvas_trace.frames) == 1
 
@@ -321,6 +335,74 @@ class TestCanvasTrace:
 
         assert len(canvas_trace.frames) == 1
         assert canvas_trace.frames[0].step_idx == 0
+
+    def test_corrector_style_scheduler_frame_and_trace_track_effective_steps(self, monkeypatch):
+        """Issue #20 end-to-end wiring: a corrector-style scheduler whose
+        `set_timesteps` rescales `num_inference_steps` away from the
+        user-requested value (`pipeline_diffusion_gemma.py:284-297` —
+        `predictor_steps != num_inference_steps` whenever `corrector_steps >
+        0`) must leave both the captured frame's `t`/`temperature` AND
+        `CanvasTrace.scheduler_config["num_inference_steps_effective"]`
+        reading the rescaled value — not the requested one `run_diffusion`
+        was called with."""
+        captured: dict = {}
+
+        class CorrectorScheduler:
+            def __init__(self, **kwargs):
+                captured["scheduler_kwargs"] = kwargs
+                self.num_inference_steps = kwargs["num_inference_steps"]
+
+            def set_timesteps(self, num_inference_steps, device=None):
+                # Mirrors a real corrector scheduler folding corrector sweeps
+                # into the same step budget: the effective predictor-step
+                # count is smaller than what the ctor was given.
+                self.num_inference_steps = num_inference_steps
+
+        class FakePipeline:
+            def __init__(self, model, scheduler, processor):
+                self.eos_token_id = 999
+                self._scheduler = scheduler
+
+            def __call__(self, **kwargs):
+                # Simulate the real pipeline's entry-point rescale
+                # (`pipeline_diffusion_gemma.py:297`) BEFORE the per-step
+                # loop fires any callback.
+                self._scheduler.set_timesteps(5)
+                callback = kwargs["callback_on_step_end"]
+                callback_kwargs = {
+                    "scheduler_output": FakeSchedulerOutput([[True, True]]),
+                    "canvas": torch.tensor([[1, 2]]),
+                }
+                # step_idx=2 (not 0): `t`'s fraction is `(N - step_idx) / N`,
+                # which equals 1.0 at step_idx=0 for ANY denominator — a
+                # step-0 callback couldn't distinguish "read the effective 5"
+                # from "read the stale requested 20". A mid-schedule step is
+                # required to actually witness the divergence.
+                callback(self, 0, 2, callback_kwargs)
+                return FakePipelineOutput(sequences=[torch.tensor([1, 2], dtype=torch.long)])
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", CorrectorScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", FakePipeline)
+
+        text, canvas_state, canvas_trace = run_diffusion(
+            _fake_model(), "hi", num_inference_steps=20, t_min=0.4, t_max=0.8
+        )
+
+        from dgemma.loop import anneal_temperature
+
+        expected_t, expected_temperature = anneal_temperature(
+            step_idx=2, num_inference_steps=5, t_min=0.4, t_max=0.8
+        )
+        frame = canvas_trace.frames[0]
+        assert frame.t == pytest.approx(expected_t)
+        assert frame.temperature == pytest.approx(expected_temperature)
+        # Pin the divergence: annealing against the stale requested 20 would
+        # have produced a different reading than the effective 5.
+        stale_t, _ = anneal_temperature(step_idx=2, num_inference_steps=20, t_min=0.4, t_max=0.8)
+        assert frame.t != pytest.approx(stale_t)
+
+        assert canvas_trace.scheduler_config["num_inference_steps_requested"] == 20
+        assert canvas_trace.scheduler_config["num_inference_steps_effective"] == 5
 
 
 class TestTurnClosedHonestyRider:
