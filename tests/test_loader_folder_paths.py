@@ -303,9 +303,16 @@ class TestResolveLocalModelDir:
 class TestLoaderIntegrationWithFakeFolderPaths:
     """End-to-end through `DGemmaLoader.load()` with a fake `folder_paths` and
     a monkeypatched `load_model`, proving the dropdown-to-load_model wiring
-    end to end (not just the two helper functions in isolation)."""
+    end to end (not just the two helper functions in isolation).
+
+    Ratification 2026-07-13: the dropdown ships DISABLED, so these integration
+    tests explicitly ENABLE `_LOCAL_FOLDERS_ENABLED` (the trigger-day state) and
+    drive the `local_model_dir` advanced/local-folders path — proving the wiring
+    is correct and ready for the enable trigger (#15 / #4), while the shipped
+    default keeps it hidden (covered in `test_loader_contract.py`)."""
 
     def test_load_resolves_and_forwards_local_files_only_true(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
         dm_root = tmp_path / "diffusion_models"
         dm_root.mkdir()
         expected_path = _make_model_dir(tmp_path, "diffusion_models", "diffusiongemma-26b")
@@ -324,13 +331,14 @@ class TestLoaderIntegrationWithFakeFolderPaths:
         monkeypatch.setattr(loader_module, "load_model", fake_load_model)
 
         node = loader_module.DGemmaLoader()
-        result = node.load(model_name="diffusiongemma-26b", quant="none")
+        result = node.load(repo_id="ignored", quant="none", local_model_dir="diffusiongemma-26b")
 
         assert result == ("the-loaded-model",)
         assert captured["repo_id"] == expected_path
         assert captured["local_files_only"] is True
 
     def test_load_raises_and_never_calls_load_model_for_missing_selection(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
         dm_root = tmp_path / "diffusion_models"
         dm_root.mkdir()
         fake = FakeFolderPaths({"diffusion_models": [str(dm_root)], "text_encoders": []})
@@ -341,6 +349,30 @@ class TestLoaderIntegrationWithFakeFolderPaths:
 
         node = loader_module.DGemmaLoader()
         with pytest.raises(RuntimeError, match="never falls back to a network fetch"):
-            node.load(model_name="nothing-here", quant="none")
+            node.load(repo_id="ignored", quant="none", local_model_dir="nothing-here")
+
+        assert load_model_calls == []
+
+    def test_traversal_guard_blocks_escape_through_load_end_to_end(self, tmp_path, monkeypatch):
+        """The retained security surface (ratification 2026-07-13: keep the
+        path-traversal guard), exercised end-to-end through `load()`: a
+        `../`-laden `local_model_dir` that WOULD resolve to a real model dir
+        outside the configured root is rejected, and `load_model` is never
+        reached — even with the dropdown enabled."""
+        monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
+        dm_root = tmp_path / "diffusion_models"
+        dm_root.mkdir()
+        # A real, loadable model dir OUTSIDE the configured root.
+        _make_model_dir(tmp_path, "etc")
+
+        fake = FakeFolderPaths({"diffusion_models": [str(dm_root)], "text_encoders": []})
+        monkeypatch.setattr(loader_module, "folder_paths", fake)
+
+        load_model_calls = []
+        monkeypatch.setattr(loader_module, "load_model", lambda **kw: load_model_calls.append(kw))
+
+        node = loader_module.DGemmaLoader()
+        with pytest.raises(RuntimeError, match="never falls back to a network fetch"):
+            node.load(repo_id="ignored", quant="none", local_model_dir="../etc")
 
         assert load_model_calls == []

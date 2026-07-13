@@ -12,6 +12,28 @@ is: this module turns "what local model dirs exist, and which one did the
 user pick" into a plain local filesystem path; `dgemma.model.load_model`
 still only ever sees a path/repo_id string and a `local_files_only` bool, no
 different than before.
+
+RATIFICATION 2026-07-13 — the folder_paths dropdown ships DISABLED by default
+(`_LOCAL_FOLDERS_ENABLED = False`). Rationale (operator ratification feedback):
+the pack's current load path is deliberately un-ComfyUI — weights come via
+`from_pretrained()` out of the HF hub cache (`HF_HOME`), NOT from ComfyUI's
+`models/diffusion_models`/`text_encoders` directories. A folder_paths scan
+against directories the model never inhabits would present an empty (or worse,
+misleadingly populated) selector, so the HF-identifier flow (`repo_id`) stays
+the primary, visible input and the dropdown is scaffolding held behind the flag
+until its ENABLE TRIGGER is met:
+
+  * #15 — GGUF backend graduation (weights placed as `.gguf` under a ComfyUI
+    model dir), and/or
+  * #4  — an AWQ/quantized checkpoint placed conventionally under
+    `models/diffusion_models` (or `text_encoders`).
+
+Until then the scanning/resolution code + its path-traversal guard are shipped,
+tested, and ready — but not wired into the visible UI. Flip `_LOCAL_FOLDERS_ENABLED`
+to `True` (and remove this note's "until then" clause) on the day weights
+actually live under ComfyUI model dirs. `local_files_only` and the traversal
+guard remain active for the HF-cache flow regardless of the flag — they are
+wanted independent of the dropdown (see `resolve_local_model_dir`'s docstring).
 """
 from __future__ import annotations
 
@@ -27,9 +49,19 @@ import os
 # absolute form can resolve. Observed violation: graph smoke test 2026-07-05
 # (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py.
 if __package__ and "." in __package__:
-    from ..dgemma.model import DEFAULT_QUANT, load_model
+    from ..dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
 else:
-    from dgemma.model import DEFAULT_QUANT, load_model
+    from dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+
+# Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
+# until weights actually live under ComfyUI model dirs. See the module
+# docstring for the enable trigger (#15 GGUF graduation / #4 conventional
+# checkpoint placement). When False (the default, current state): the dropdown
+# is omitted from `INPUT_TYPES` entirely — hidden, not merely de-defaulted —
+# and the HF-identifier `repo_id` flow is the sole visible load path. Flip to
+# True on the trigger day; the scan/resolve functions and their tests already
+# ship, so enabling is a one-line change, not a re-implementation.
+_LOCAL_FOLDERS_ENABLED = False
 
 # `folder_paths` is a ComfyUI-runtime module: real inside a live ComfyUI
 # process (its repo root is on sys.path at startup — `ComfyUI/main.py`), and
@@ -149,34 +181,69 @@ class DGemmaLoader:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model_name": (list_local_model_dirs(),),
-                # "none" is the only honest option (issue #18): bitsandbytes
-                # cannot quantize DiffusionGemma's fused 3D MoE experts, so
-                # "nf4"/"int8" were removed from the selector rather than left
-                # to silently not do what they claim — see dgemma/model.py's
-                # DEFAULT_QUANT provenance comment.
-                "quant": (["none"], {"default": DEFAULT_QUANT}),
-            }
+        # PRIMARY, always-visible flow: the HF identifier. Weights resolve via
+        # `from_pretrained()` out of the HF hub cache (`HF_HOME`) — the pack's
+        # deliberate (un-ComfyUI) load path (ratification 2026-07-13).
+        required = {
+            "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
+            # "none" is the only honest option (issue #18): bitsandbytes
+            # cannot quantize DiffusionGemma's fused 3D MoE experts, so
+            # "nf4"/"int8" were removed from the selector rather than left
+            # to silently not do what they claim — see dgemma/model.py's
+            # DEFAULT_QUANT provenance comment.
+            "quant": (["none"], {"default": DEFAULT_QUANT}),
+            # Off by default: keep the HF download-and-cache behavior. On:
+            # forces both from_pretrained calls to resolve only from the local
+            # HF cache (no network) — useful once a checkpoint is already
+            # cached (e.g. tokenizer-only test runs). Kept active regardless of
+            # the folder_paths flag (ratification 2026-07-13): it applies to the
+            # HF-cache flow too and is wanted independent of the dropdown.
+            "local_files_only": ("BOOLEAN", {"default": False}),
         }
+        spec: dict = {"required": required}
+
+        # SCAFFOLDING, hidden by default: the folder_paths dropdown is only
+        # surfaced once `_LOCAL_FOLDERS_ENABLED` is flipped (enable trigger:
+        # #15 GGUF graduation / #4 conventional checkpoint placement — see the
+        # module docstring). Until then it is omitted from INPUT_TYPES entirely
+        # so ComfyUI renders no empty/misleading selector. When enabled it lands
+        # in `optional` (advanced/local-folders path), NOT `required`, so the
+        # HF-identifier flow stays the primary one a user reaches for.
+        if _LOCAL_FOLDERS_ENABLED:
+            spec["optional"] = {"local_model_dir": (list_local_model_dirs(),)}
+        return spec
 
     RETURN_TYPES = ("DGEMMA_MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "load"
     CATEGORY = "DiffusionGemma"
 
-    def load(self, model_name: str, quant: str):
-        model_path = resolve_local_model_dir(model_name)
-        if model_path is None:
-            raise RuntimeError(
-                f"DGemmaLoader: could not resolve model_name={model_name!r} to a local "
-                "model directory under the configured 'diffusion_models' or "
-                "'text_encoders' folders. Place the DiffusionGemma checkpoint "
-                "(a directory containing config.json) under one of those ComfyUI "
-                "model folders — this loader never falls back to a network fetch."
-            )
-        # local_files_only=True unconditionally: the dropdown only ever
-        # offers local directories already resolved to a path, so there is
-        # never a repo_id left to fetch from the network (issue #17).
-        return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
+    def load(
+        self,
+        repo_id: str,
+        quant: str,
+        local_files_only: bool = False,
+        local_model_dir: str | None = None,
+    ):
+        # Advanced/local-folders path (only reachable when the dropdown is
+        # enabled AND a selection was made): resolve the dropdown pick through
+        # the path-traversal guard (`resolve_local_model_dir`) and force
+        # local_files_only — a resolved local directory is never a network
+        # fetch. The guard stays active here (ratification 2026-07-13) even
+        # though the dropdown is scaffolding: a `/prompt` POST can carry a
+        # `local_model_dir` string regardless of what the UI renders.
+        if _LOCAL_FOLDERS_ENABLED and local_model_dir:
+            model_path = resolve_local_model_dir(local_model_dir)
+            if model_path is None:
+                raise RuntimeError(
+                    f"DGemmaLoader: could not resolve local_model_dir={local_model_dir!r} "
+                    "to a model directory under the configured 'diffusion_models' or "
+                    "'text_encoders' folders. Place the DiffusionGemma checkpoint "
+                    "(a directory containing config.json) under one of those ComfyUI "
+                    "model folders — the local-folders path never falls back to a "
+                    "network fetch."
+                )
+            return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
+
+        # PRIMARY path: HF identifier. `local_files_only` honored as given.
+        return (load_model(repo_id=repo_id, quant=quant, local_files_only=local_files_only),)
