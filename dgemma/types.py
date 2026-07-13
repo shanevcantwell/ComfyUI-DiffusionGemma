@@ -62,6 +62,12 @@ class DiffusionFrame:
     temperature. Both ride the frame so a reader never has to reconstruct one
     from the other against the scheduler config.
 
+    `num_inference_steps` in that formula is the scheduler's EFFECTIVE value
+    (`scheduler.num_inference_steps` after `set_timesteps`), not necessarily
+    the value `run_diffusion` was called with — see `_FrameCollector`'s
+    docstring (`dgemma/loop.py`, issue #20) for the corrector-scheduler case
+    where the two diverge.
+
     Commit info is **per-example**: `committed_fraction_per_example[i]` is
     the fraction of example i's canvas positions accepted this step (mean of
     `scheduler_output.accepted_index[i]` over the block dim only — never the
