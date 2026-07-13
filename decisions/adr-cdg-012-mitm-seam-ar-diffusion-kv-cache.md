@@ -161,6 +161,195 @@ ablation** (zero/ablate the 5 full-attention layers' cache entries) a direct
 utility function on top of tier-2 surgery — a direct test of whether #40's
 fossil waves ride the long-range layers, per #47's node-level framing.
 
+## Data channels
+
+*Added 2026-07-13 per operator review of PR #51 ("better definition of how the
+actual data 'channels' of input and output work, to review before
+implementation"). This section makes the seam's I/O concrete enough that an
+implementer cannot misread it. It **does not alter** the Decision above — it
+pins the shapes, provenance tags, entry points, ride locations, and per-door
+validation the Decision leaves at schema-level. Where a shape cannot be pinned
+without a de-risk read against real weights, that is surfaced as an Open
+Question, not invented.*
+
+Two node boundaries carry `KV_CACHE`; each has an INPUT face and an OUTPUT
+face. The mint identity that makes a cache non-lying (§1, §2) is a single
+dataclass — call it the **provenance envelope** — that rides *every* crossing.
+Its concrete fields are pinned in §D.0, then each channel says which door it
+crosses and what validation fires there.
+
+### D.0 The `KV_CACHE` payload — concrete dataclass
+
+The payload riding the `KV_CACHE` socket is a `dgemma/types.py` dataclass (the
+identity, not the ComfyUI socket string — `IDENTITY⊥ENVELOPE`, ARCHITECTURE.md
+rule 4), shaped like the existing `CanvasTrace`/`CanvasState` payloads: a live
+object plus the mint metadata that keeps it honest. Proposed name `KVCache`
+(dataclass) on socket string `DGEMMA_KV_CACHE`.
+
+| field | type | meaning / shape | filled by |
+|---|---|---|---|
+| `cache` | `Any` (`transformers.DynamicCache`) | the live per-layer K/V store. Per layer `i`: `key_cache[i]`, `value_cache[i]` each a tensor of shape `(batch, num_kv_heads, seq_len, head_dim)`, dtype `bfloat16`, on the model's device. Layer count == the loaded model's decoder-layer count (30 for `26B-A4B`: 5 full-attention + 25 sliding, at indices `(i+1)%6==0` full). | `DGemmaEncode` |
+| `cumulative_length` | `tuple[int, ...]` | per-layer running committed length — the grounding report's ranked-#1 blocker (`cache_utils.py:254`, mask offsets at `:270`). One entry per layer; a consumer NEVER hand-tracks it (§2, Neg-Consequences). | `DGemmaEncode` (advances on each encode) |
+| `geometry` | `dict` | the geometry fingerprint (§2): `layer_types` pattern (the 5-full/25-sliding mask), `sliding_window` size, `batch`, `dtype`, per-layer-type RoPE params (full: proportional, θ=1e6, partial_rotary 0.25; sliding: default, θ=1e4). This is what ingress validates against the loaded model. | `DGemmaEncode` (read from `model.config`) |
+| `provenance` | `Provenance` (dataclass) | the mint record (§1): `minting_sequence: tuple[int, ...] | None` (token ids the encoder consumed — present for tier 1; `None` once perturbed), `edit_script: tuple[EditOp, ...]` (empty for tier 1; the splice/ablate/scale ops for tier 2), `model_repo_id: str` + `tokenizer_fingerprint: str` (which model/vocab minted it — the identity ingress checks vocab alignment against). | `DGemmaEncode`; `edit_script` appended by any tier-2 surgery op |
+
+`minting_sequence is None and edit_script == ()` is an **illegal state** — an
+orphan cache with no provenance at all (the Neg-Consequences "orphan-cache
+poisoning" failure). Ingress rejects it (§D.3). This is the ADR-CDG-001 lying-
+payload rule in dataclass-invariant form.
+
+### D.1 INPUT channels (what enters, where, provenance, entry point)
+
+**IN-1 — sequence → `DGemmaEncode` (mint a fresh cache).** Enters as token ids
+(`STRING`/token-id list). Provenance: this node is the *mint*; it stamps
+`provenance.minting_sequence = <these ids>`, `edit_script = ()`,
+`model_repo_id`/`tokenizer_fingerprint` from `dgemma_model`. No `KV_CACHE`
+ingress validation (nothing crossed yet); the mint is where the envelope is
+*created*, not checked. Foreign-AR-model authorship (concept.md: "any AR model
+can author the run-on text") is handled here by feeding foreign-authored ids —
+but DiffusionGemma's *own* encoder weights encode them, so the cache geometry
+is always DG's, never the foreign model's. **Failure this prevents:** a cache
+minted with no record of which ids produced it — unreproducible tier-1
+conditioning.
+
+**IN-2 — `KV_CACHE` → `DGemmaDenoise` (inject a known-provenance cache).** This
+is issue #47's motivating capability. The cache enters as a `KV_CACHE` payload
+(the dataclass above). Entry point into the one contract: a **new declarative
+parameter on `run_diffusion`**, `kv_cache: KVCache | None = None` — additive-
+optional, defaulting `None` (today's exact behavior: `DGemmaDenoise` with no
+injected cache mints its own via the first encode, mirroring ADR-CDG-006's
+`start_at_step > 0` requires-a-resume-input gate). This honors rule 7: the
+cache is a **declarative payload validated at ingress, never an executable
+participant** — `run_diffusion` receives *data* (a cache object + its envelope),
+not a closure or a hook. `None` leaves rule-6 `STATELESS-CORE` trivially
+satisfied (no injected state crosses; the run mints fresh). **Failure this
+prevents:** the injection door being opened as a second executable seam (a
+surface handing in code), which rule 7 forecloses — it is a data door only.
+
+**IN-3 — `KV_CACHE` → `DGemmaEncode` (advance an existing cache, cross-block
+re-encode).** The decoder→encoder committed-canvas re-encode crossing
+(`pipeline_diffusion_gemma.py:429`) surfaced as a node input: a prior block's
+`KV_CACHE` plus the newly-committed canvas ids enter `DGemmaEncode`, which
+encodes the committed block into the cache and emits a **new** payload (§3
+advance-returns-new-payload; OUT-2). Provenance: `minting_sequence` extends by
+the committed ids (tier 1 stays tier 1); `cumulative_length` advances per
+layer. **Failure this prevents:** a re-encode that mutates the input cache in
+place, contaminating a fan-out branch (§3, the `STATELESS-CORE`-in-miniature
+aliasing hazard).
+
+**IN-4 — serialized `KV_CACHE` → load node (deserialize a tier-2 artifact).**
+A `torch.save`d cache + its envelope re-enters from disk (§4 save/load pair).
+Disk is a data-plane crossing like any node-to-node one (§1,
+`CONSERVE-ACROSS-THE-DATA-BOUNDARY`): the same §D.3 ingress fires on the
+deserialized payload. Provenance for tier-2 artifacts is `minting_sequence =
+None` + a non-empty `edit_script` (the only reproduction path once perturbed).
+**Failure this prevents:** a deserialized cache built against a different
+model's geometry (device/dtype/layer-type drift) attaching silently — caught
+by the geometry-fingerprint check, which was designed for caches of unknown
+history (§4).
+
+### D.2 OUTPUT channels (what comes back, where it rides, retention policy)
+
+**OUT-1 — `DGemmaDenoise` → `KV_CACHE` (the advanced cache).** When
+`DGemmaDenoise` stops at a block boundary (§4 optional stop), it emits the
+advanced cache as a **new** `KV_CACHE` payload (§3), with `cumulative_length`
+and `provenance.minting_sequence` advanced by the committed block. Rides its
+own socket, not a trace field. **Retention policy — named, because KV caches
+are large:** the advanced-cache output is emitted **only when the stop-at-block
+boundary is requested**; a run to completion does not retain intermediate
+per-block caches (they are advanced-through, not accumulated). A `KVCache`
+payload is one live `DynamicCache` at a time — O(context) memory, not
+O(context × blocks). The tier-2 serialization artifact (§5) is opt-in via the
+save node; nothing auto-persists caches.
+
+**OUT-2 — `DGemmaEncode` → `KV_CACHE` (the minted/advanced cache).** IN-1's
+mint and IN-3's advance both exit here as a fresh payload. Same
+advance-returns-new-payload discipline; same one-cache-at-a-time retention.
+
+**OUT-3 — injection provenance → `CanvasTrace` (the record that a cache was
+injected).** When a run is driven with an injected cache (IN-2), the fact and
+identity of the injection must be recoverable from the trace, or a downstream
+analysis cannot tell a conditioned run from an unconditioned one — the
+`CanvasTrace` "mint identity gives the readings their meaning" discipline
+(`types.py:99-124`) applied to the cache axis. Rides as an **additive-optional
+field on `CanvasTrace`** under the #35 R6 additive-optional discipline
+(`ARCHITECTURE.md` R6 row): `injected_cache_provenance: Provenance | None =
+None` (default `None` — unchanged for every non-injected run today). It carries
+the envelope's *identity* (minting sequence hash / edit-script summary /
+`model_repo_id`), **not** the tensors — the tensors are large and already have
+their own OUT-1/save-node home; duplicating them into the trace would violate
+OUT-1's retention policy. **Failure this prevents:** a fossil-wave ablation
+study whose trace cannot say the cache it ran against was injected/perturbed —
+a conclusion that looks grounded but isn't (Neg-Consequences orphan-cache
+poisoning, trace side).
+
+**Per-step deltas are OUT OF SCOPE for this channel set.** Capturing how the
+injected cache changes the *per-step* canvas distribution is a `DISTRIBUTION`-
+tap concern (the seam-inventory `DISTRIBUTION` primitive, gated on #11/#14),
+not a `KV_CACHE` output. This ADR's OUTPUT channels carry caches and injection
+provenance; they do not carry per-step distribution deltas. Recorded so an
+implementer does not fold a distribution capture into the cache payload.
+
+### D.3 VALIDATION at each door (ingress checks + enforcement surface)
+
+Every `KV_CACHE` ingress (IN-2, IN-3, IN-4) runs one validator —
+`validate_kv_cache_ingress(payload, dgemma_model)` — before the payload is
+used. Fail-on-mismatch, never trust-and-degrade (rule 5,
+`EMIT-CANONICAL / PARSE-AT-THE-DOOR`). Each check names the failure it prevents
+(greenfield anticipated-failure anchoring):
+
+| # | ingress check | failure it prevents | enforcement surface |
+|---|---|---|---|
+| V1 | layer count of `cache` == loaded model's decoder-layer count | a cache from a differently-sized model attaching with a truncated/over-long layer set — silent wrong-geometry attention | `test_kv_ingress_layer_count_mismatch_raises` (unit, synthetic cache vs. model config) |
+| V2 | `geometry.layer_types` / `sliding_window` / RoPE params == `model.config` derivation | the Neg-Consequences "silent geometry mismatch" — a cache built against one layer-type pattern fed to another produces wrong masks with no crash | `test_kv_ingress_geometry_fingerprint_mismatch_raises` |
+| V3 | `cumulative_length` present, one entry per layer, non-negative | the ranked-#1 blocker: a stale/uninitialized `cumulative_length` silently corrupting mask offsets (`cache_utils.py:254,270`) — plausible-but-wrong mask | `test_kv_ingress_missing_or_ragged_cumulative_length_raises` |
+| V4 | `provenance.tokenizer_fingerprint` / `model_repo_id` match the loaded model | vocab misalignment — a cache minted under a different tokenizer conditioning the canvas on token ids that mean something else (the orphan-provenance poisoning, vocab flavor) | `test_kv_ingress_vocab_mismatch_raises` |
+| V5 | provenance non-orphan: NOT (`minting_sequence is None` and `edit_script == ()`) | a cache with no reproduction path at all — unreproducible, unauditable experimental input (§D.0 illegal state) | `test_kv_ingress_orphan_provenance_raises` |
+| V6 | `cache` dtype / device match the loaded model | a CPU-loaded or fp32 deserialized cache (IN-4) attaching to a bf16-on-GPU model — device/dtype drift that would error deep in attention rather than at the door | `test_kv_ingress_dtype_device_mismatch_raises` |
+
+Enforcement-surface home: these rows extend `ARCHITECTURE.md`'s enforcement-
+surface table with a `KV_CACHE` ingress row (`NOT-YET-IMPLEMENTED` until the
+node pair lands), alongside the existing declarative-payload ingress row (rule
+7). The validator is engine-side (`dgemma/`, ComfyUI-agnostic per ADR-CDG-003);
+the socket string is surface-side.
+
+### D.4 Channel diagram
+
+```
+                         AR HEMISPHERE                    │  SEAM  │           DIFFUSION HEMISPHERE
+                     (encoder — sole cache writer)        │ (MITM) │        (decoder — reads, never writes)
+ ─────────────────────────────────────────────────────── │ ────── │ ───────────────────────────────────────
+
+   token ids (own or foreign-authored AR text)
+        │  IN-1
+        ▼
+   ┌───────────────┐   OUT-2                              │        │
+   │ DGemmaEncode  │────────────►  KV_CACHE payload  ─────┼──[V1..V6]──►  ┌────────────────┐
+   │  (mint /      │               { DynamicCache          │ ingress │     │  DGemmaDenoise  │
+   │   advance)    │◄──── IN-3       + cumulative_length    validate │     │  (block loop,   │
+   └───────────────┘   advance an    + geometry fp          │        │     │   canvas in)    │
+        ▲                existing     + provenance envelope }│  IN-2  ├────►│                 │
+        │                cache +                             (inject) │     └────────┬────────┘
+        │                committed                          │        │              │
+        │                canvas                             │        │      OUT-1 (stop-at-block):
+        │                                                   │        │      advanced KV_CACHE ──┐
+        └───────────────────────────────────────────────────────────┼──────────────────────────┘
+                    committed-canvas re-encode (pipeline_diffusion_gemma.py:429)   (feeds IN-3)
+
+   disk  ──[torch.load + envelope]──►  IN-4  ──[V1..V6]──►  (same ingress as IN-2)     │
+                                                                                        ▼
+                                                              CanvasTrace.injected_cache_provenance
+                                                              (OUT-3 — identity only, not tensors)
+```
+
+Read: `DGemmaEncode` is the sole minter/advancer (mirrors the model's
+sole-cache-writer encoder, `modeling_diffusion_gemma.py:350-351`);
+`DGemmaDenoise` is the sole consumer (mirrors the read-only decoder). Every
+arrow crossing the seam into a consumer passes `[V1..V6]` ingress. The
+re-encode crossing (bottom) is the model's own decoder→encoder loop
+(`:429`) surfaced as the IN-3 node input. OUT-3 records injection identity on
+the trace without duplicating the tensors.
+
 ## Rationale
 
 ### Positive Consequences
@@ -275,10 +464,32 @@ by design.
       exists today, so node-internal iteration is the only buildable shape
       until that changes.
 
+- [ ] **`CANVAS_STATE` resume under an injected tier-2 cache — a genuine
+      tension with ADR-CDG-005 the channel definition surfaced.** ADR-CDG-005
+      excludes KV from the resume save-state on the ground that it is
+      *recomputable from the committed prefix via one prefill pass* (ADR-CDG-005
+      §"KV cache is deliberately excluded", Option B). That ground holds for a
+      **tier-1** cache (its minting sequence prefills it back). It does **not**
+      hold for a **tier-2** perturbed cache: no prefill reproduces it (§5,
+      Option D — that is precisely why tier 2 requires serialization). So a
+      `CANVAS_STATE` captured mid-run *while a tier-2 cache is injected* is not
+      self-sufficient — resuming it re-prefills a cache that never matches the
+      perturbed one that produced the frames. This does **not** reopen
+      ADR-CDG-005's routine exclusion (tier-1 resume is unaffected, per Option
+      C); it names a case ADR-CDG-005's recomputability premise did not cover.
+      **Resolution trigger:** decide, before `CANVAS_STATE`+`KV_CACHE`
+      co-capture is built, whether a tier-2-injected resume must reference the
+      serialized cache artifact (by envelope identity, like OUT-3) rather than
+      relying on prefill — a per-run flag on `CANVAS_STATE`, not a change to its
+      default shape. This is a channel-composition question, not a Decision this
+      ADR makes.
+
 **Resolution plan:** the real-weights smoke test gates all implementation
 past a skeleton; the scope boundary and block-loop-ownership questions are
 recorded as open and must not be silently decided by implementation ahead of
-their resolution triggers.
+their resolution triggers. The `CANVAS_STATE`-under-tier-2 tension is recorded
+as open (not decided here) and gates any `CANVAS_STATE`+`KV_CACHE` co-capture
+work.
 
 ## Supersession Relationships
 
