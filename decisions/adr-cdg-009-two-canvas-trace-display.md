@@ -1,7 +1,9 @@
-# ADR-CDG-009 — Make the two-canvas (block) structure legible in the flipbook and heatmap
+# ADR-CDG-009 — Make the N-canvas (block) structure legible in the flipbook and heatmap
 
 **Status**: proposed
-**Date**: 2026-07-13
+**Date**: 2026-07-13 (revised 2026-07-13: reframed two-canvas → N-canvas per
+operator ratification feedback — see "Revision 2026-07-13" at the foot of this
+ADR)
 **Related**: ADR-CDG-001 (native socket types — payloads mean what they say;
 this ADR's `committed_fraction` relabeling and heatmap fill-sentinel are both
 instances of that discipline applied to display, not just data), ADR-CDG-005
@@ -12,15 +14,23 @@ twin for `CANVAS_TRACE`/flipbook rather than the resumable-state contract)
 
 ## Context
 
-DiffusionGemma generation spans **two canvases** (block-diffusion): a fixed-
-width canvas denoises to convergence, then the block boundary advances and a
-second, fresh canvas opens and denoises in turn. `DiffusionFrame.canvas_idx`
-(`dgemma/types.py:73`) already tags every captured frame with which block it
-belongs to — `_FrameCollector` (`dgemma/loop.py:104-202`) infers the boundary
-from a non-increasing `step_idx` between callbacks
-(`dgemma/loop.py:134-141,178-180`) and increments `_canvas_idx` there. The
-data needed to distinguish canvases already exists per-frame; nothing
-upstream of display needs to change to make it available.
+DiffusionGemma generation spans **N canvases** (block-diffusion): the
+pipeline's outer loop is `for _ in range(num_canvases)`
+(`pipeline_diffusion_gemma.py:318`), and each iteration opens a fresh
+fixed-width canvas that denoises to convergence before the block boundary
+advances to the next. `step_idx` resets to 0 at each canvas; `global_step` is
+monotone across all of them. **Two canvases (thinking + answer) is the
+*observed* case, not the structural limit** — a run with N=1 (no thinking
+phase) or N≥3 is the same mechanism with a different block count.
+`DiffusionFrame.canvas_idx` (`dgemma/types.py:73`) already tags every captured
+frame with which block it belongs to — `_FrameCollector`
+(`dgemma/loop.py:104-202`) infers *each* boundary generically from a
+non-increasing `step_idx` between callbacks
+(`dgemma/loop.py:134-141,178-180`) and increments `_canvas_idx` there, with no
+assumption about how many boundaries there will be. The engine side is already
+N-aware; the data needed to distinguish canvases already exists per-frame, and
+nothing upstream of display needs to change to make it available. This ADR's
+job is to make the display surfaces equally N-aware.
 
 Two display surfaces read `trace.frames` today and neither uses
 `canvas_idx` for anything beyond the diff-baseline reset:
@@ -43,19 +53,21 @@ Two display surfaces read `trace.frames` today and neither uses
   produces a jagged list, the "25-vs-29 frame/heatmap shape mismatch" issue
   #26 names from a live run.
 
-Grounded facts from a 61-step cloze run (issue #26): canvas 1 converges
-(`committed_fraction` → 1.0) by step 41; step 42 opens canvas 2 and
-`committed_fraction` crashes 1.000 → 0.004, because the fraction is
-**block-local** — `accepted_index.float().mean(dim=-1)`
+Grounded facts from a 61-step cloze run (issue #26) — a two-canvas instance of
+the general N-canvas structure: canvas 1 converges (`committed_fraction` → 1.0)
+by step 41; step 42 opens canvas 2 and `committed_fraction` crashes 1.000 →
+0.004, because the fraction is **block-local** — `accepted_index.float().mean(dim=-1)`
 (`dgemma/loop.py:185`) is computed over the active block's own tensor only,
 with no persistent cross-block state (`EntropyBoundScheduler` holds none;
-ADR-CDG-001's addendum on scheduler-relative commit semantics). Canvas 1's
-content is preserved byte-for-byte across the boundary — the block *advances*,
-it does not discard — but nothing in the current display says so. A reader
-sees a converged canvas, then a wall of noise, then a sawtooth in the summary
-curve, and the honest reading ("canvas 1 finished; canvas 2 began") is
-indistinguishable from the wrong one ("canvas 1 got thrown out and
+ADR-CDG-001's addendum on scheduler-relative commit semantics). The prior
+canvas's content is preserved byte-for-byte across each boundary — the block
+*advances*, it does not discard — but nothing in the current display says so. A
+reader sees a converged canvas, then a wall of noise, then a sawtooth in the
+summary curve, and the honest reading ("canvas k finished; canvas k+1 began")
+is indistinguishable from the wrong one ("canvas k got thrown out and
 re-melted") without already knowing the block-diffusion mechanism going in.
+This misreading recurs at *every* boundary, so the fix must be per-boundary,
+not a single hardcoded midpoint split.
 
 This is a `EMIT-CANONICAL / PARSE-AT-THE-DOOR` problem in the same shape
 ADR-CDG-001 already names for data payloads, applied here to display:
@@ -87,40 +99,56 @@ in this block," not "this position is uncommitted." `_heatmap_to_image`
 for `2`) so a padded region reads as *structurally absent*, not as
 melted-and-never-committing.
 
-Between the last frame of one `canvas_idx` and the first frame of the next,
-insert a single **boundary marker row**: a uniform row of a fourth sentinel
-value (`3`), rendered as a bright dividing line the height of one (unscaled)
-row. This directly answers issue #26's ask for "a boundary marker in the
-heatmap" and gives a reader a literal, unmissable line at every block
-transition, independent of reading the commit-state coloring correctly.
+At **every** `canvas_idx` transition — between the last frame of one canvas
+and the first frame of the next — insert a **boundary marker row**: a uniform
+row of a fourth sentinel value (`3`), rendered as a bright dividing line the
+height of one (unscaled) row. An N-canvas trace has **N−1 such transitions**,
+so a run yields 0..N−1 boundary rows (N=1 → zero rows, no spurious divider on
+a single-canvas run). This directly answers issue #26's ask for "a boundary
+marker in the heatmap" and gives a reader a literal, unmissable line at every
+block transition, independent of reading the commit-state coloring correctly.
 
 This resolves the ragged-row/shape-mismatch bug (any-width canvases now
 produce a rectangular array) as a side effect of making the boundary
 visible, not as a separately-motivated fix.
 
-### 2. Flipbook: per-block caption, boundary frame
+### 2. Flipbook: per-block caption keyed to the canvas index, per-boundary divider frames
 
+**Caption (SHIPPED in this PR — no unresolved encoding choice).**
 `render_frames_to_image_batch`'s caption changes from
-`f"step {idx + 1}/{total}"` to `f"canvas {frame.canvas_idx + 1} · step
-{block_local_idx + 1}/{block_len}"` — the caption already available data
-(`canvas_idx`), reformatted to say what it actually is: position within a
-block, not position within the whole run. `render_frames_to_image_batch`
-currently takes `frames: list[str]` only (decoded text, no frame metadata);
-it must additionally take `canvas_indices: list[int]` (parallel array, one
-`canvas_idx` per string — cheap to derive from `canvas_trace.frames` at the
-`nodes/sampler.py` call site, which already holds both the decoded strings
-and the original `DiffusionFrame`s) so the block-local numbering and
-boundary detection can be computed without decoding.
+`f"step {idx + 1}/{total}"` to `f"canvas {k}/{N} · step {i}/{M}"` — where
+`k` is the 1-based canvas number, `N` the total canvas count, `i` the 1-based
+block-local step within that canvas, and `M` that canvas's own step count.
+This uses already-available data (`canvas_idx`), reformatted to say what it
+actually is: position within a block *and* which block of how many, not a flat
+position within the whole run. `render_frames_to_image_batch` currently takes
+`frames: list[str]` only (decoded text, no frame metadata); it additionally
+takes `canvas_indices: list[int]` — **a per-image key carrying each frame's
+`canvas_idx`** (parallel array, one `canvas_idx` per string, cheap to derive
+from `canvas_trace.frames` at the `nodes/sampler.py` call site, which already
+holds both the decoded strings and the original `DiffusionFrame`s). Passing the
+canvas index *per image* rather than re-deriving boundaries from a count is the
+`CONSERVE-DATA-BOUNDARY` move #35's F7 note asks for: the correspondence
+between a rendered image and its canvas is carried explicitly, not reconstructed
+by a fragile 1:1 zip. Block-local numbering and boundary detection then fall out
+of the per-image key for any N, including the degenerate N=1 (every frame keyed
+to canvas 0 → captions read `canvas 1/1 · step i/M`, and **zero dividers**).
 
+**Divider frames (DESIGN — held for ratification, NOT shipped in this PR).**
 At each detected `canvas_idx` transition, insert one synthetic **divider
 frame** into the batch (same fixed canvas size as the real frames, distinct
-background color, caption `"— canvas {N} → canvas {N+1} —"`) between the
-last frame of the outgoing block and the first frame of the incoming one.
-This makes the boundary a visible frame in any consumer that scrubs the
-`images` batch (`PreviewImage`, `SaveAnimatedWEBP`, VHS `Video Combine`) —
-the same mechanism issue #26 asks for, applied to the medium (a frame
-sequence) each of those consumers actually understands, rather than a
-side-channel annotation those consumers would not render.
+background color, caption `"— canvas {k} → canvas {k+1} —"`) between the last
+frame of the outgoing block and the first frame of the incoming one. An
+N-canvas trace has N−1 transitions, so 0..N−1 divider frames are inserted
+(**N=1 → zero divider frames**); no code path assumes exactly one. This makes
+each boundary a visible frame in any consumer that scrubs the `images` batch
+(`PreviewImage`, `SaveAnimatedWEBP`, VHS `Video Combine`) — the same mechanism
+issue #26 asks for, applied to the medium (a frame sequence) each of those
+consumers actually understands, rather than a side-channel annotation those
+consumers would not render. The synthetic-frame *encoding* (distinct
+background color; whether a non-denoising frame belongs in the `images` batch
+at all vs. only the caption change) is a real display choice held as an open
+ratification question — hence design-only here while the caption ships.
 
 ### 3. `committed_fraction`: label as block-local at every display surface
 
@@ -132,10 +160,12 @@ boundary, marked above): ..."`, and the live-view status line
 one-line clarification in its legend/tooltip. No field renames, no schema
 change — `DiffusionFrame.committed_fraction`'s docstring
 (`dgemma/types.py:80-89`) already states the block-local scope correctly;
-this is purely propagating that existing, correct meaning to the two
-operator-facing text surfaces that currently don't say it. This directly
-answers issue #26's "the sawtooth reads as re-melt" misreading — the fix is
-captioning, not recomputation. (Whether a *cumulative*, cross-block reading
+this is purely propagating that existing, correct meaning to the
+operator-facing text surfaces that currently don't say it. The wording is
+already N-agnostic ("resets near 0 at each canvas/block boundary") — it names
+the per-boundary reset, not a single midpoint, so it holds for any N. This
+directly answers issue #26's "the sawtooth reads as re-melt" misreading — the
+fix is captioning, not recomputation. (Whether a *cumulative*, cross-block reading
 of commit progress is also wanted is deliberately out of scope — see Open
 Questions.)
 
@@ -179,13 +209,19 @@ Questions.)
 - **The flipbook's synthetic divider frame is not a real denoising step.**
   A consumer that assumes every frame in the `images` batch corresponds 1:1
   to a `DiffusionFrame` (e.g. a hypothetical future node that zips `images`
-  back against `canvas_trace.frames` by index) would miscount once divider
-  frames are inserted. **Enforcement surface:** `render_frames_to_image_batch`
-  keeps a strict "N real frames in, N + (num_boundaries) frames out"
-  contract, documented in its own docstring and pinned by a test asserting
-  batch length equals `len(frames) + num_transitions` for a multi-canvas
-  fixture — the count relationship is the checkable invariant, not "trust
-  the docstring."
+  back against `canvas_trace.frames` by positional index) would miscount once
+  divider frames are inserted. The `CONSERVE-DATA-BOUNDARY` mitigation (#35 F7)
+  is the per-image `canvas_indices` key: a consumer keys on the explicit canvas
+  index carried per image rather than on a fragile 1:1 positional zip, so
+  divider insertion never silently misaligns the correspondence. **Enforcement
+  surface:** `render_frames_to_image_batch` keeps a strict "K real frames in,
+  K + num_transitions frames out" contract where `num_transitions` = the count
+  of `canvas_idx` changes = **N − 1** for an N-canvas run (so **N=1 → +0
+  frames, zero dividers**), documented in its own docstring and pinned by a
+  test **parametrized over N ∈ {1, 2, 3+}** asserting batch length equals
+  `len(frames) + num_transitions` — the count relationship is the checkable
+  invariant across all N, not "trust the docstring," with N=1 the explicit
+  degenerate case that must render no divider.
 - **`gen_length` fixed-width assumption broken already, not introduced
   here.** `render_frames_to_image_batch` already computes one shared
   `(width, height)` for the whole batch from the tallest wrapped frame
@@ -207,9 +243,9 @@ currently `("IMAGE", "STRING")` — a single heatmap `IMAGE`, matching
 `PreviewImage`'s single-image-or-uniform-batch expectation. Switching to a
 list return is a breaking change to the node's output arity/type (an
 `OUTPUT_IS_LIST` flip), forcing every existing workflow that wires
-`DGemmaTrace`'s `heatmap` output downstream to be rebuilt, for a run that
-today is architecturally exactly two canvases (P0–P3 scope) but could in
-principle be more. It also loses the "one glance, whole run" property the
+`DGemmaTrace`'s `heatmap` output downstream to be rebuilt, for a run whose
+canvas count N is a runtime property (two is merely the common thinking+answer
+case, not a fixed structure). It also loses the "one glance, whole run" property the
 issue explicitly asks for ("makes the two-canvas structure legible" reads
 most naturally as *one* legible artifact, not N artifacts a reader must
 mentally re-stitch). Left as an **open question** below rather than fully
@@ -224,7 +260,8 @@ Avoids inventing a fill sentinel entirely — every row is already the same
 
 **Why rejected:** Silently discards real commit-state data for whichever
 canvas is wider (typically canvas 2, the "over-provisioned for this prompt"
-case issue #26 itself observed). A heatmap that quietly drops columns is a
+case issue #26 itself observed — and, for N≥3, silently discards data for
+every canvas wider than the narrowest). A heatmap that quietly drops columns is a
 lying payload in exactly ADR-CDG-001's sense — it looks complete and isn't.
 Padding-with-a-documented-sentinel keeps every real cell visible; the cost
 is a legend entry, not lost data.
@@ -248,11 +285,14 @@ rather than bundled in.
 
 ## Open Questions
 
-- [ ] Does a run ever span more than two canvases in practice, and if so,
-      does the padded-heatmap approach's wasted sentinel area become a real
-      cost (Option A's rejected-for-now trade-off) rather than a
-      theoretical one? **Resolution trigger:** revisit once a 3+-canvas
-      trace is observed from a real run; P0–P3 grounding is two-canvas only.
+- [ ] The structure is N-canvas by construction (`for _ in range(num_canvases)`),
+      so a 3+-canvas run is a *when*, not an *if*. The open question is
+      whether, once such runs are common, the padded-heatmap approach's wasted
+      sentinel area (which grows with the spread of per-canvas widths) becomes
+      a real cost that tips the trade-off toward Option A's per-canvas
+      sub-heatmaps. **Resolution trigger:** revisit once 3+-canvas traces are
+      routinely observed and the sentinel padding is measured; the two-canvas
+      thinking+answer case is merely the common one, not the design ceiling.
 - [ ] Is a cumulative (non-block-local) commit curve wanted alongside the
       relabeled block-local one (Option C), and if so, how should blocks of
       differing width be weighted? **Resolution trigger:** raise as a
@@ -295,3 +335,45 @@ rather than bundled in.
   regress)
 - Issue #26 (this ADR's originating ask, including the grounded 61-step
   cloze-run observations)
+- `pipeline_diffusion_gemma.py:318` (the N-ary outer canvas loop
+  `for _ in range(num_canvases)` this reframe grounds on)
+- Issue #35 F7 (`CONSERVE-DATA-BOUNDARY`: the per-image canvas-index key that
+  the flipbook `canvas_indices` param satisfies)
+
+## Revision 2026-07-13 — two-canvas → N-canvas reframe (operator ratification feedback)
+
+The operator's ratification feedback established that **two canvases is the
+observed case (thinking + answer), not the structural limit**: the pipeline's
+outer loop is `for _ in range(num_canvases)`
+(`pipeline_diffusion_gemma.py:318`), `step_idx` resets per canvas, `global_step`
+is monotone, and `_FrameCollector` already infers each boundary generically
+from a non-increasing `step_idx` (`dgemma/loop.py:137-141`) with no count
+assumption. This revision reframes the ADR accordingly, and lands the one
+piece with no held ratification question:
+
+- **Title + framing.** "two-canvas" → "N-canvas"; block boundaries are N−1
+  N-ary events (0..N−1), never a single hardcoded midpoint split.
+- **§1 heatmap divider rows.** Now "at every `canvas_idx` transition," N−1
+  rows for an N-canvas run, N=1 → zero divider rows. (Encoding still design —
+  held.)
+- **§2 flipbook.** Caption reframed to the operator-dictated
+  `canvas k/N · step i/M`, keyed to a **per-image `canvas_indices` array**
+  (the #35 F7 `CONSERVE-DATA-BOUNDARY` fix — canvas index carried per image,
+  not a fragile 1:1 positional zip). The caption + per-image key is **shipped
+  in this PR** with tests parametrized over N ∈ {1, 2, 3} (N=1 renders normal
+  captions and **zero dividers**). The synthetic **divider frame** encoding
+  (background color; whether a non-denoising frame belongs in `images` at all)
+  remains **design-only**, held for ratification.
+- **§3 committed_fraction label.** Already N-agnostic ("resets near 0 at each
+  canvas/block boundary") — unchanged, confirmed correct for any N.
+- **Divider-count invariant.** `num_transitions = N − 1`; enforcement is a
+  test parametrized over N including the degenerate N=1 zero-divider case, not
+  a hardcoded "one boundary."
+
+**Deliberately NOT shipped (held for the operator's still-open ratification
+questions):** heatmap fill/divider sentinel encoding (`2`/`3` + colors),
+padding-to-shared-IMAGE vs. per-canvas sub-heatmaps, and the synthetic
+flipbook divider-frame encoding. Those are real display choices the PR body's
+ratification questions still hold; implementing them now would pre-empt the
+operator's call. The caption/per-image-key slice ships because its format is
+operator-dictated and carries no unresolved encoding choice.
