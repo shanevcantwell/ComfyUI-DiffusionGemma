@@ -31,6 +31,10 @@ tools/flipbook/out/
 .ruff_cache/
 .mypy_cache/
 .coverage
+# ADR-CDG-013 §3: `[tool.coverage.run] parallel = true` names per-process
+# files `.coverage.<host>.<pid>.<rand>` (unit suite + e2e-battery subprocess
+# data, pre-`coverage combine`) — never committed.
+.coverage.*
 
 # Editor / OS
 .vscode/

@@ -38,7 +38,12 @@ dependencies = [
 Repository = "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma"
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+# `requests`/`websocket-client` (ADR-CDG-013 §Decision 1): the E2E black-box
+# battery driver (`tests/e2e/`) speaks only ComfyUI's HTTP+websocket API —
+# these are test-driver deps, never a node-pack runtime dependency, so they
+# live here (and are correctly absent from `requirements.txt` — see
+# `tests/test_requirements_sync.py`'s `[project].dependencies`-only scope).
+dev = ["pytest", "ruff", "requests", "websocket-client", "coverage"]
 # ADR-CDG-008 Phase 2: surfaces/mcp/ is a PEER surface, not core — the `mcp`
 # SDK is therefore optional, exactly like ComfyUI itself is absent-by-design
 # from this pack's core dependencies (`tests/test_seam.py`). A ComfyUI-only
@@ -71,10 +76,34 @@ py-modules = []
 # `dgemma`/`surfaces` are still found via `sys.path[0]` (the cwd
 # `python -m pytest` inserts).
 testpaths = ["tests"]
-# `-m 'not live'`: the default fast suite excludes `live` tests (real
-# weights + CUDA) so bare `pytest` stays CI-safe/no-GPU; `pytest -m live`
-# selects only them. See `tests/README.md` for the two-halves convention.
-addopts = "--import-mode=importlib -m 'not live'"
+# `-m 'not live and not e2e'`: the default fast suite excludes both `live`
+# (in-process real-weights seam tests) and `e2e` (black-box battery against
+# a headless ComfyUI subprocess, ADR-CDG-013) so bare `pytest` stays
+# CI-safe/no-GPU/no-server; `pytest -m live` / `pytest -m e2e` select each
+# tier on its own. See `tests/README.md` for the two-halves (now
+# three-tiers) convention.
+addopts = "--import-mode=importlib -m 'not live and not e2e'"
 markers = [
     "live: requires real DiffusionGemma weights (bf16, ~52GB cached) + a CUDA device; excluded from the default fast suite — run with `pytest -m live`",
+    "e2e: black-box E2E battery against a headless ComfyUI subprocess on real weights (ADR-CDG-013); distinct from `live` (in-process seam tests) — imports only requests/websocket-client, never the implementation. Excluded from the default fast suite and from `pytest -m live`; run with `pytest -m e2e`.",
 ]
+
+# ADR-CDG-013 §3: subprocess-merged coverage for the E2E battery. The
+# node-pack code under an `e2e` run executes inside the headless ComfyUI
+# *subprocess*, not the pytest process, so coverage there is measured via
+# `COVERAGE_PROCESS_START` + `sitecustomize.process_startup()` (the
+# subprocess hook `tests/e2e/conftest.py`'s server fixture sets in the
+# subprocess env) and merged into this same dataset via `coverage combine`.
+# `parallel = true` names the resulting per-process files `.coverage.<host>.<pid>`
+# so the unit suite's run and the server subprocess's run don't clobber each
+# other before combining. `sigterm = true` flushes measurement on the
+# SIGTERM the server-lifecycle fixture sends at teardown (coverage 7.x).
+# `concurrency = ["thread"]`: ComfyUI's execution and the live-view push run
+# on server threads, not separate processes — deliberately NOT
+# "multiprocessing" (that's the Open Question fallback in ADR-CDG-013 if #50
+# recurs inside the server process, not the default).
+[tool.coverage.run]
+parallel = true
+concurrency = ["thread"]
+sigterm = true
+source = ["dgemma", "surfaces", "consumers"]
