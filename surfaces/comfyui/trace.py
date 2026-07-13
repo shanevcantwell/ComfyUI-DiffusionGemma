@@ -2,21 +2,23 @@
 
 Post-hoc analysis over a complete `DGEMMA_CANVAS_TRACE` socket (plan.md Phase
 3 (b) — unaffected by the (a) live-view split; see `surfaces/comfyui/sampler.py`'s
-docstring). Calls the pure `dgemma.sampling` functions (steps 3-4: heatmap,
-avalanche curve, mask-token corroboration) and wraps their plain-list/
-dataclass results into ComfyUI-native socket types. `dgemma/sampling.py`
-itself is NOT relocated by this phase — ADR-CDG-008 Open Question #1
-(analysis's eventual `consumers/`/`surfaces/analysis/` home) is Phase 3,
-explicitly out of scope here.
+docstring). Calls the pure `consumers.analysis` functions (heatmap, avalanche
+curve, mask-token corroboration) and wraps their plain-list/dataclass results
+into ComfyUI-native socket types. The functions themselves live in
+`consumers/analysis.py` — a top-level sibling of `surfaces/` and `dgemma/`
+(ADR-CDG-008 Open Question #1, resolved to `consumers/`; see the ADR's
+amendment note and issue #55 §1). This node is the surface-tier half of the
+split: it imports up-and-over into the consumer tier, which is normal
+composition, not a layering inversion (both sit above the core).
 
 The one piece of non-trivial code in this file — building an `IMAGE` tensor
 from a plain `list[list[int]]` — is the ADR-CDG-003-sanctioned exception, not
-a violation: `dgemma/sampling.py`'s own docstring says explicitly that
+a violation: `consumers/analysis.py`'s own docstring says explicitly that
 ComfyUI-shaped tensor construction does NOT belong there, and plan.md step 6
 assigns it here ("a real tensor built here, in the adapter layer, from the
-plain array `dgemma/sampling.py` returned"). No denoising-loop logic, no
+plain array `consumers/analysis.py` returned"). No denoising-loop logic, no
 `for` loop over steps of its own — the heatmap/curve/corroboration
-computation itself is entirely `dgemma.sampling`'s.
+computation itself is entirely `consumers.analysis`'s.
 """
 from __future__ import annotations
 
@@ -25,20 +27,21 @@ import torch
 # Dual-context import, explicit package-depth gate — see
 # surfaces/comfyui/loader.py for the full rationale. This module lives two
 # levels under the pack root (surfaces/comfyui/), so the relative climb to
-# dgemma/ is THREE dots (ADR-CDG-008 Phase 1 / issue #52 risk R-1).
-# dgemma.sampling itself is NOT relocated by this phase (Phase 3 is out of
-# scope, Open Question #1 unresolved) — only the import depth changes. Gate
-# is `__package__.count(".") >= 2`, not bare dot-presence — see loader.py's
-# "GATE CORRECTION" comment.
+# consumers/ is THREE dots (ADR-CDG-008 Phase 1 / issue #52 risk R-1).
+# `consumers/` is a top-level pack-root child, exactly like `dgemma/`, so the
+# relative-import depth is unchanged by the Phase 3 relocation — only the
+# middle segment (`dgemma.sampling` -> `consumers.analysis`) changed (issue
+# #55 §2 "Dual-context depth check"). Gate is `__package__.count(".") >= 2`,
+# not bare dot-presence — see loader.py's "GATE CORRECTION" comment.
 if __package__ and __package__.count(".") >= 2:
-    from ...dgemma.sampling import (
+    from ...consumers.analysis import (
         build_avalanche_curve,
         build_commit_heatmap,
         corroborate_no_mask_token,
     )
     from .socket_types import DGEMMA_CANVAS_TRACE
 else:
-    from dgemma.sampling import (
+    from consumers.analysis import (
         build_avalanche_curve,
         build_commit_heatmap,
         corroborate_no_mask_token,

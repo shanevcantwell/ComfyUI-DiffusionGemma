@@ -1,13 +1,21 @@
-"""dgemma/sampling.py — pure functions over a captured `CanvasTrace` (plan.md
-Phase 3, module goes stub -> real per the module build-order table).
+"""consumers/analysis.py — pure functions over a captured `CanvasTrace`.
 
-ComfyUI-agnostic (ADR-CDG-003): no `nodes/` import, no torch-autograd or live
-pipeline dependency — everything here reads a `CanvasTrace` already produced
-by `dgemma.loop.run_diffusion` and returns plain Python lists/dataclasses.
-`nodes/trace.py` is the ComfyUI-side adapter that wraps these plain results
-into `IMAGE`/`STRING` sockets; that wrapping does NOT belong here (the
-one-line test, ADR-CDG-003: no ComfyUI-shaped tensor construction in this
-module).
+Consumer tier per ADR-CDG-008 Open Question #1 (settled `consumers/`, see the
+amendment note in `decisions/adr-cdg-008-mcp-center-multi-surface-topology.md`
+and issue #55 §1): analysis **parses** an already-emitted `CanvasTrace` — it
+never wraps `load_model`/`run_diffusion` — so it lives outside `dgemma/`'s
+import graph, not inside it. This module was relocated from
+`dgemma/sampling.py` (CDG-008 Phase 3); `dgemma/__init__.py` no longer
+re-exports it, and `tests/test_seam.py`'s subprocess assertion (CDG-008 Phase
+4) enforces that `import dgemma` never pulls this module in.
+
+ComfyUI-agnostic (ADR-CDG-003): no `surfaces/` import, no torch-autograd or
+live pipeline dependency — everything here reads a `CanvasTrace` already
+produced by `dgemma.loop.run_diffusion` and returns plain Python
+lists/dataclasses. `surfaces/comfyui/trace.py` is the ComfyUI-side adapter
+that wraps these plain results into `IMAGE`/`STRING` sockets; that wrapping
+does NOT belong here (the one-line test, ADR-CDG-003: no ComfyUI-shaped
+tensor construction in this module).
 
 Working data note: `DiffusionFrame` (dgemma/types.py) carries the *aggregate*
 `committed_fraction_per_example` per step, not a per-position commit mask —
@@ -35,7 +43,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .types import CanvasTrace
+# Dual-context import, same discipline as the root `__init__.py` and
+# `surfaces/comfyui/*.py` (ADR-CDG-003/CDG-008): ComfyUI's real loader gives
+# this module a dotted `__package__` (`"<synthetic-pack-name>.consumers"`)
+# with the pack root absent from `sys.path`, so a bare absolute
+# `from dgemma.types import ...` raises `ModuleNotFoundError` in that context
+# even though it resolves fine under pytest (repo root on `sys.path`).
+# `consumers/` sits one level under the pack root — same depth as `dgemma/`
+# itself — so climbing to the sibling `dgemma` package is TWO dots (one dot
+# reaches this module's own package's parent, i.e. the pack root; the second
+# descends into `dgemma.types`). Gate is `"." in __package__` (not bare
+# truthiness) because `__package__` is the plain string `"consumers"` (zero
+# dots) under pytest/standalone and `"<synthetic>.consumers"` (>= 1 dot)
+# under the real loader — mirrors the root `__init__.py`'s depth-0 gate,
+# not `surfaces/comfyui/*.py`'s depth-2 `>= 2` gate (this module is one
+# level shallower). Found during CDG-008 Phase 3 execution (issue #55 did
+# not anticipate this module needing its own dual-context gate — the
+# original `dgemma/sampling.py` never needed one because its `.types` import
+# was relative-within-`dgemma`, which resolves regardless of context).
+if __package__ and "." in __package__:
+    from ..dgemma.types import CanvasTrace
+else:
+    from dgemma.types import CanvasTrace
 
 
 def build_commit_heatmap(trace: CanvasTrace, scale: int = 1) -> list[list[int]]:
@@ -56,8 +85,8 @@ def build_commit_heatmap(trace: CanvasTrace, scale: int = 1) -> list[list[int]]:
     grid by an integer factor on BOTH axes: each cell becomes a
     `scale`×`scale` block, so the output is `(steps*scale) x
     (positions*scale)`. `scale=1` is the identity. Pure list math here —
-    the engine owns the scaling (ADR-CDG-003: `nodes/trace.py` stays a thin
-    adapter; its `cell_px` widget threads straight through to this
+    the engine owns the scaling (ADR-CDG-003: `surfaces/comfyui/trace.py`
+    stays a thin adapter; its `cell_px` widget threads straight through to this
     parameter). Raises `ValueError` for `scale < 1` (parse-at-the-door —
     a zero/negative scale would silently emit an empty grid).
     """
