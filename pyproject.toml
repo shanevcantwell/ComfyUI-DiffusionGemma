@@ -24,12 +24,13 @@ dependencies = [
     "torchvision",
     "accelerate",
     # Pillow: was already present transitively (torchvision), but issue #21's
-    # `nodes/frames_image.py` (DGemmaSampler's `frames_image` output) imports
-    # it directly (PIL text rasterization) — declared explicitly now that
-    # it's a direct dependency, not just a transitive one.
+    # `surfaces/comfyui/frames_image.py` (DGemmaSampler's `frames_image`
+    # output) imports it directly (PIL text rasterization) — declared
+    # explicitly now that it's a direct dependency, not just a transitive one.
     "Pillow",
     # numpy: same story — already present transitively (torch), now a direct
-    # import (`nodes/frames_image.py`'s PIL-image -> tensor conversion).
+    # import (`surfaces/comfyui/frames_image.py`'s PIL-image -> tensor
+    # conversion).
     "numpy",
 ]
 
@@ -58,9 +59,10 @@ py-modules = []
 # pack entry point) makes pytest's default "prepend" mode try to resolve a
 # dotted package name by walking up through it, which fails — that
 # `__init__.py` only has a valid package context when ComfyUI's own loader
-# constructs one (see `nodes/__init__.py`'s naming note). `importlib` mode
-# imports each test file by its own file path instead, sidestepping that
-# entirely; `dgemma`/`nodes` are still found via `sys.path[0]` (the cwd
+# constructs one (see `surfaces/comfyui/__init__.py`'s naming note, was
+# `nodes/__init__.py` before ADR-CDG-008 Phase 1). `importlib` mode imports
+# each test file by its own file path instead, sidestepping that entirely;
+# `dgemma`/`surfaces` are still found via `sys.path[0]` (the cwd
 # `python -m pytest` inserts).
 testpaths = ["tests"]
 # `-m 'not live'`: the default fast suite excludes `live` tests (real

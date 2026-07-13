@@ -1,6 +1,8 @@
 """Coverage closer for the dotted-package import branch of
-`nodes/loader.py:19`, `nodes/sampler.py:22`, and `nodes/trace.py` (P3's new
-module, same dual-context gate) — test-coverage-plan.md Phase 2's precedent.
+`surfaces/comfyui/loader.py`, `surfaces/comfyui/sampler.py`, and
+`surfaces/comfyui/trace.py` (same dual-context gate; relocated from `nodes/`
+per ADR-CDG-008 Phase 1, issue #52) — test-coverage-plan.md Phase 2's
+precedent.
 
 `tests/test_comfyui_loader_context.py` already proves this branch executes
 correctly under ComfyUI's real loader mechanics — but it does so in a
@@ -49,27 +51,29 @@ def synthetic_pack_root():
 
 
 def test_loader_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
-    module = importlib.import_module(f"{synthetic_pack_root}.nodes.loader")
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.loader")
 
-    assert module.__package__ == f"{synthetic_pack_root}.nodes"
-    assert "." in module.__package__  # the exact condition nodes/loader.py:18 gates on
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__  # the exact condition loader.py's gate checks
     assert module.DGemmaLoader.FUNCTION == "load"
     assert module.load_model.__module__ == f"{synthetic_pack_root}.dgemma.model"
 
 
 def test_sampler_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
-    module = importlib.import_module(f"{synthetic_pack_root}.nodes.sampler")
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.sampler")
 
-    assert module.__package__ == f"{synthetic_pack_root}.nodes"
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
     assert "." in module.__package__
     assert module.DGemmaSampler.FUNCTION == "sample"
     assert module.run_diffusion.__module__ == f"{synthetic_pack_root}.dgemma.loop"
 
 
 def test_trace_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
-    module = importlib.import_module(f"{synthetic_pack_root}.nodes.trace")
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.trace")
 
-    assert module.__package__ == f"{synthetic_pack_root}.nodes"
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
     assert "." in module.__package__
     assert module.DGemmaTrace.FUNCTION == "render"
+    # dgemma.sampling itself is NOT relocated by this phase (Phase 3 is out
+    # of scope, ADR-CDG-008 Open Question #1 unresolved) — this stays as-is.
     assert module.build_commit_heatmap.__module__ == f"{synthetic_pack_root}.dgemma.sampling"
