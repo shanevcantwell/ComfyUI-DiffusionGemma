@@ -1,6 +1,6 @@
 # DiffusionFrame capture discipline: additive-optional fields + heavy-field retention tiers
 
-**Status**: `accepted`
+**Status**: `accepted` (ratified by independent design-gate review, 2026-07-13; operator veto standing)
 **Date**: 2026-07-13
 **Related**: ADR-CDG-001 (native socket types / no lying payloads), ADR-CDG-005 (`CANVAS_STATE` small-per-step economy + save-state/display split), ADR-CDG-010 (composite ordering: capture pre-pin), ADR-CDG-011 (declarative payloads, effective-knob telemetry on the frame), issue #35 R6/F3, issue #61 (the design/plan this record decides), issues #14 / #11 / #9 / #3, ROADMAP Track B R0.
 
@@ -100,6 +100,23 @@ thought-channel leak; a research probe must be able to see one). The per-step `f
 snapshots are *already* raw (`decode_frames` documents "no excision"); only the *final* raw
 sequence was previously unreachable — this closes that gap.
 
+### 7. The `capture=` payload shape is owned by this capture cluster (seam with #64)
+
+The `capture=` declarative param on `run_diffusion` (rule 7) is touched by two parallel plans:
+issue #61 (this record's plan — the DISTRIBUTION retention tiers) and issue #64 (the
+ADR-CDG-010/011 step-end intervention plan, which proposes a `CaptureSpec` carrying
+`pinned_mask` and a second `keep_frames`). Two plans defining one `run_diffusion` param with
+incompatible shapes is a drift hazard. **Ruling (independent design-gate review, 2026-07-13):
+the `capture=` payload's shape is owned by this capture cluster (#61 / ADR-CDG-014).** Its
+canonical fields are the retention-tier controls (`top_k`, `capture_full_distribution`,
+`max_full_distribution_steps`); #64's `pinned_mask: bool` and `keep_frames` handling are
+contributed **into** this payload as additive-optional fields under Decision 1's discipline, not
+minted as a competing `CaptureSpec`. The two plans reference **one** dataclass. #64's
+`Constraints`/`ControlSignals` payloads are unaffected and remain #64-owned; only the shared
+`capture=` param is ruled here. Rationale: opinion locality — the `capture=` param exists *for*
+capture/observability, which is this cluster's domain; #64's use of it is incidental
+(a home for a constraint-telemetry flag). Recorded on both #61 and #64 so the plans cannot drift.
+
 ## Rationale
 
 ### Positive Consequences
@@ -159,8 +176,8 @@ quantized *transport* tier is a follow-up ADR, not a reason to skip the budget.
 
 ## Open Questions
 
-- [ ] Retention default confirmation (Tier 0 on / Tier 1 off / Tier 2 opt-in+budget). **Resolution:** operator decision on issue #61 before P-A implements; recommendation is the table above.
-- [ ] Top-k default value when Tier 1 is requested (recommended k=16). **Resolution:** settled at P-B implementation against observed multi-modality in the first H0-observe run.
+- [x] Retention default confirmation (Tier 0 on / Tier 1 off / Tier 2 opt-in+budget). **Resolved** (design-gate review, 2026-07-13): **confirmed as recommended** — Tier 0 always-on, Tier 1 on-request (default off), Tier 2 explicit-opt-in-with-budget. The 5-order-of-magnitude cost span (48 KB → 26 GB) makes any heavier default a footgun on the 48 GB box; Tier 0 is the cheapest honest DISTRIBUTION slice and its always-on default is what prevents the P3 "heatmap promised, never captured" regression. Operator veto standing.
+- [x] Top-k default value when Tier 1 is requested (recommended k=16). **Resolved** (design-gate review, 2026-07-13): **k=16 confirmed as the default** — ~24 KB/step / ~1.1 MB/run is negligible and k=16 covers observed multi-modality without a second round-trip; may be re-tuned at P-B against the first H0-observe run, but the shipped default is 16.
 - [ ] Batched (N>1) distribution capture. **Resolution:** deliberately deferred — single-example scope matches every existing `consumers/analysis.py` function; trigger is a batched-trace design pass (P4+), not this ADR.
 - [ ] Whether Tier 2 needs a per-*position* budget (capture full dist only at named positions) in addition to the per-*step* budget. **Resolution:** revisit if per-step budgeting alone still OOMs a study of a wide canvas; the ingress validator is the place it would land.
 
