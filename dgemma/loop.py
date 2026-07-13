@@ -438,6 +438,18 @@ class _FrameCollector:
         block dim 0 would make the per-example mean NaN, and a NaN
         committed_fraction would silently read as not-converged downstream —
         degenerate input is surfaced, not laundered into a validity field.
+
+        **Tier 0 entropy capture (ADR-CDG-014 Decision 3/4, issue #14):**
+        this method IS the composite's `capture` participant, which runs
+        FIRST in the fixed order (`capture -> cancel -> beta-rebuild -> pin`,
+        ADR-CDG-010) — so `callback_kwargs["logits"]`, when present, is the
+        model's pre-pin predictive distribution for this step, never a
+        post-pin/post-constraint artifact. `DiffusionFrame.entropy` is
+        always populated when `logits` is reachable (the always-on Tier 0
+        default); `None` only when a caller drives this collector directly
+        without requesting `logits` in `callback_on_step_end_tensor_inputs`
+        (additive-optional discipline — absence, never a zero-valued
+        stand-in, ADR-CDG-014 Decision 1/2).
         """
         scheduler_output = callback_kwargs["scheduler_output"]
         canvas = callback_kwargs["canvas"]
@@ -458,6 +470,19 @@ class _FrameCollector:
         # batch-blended scalar (review finding, 2026-07-05).
         committed_per_example = tuple(accepted_index.float().mean(dim=-1).tolist())
 
+        entropy = None
+        logits = callback_kwargs.get("logits")
+        if logits is not None:
+            entropy = torch.distributions.Categorical(logits=logits).entropy()
+            if entropy.dim() == 2:
+                # `logits` may be `[batch, canvas_len, vocab]` (real
+                # pipeline) or already `[canvas_len, vocab]` (some fake
+                # fixtures) — single-example scope (ADR-CDG-014 Open
+                # Questions: batched capture deliberately deferred to a
+                # P4+ design pass), so batch index 0 is what every existing
+                # single-example consumer expects.
+                entropy = entropy[0]
+
         frame = DiffusionFrame(
             canvas_idx=self._canvas_idx,
             step_idx=step_idx,
@@ -465,6 +490,7 @@ class _FrameCollector:
             temperature=temperature,
             committed_fraction_per_example=committed_per_example,
             canvas=canvas,
+            entropy=entropy,
         )
         self.steps_used += 1
         if self.keep_frames == "last":
@@ -856,7 +882,13 @@ def run_diffusion(
     the scheduler's class name and the entropy/temperature config passed to
     it, per ADR-CDG-001's addendum on scheduler-relative commit semantics
     (a trace without the scheduler identity that minted its commit readings
-    is a lying payload).
+    is a lying payload). It also carries `raw_canvas_ids` (ADR-CDG-014
+    Decision 6, issue #11): the pre-excision final canvas ids, captured in
+    `_build_result` before `excise_thought_channel` runs — the raw view
+    `CanvasState.canvas_ids` (post-excision) does not carry. Each captured
+    `DiffusionFrame` also carries `entropy` (ADR-CDG-014 Decision 3/4, issue
+    #14): per-position predictive entropy derived from that step's pre-pin
+    `logits`, always populated (Tier 0's always-on default).
 
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
@@ -914,7 +946,13 @@ def run_diffusion(
                 confidence_threshold=confidence,
                 generator=generator,
                 callback_on_step_end=step_end,
-                callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+                # "logits" (ADR-CDG-014 Decision 4, issue #14): the Tier 0
+                # entropy capture's source — already a base-pipeline
+                # `_callback_tensor_inputs` allowlist entry
+                # (`pipeline_diffusion_gemma.py:76`), so widening this list
+                # is all `run_diffusion` needs to do; `_FrameCollector.
+                # on_step_end` derives `DiffusionFrame.entropy` from it.
+                callback_on_step_end_tensor_inputs=["canvas", "logits", "scheduler_output"],
             )
     except DiffusionCancelled:
         # #38 partial-return semantics: return the evidence already
@@ -988,6 +1026,15 @@ def _build_result(
     construction — identical for both so a cancelled run's returned shape is
     not a special case a caller has to branch on (#38: "return what exists"
     means the same contract, populated with less)."""
+    # ADR-CDG-014 Decision 6 (issue #11): capture the pre-excision `sequences`
+    # onto `raw_canvas_ids` BEFORE `excise_thought_channel` runs below — this
+    # is the only point the final raw (un-excised) canvas ids are ever
+    # reachable; `CanvasState.canvas_ids` stays post-excision (the #8
+    # contract, unchanged). Plain `list[int]`, mirroring `excise_thought_
+    # channel`'s own id-level normalization, so a consumer never has to
+    # branch on tensor-vs-list.
+    raw_canvas_ids = [int(x) for x in sequences]
+
     start_id, end_id = resolve_thought_channel_ids(dgemma_model.processor)
     excision = excise_thought_channel(sequences, start_id, end_id)
 
@@ -1018,6 +1065,7 @@ def _build_result(
     canvas_trace = CanvasTrace(
         frames=collector.frames,
         scheduler_name=type(scheduler).__name__,
+        raw_canvas_ids=raw_canvas_ids,
         scheduler_config={
             "entropy_bound": entropy_bound,
             "t_min": t_min,

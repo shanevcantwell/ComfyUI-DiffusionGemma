@@ -83,6 +83,51 @@ class DiffusionFrame:
     committed_fraction_per_example: tuple[float, ...]
     canvas: Any  # torch.LongTensor snapshot of the canvas after this step (scheduler_output.prev_sample)
 
+    entropy: Any | None = None
+    """Tier 0 capture (ADR-CDG-014 Decision 3, issue #14): per-position
+    predictive entropy, `float32[canvas_len]`, derived from this step's
+    **pre-pin** `logits` (`Categorical(logits=...).entropy()`) in the
+    capture participant — which runs FIRST in the composite (`capture ->
+    cancel -> beta-rebuild -> pin`, ADR-CDG-010). `entropy` is therefore the
+    model's own predictive entropy over the canvas, not a post-pin/post-
+    constraint artifact. Always populated when `logits` are reachable
+    (`run_diffusion` requests `"logits"` in
+    `callback_on_step_end_tensor_inputs`) — this is the "always on" Tier 0
+    default (ADR-CDG-014 Decision 3): the cheapest honest slice of the
+    DISTRIBUTION seam, ~1 KB/step.
+
+    `None` means "not captured this run" (e.g. `logits` unreachable),
+    **never** "every position had zero entropy" — reading a `None` field as
+    a zero-valued measurement is exactly the ADR-CDG-001 lying-payload trap
+    ADR-CDG-014 Decision 2 forbids. A consumer reads absence honestly
+    (raises or skips)."""
+
+    top_k_ids: Any | None = None
+    """Tier 1 capture (ADR-CDG-014 Decision 3, `capture=` `top_k` knob,
+    issue #14): per-position top-k candidate token ids, `int64[canvas_len,
+    k]`, derived from this step's pre-pin `logits` alongside `entropy`.
+    `None` when Tier 1 was not requested this run (`top_k=0`, the default)
+    — absence, not an empty/degenerate capture. P-A does not populate this
+    field (it ships in P-B); it exists now under the additive-optional
+    discipline so the frame shape is decided once."""
+
+    top_k_weights: Any | None = None
+    """Tier 1 capture's companion: per-position top-k weights (softmax
+    probabilities over `top_k_ids`), `float32[canvas_len, k]`. Same
+    absence-vs-empty semantics as `top_k_ids`; the two are always populated
+    or absent together. P-A does not populate this field (P-B scope)."""
+
+    distribution: Any | None = None
+    """Tier 2 capture (ADR-CDG-014 Decision 3, `capture_full_distribution`
+    knob + `max_full_distribution_steps` budget, issue #14): the full
+    per-position distribution, `float32[canvas_len, vocab]`
+    (`softmax(logits)`) — ~134 MB/step, budget-gated at ingress (an
+    unbounded request is rejected, never silently honored). `None` when
+    Tier 2 was not requested, or when this step fell outside the retained
+    budget under `keep_frames="all"` (ADR-CDG-014 Decision 5). P-A does not
+    populate this field (P-C scope); it exists now under the
+    additive-optional discipline so the frame shape is decided once."""
+
     @property
     def committed_fraction(self) -> float:
         """Scalar commit fraction — defined only for single-example frames."""
@@ -121,6 +166,22 @@ class CanvasTrace:
     frames: list[DiffusionFrame]
     scheduler_name: str
     scheduler_config: dict
+
+    raw_canvas_ids: Any | None = None
+    """Pre-excision final canvas ids (ADR-CDG-014 Decision 6, issue #11):
+    the un-excised `sequences` `run_diffusion` produced, captured in
+    `_build_result` BEFORE `excise_thought_channel` runs — the raw view
+    `CanvasState.canvas_ids` (post-excision, #8 contract) deliberately does
+    not carry. Lives on the TRACE side, never on `CanvasState`
+    (ADR-CDG-005's save-state/display split is load-bearing: a resumable
+    save-state must not carry a thought-channel leak; a research probe —
+    #9's EOS-in-thought-span probe, #3's token-identity signals — needs to
+    see the pre-excision truth).
+
+    `None` on a legacy/no-capture path (additive-optional discipline,
+    ADR-CDG-014 Decision 1) — never an empty tensor standing in for "no
+    ids". A consumer reads absence honestly rather than treating `None` as
+    a zero-length canvas."""
 
 
 @dataclass
