@@ -8,6 +8,17 @@ import nothing from `comfy` at module level (this venv has no `comfy` package
 at all, so any such import would already have raised at collection time —
 the second test below is belt-and-suspenders on the same invariant
 `tests/test_seam.py` checks from the `dgemma/` side).
+
+Issue #17 (ratification 2026-07-13) — the `folder_paths` dropdown SHIPS
+DISABLED by default. The HF-identifier flow (`repo_id` STRING + `local_files_only`
+BOOLEAN) is the PRIMARY, visible load path; the dropdown scan/resolve glue
+(`nodes.loader.list_local_model_dirs`/`resolve_local_model_dir`) is shipped and
+tested but held behind `nodes.loader._LOCAL_FOLDERS_ENABLED` (default False)
+until weights actually live under ComfyUI model dirs (enable trigger: #15 GGUF
+graduation / #4 conventional checkpoint placement). While disabled the dropdown
+is omitted from `INPUT_TYPES` entirely (hidden, not de-defaulted). The
+path-traversal guard and `local_files_only` stay active regardless of the flag —
+they are wanted for the HF-cache flow too.
 """
 from __future__ import annotations
 
@@ -16,6 +27,7 @@ import sys
 import pytest
 import torch
 
+import nodes.loader as loader_module
 from nodes.loader import DGemmaLoader
 from nodes.sampler import DGemmaSampler
 
@@ -42,11 +54,56 @@ def test_nodes_modules_do_not_import_comfy():
     assert not any(m == "comfy" or m.startswith("comfy.") for m in sys.modules)
 
 
-def test_loader_input_types_declares_repo_id_and_quant():
+def test_loader_input_types_declares_repo_id_quant_and_local_files_only():
+    """Ratification 2026-07-13: the HF-identifier flow is PRIMARY and visible —
+    `repo_id` STRING (default DEFAULT_REPO_ID), `quant`, and the
+    `local_files_only` BOOLEAN are all in `required`."""
     spec = DGemmaLoader.INPUT_TYPES()
     assert "repo_id" in spec["required"]
+    assert spec["required"]["repo_id"][0] == "STRING"
     assert "quant" in spec["required"]
     assert spec["required"]["quant"][0] == ["none"]
+    assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
+
+
+def test_loader_input_types_hides_folder_paths_dropdown_by_default():
+    """Ratification 2026-07-13: the folder_paths dropdown ships DISABLED
+    (`_LOCAL_FOLDERS_ENABLED` False by default). While disabled it is omitted
+    from INPUT_TYPES ENTIRELY — no `model_name`/`local_model_dir` widget, no
+    empty/misleading selector — not merely de-defaulted. Hidden means hidden."""
+    assert loader_module._LOCAL_FOLDERS_ENABLED is False  # the shipped default
+    spec = DGemmaLoader.INPUT_TYPES()
+    assert "model_name" not in spec["required"]
+    assert "local_model_dir" not in spec["required"]
+    # No `optional` block with the dropdown either.
+    assert "local_model_dir" not in spec.get("optional", {})
+
+
+def test_loader_input_types_surfaces_dropdown_in_optional_when_enabled(monkeypatch):
+    """When the enable trigger is met (#15 GGUF / #4 conventional placement)
+    and `_LOCAL_FOLDERS_ENABLED` is flipped, the dropdown appears — but in
+    `optional` (the advanced/local-folders path), NEVER `required`, so the
+    HF-identifier `repo_id` stays the primary flow a user reaches for."""
+    monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
+    monkeypatch.setattr(loader_module, "list_local_model_dirs", lambda: ["some-local-model"])
+
+    spec = DGemmaLoader.INPUT_TYPES()
+
+    # HF-identifier still primary/visible/required.
+    assert "repo_id" in spec["required"]
+    # Dropdown is optional (a COMBO — bare list of options), not required.
+    assert spec["optional"]["local_model_dir"] == (["some-local-model"],)
+    assert "local_model_dir" not in spec["required"]
+
+
+def test_loader_input_types_dropdown_degrades_to_empty_list_outside_comfyui(monkeypatch):
+    """Even enabled, outside ComfyUI (no `folder_paths` package) the dropdown
+    degrades to an empty list rather than raising — INPUT_TYPES (called at
+    node-registration time) never crashes node discovery."""
+    monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
+    assert loader_module.folder_paths is None
+    spec = DGemmaLoader.INPUT_TYPES()
+    assert spec["optional"]["local_model_dir"] == ([],)
 
 
 def test_loader_quant_selector_does_not_offer_nf4_or_int8():
@@ -68,13 +125,6 @@ def test_loader_quant_default_is_none_not_nf4():
     assert spec["required"]["quant"][1]["default"] == "none"
 
 
-def test_loader_input_types_declares_local_files_only():
-    """local_files_only stays off (network download) by default — only an
-    explicit opt-in restricts resolution to the local HF cache."""
-    spec = DGemmaLoader.INPUT_TYPES()
-    assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
-
-
 def test_loader_declarations():
     assert DGemmaLoader.RETURN_TYPES == ("DGEMMA_MODEL",)
     assert DGemmaLoader.FUNCTION == "load"
@@ -82,6 +132,9 @@ def test_loader_declarations():
 
 
 def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
+    """Primary HF-identifier flow (ratification 2026-07-13): `load()` forwards
+    `repo_id`/`quant`/`local_files_only` straight to `load_model`, pure
+    pass-through/wrap (ADR-CDG-003)."""
     sentinel = object()
     captured = {}
 
@@ -105,9 +158,10 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
 
 
 def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
-    """A graph built before this widget existed (or a caller that only passes
-    the required kwargs) must still get the download-permitting default, not
-    a TypeError."""
+    """`local_files_only` stays off (download-permitting) by default when only
+    the required kwargs are passed — the HF-cache flow honors the toggle as
+    given, not a hardcoded True (ratification 2026-07-13: the dropdown-only
+    unconditional-True behavior was reverted)."""
     captured = {}
 
     def fake_load_model(repo_id, quant, local_files_only):
@@ -120,6 +174,79 @@ def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
     node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
 
     assert captured["local_files_only"] is False
+
+
+def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch):
+    """Belt-and-suspenders: even if a `/prompt` POST smuggles a
+    `local_model_dir` while the dropdown is DISABLED (the shipped default),
+    `load()` must NOT take the local-folders path — it stays on the HF
+    identifier. The flag gates the load path, not just the UI."""
+    assert loader_module._LOCAL_FOLDERS_ENABLED is False
+    captured = {}
+    resolve_calls = []
+
+    monkeypatch.setattr(
+        "nodes.loader.resolve_local_model_dir",
+        lambda name: resolve_calls.append(name) or "/models/should-not-be-used",
+    )
+    monkeypatch.setattr(
+        "nodes.loader.load_model",
+        lambda repo_id, quant, local_files_only: captured.update(repo_id=repo_id) or object(),
+    )
+
+    DGemmaLoader().load(
+        repo_id="google/diffusiongemma-26B-A4B-it",
+        quant="none",
+        local_model_dir="smuggled-selection",
+    )
+
+    # HF identifier used; the guard was never even consulted while disabled.
+    assert captured["repo_id"] == "google/diffusiongemma-26B-A4B-it"
+    assert resolve_calls == []
+
+
+def test_loader_enabled_dropdown_resolves_through_guard_and_forces_local(monkeypatch):
+    """When enabled AND a selection is made: `load()` resolves the pick through
+    the path-traversal guard (`resolve_local_model_dir`) and forces
+    `local_files_only=True` (a resolved local dir is never a network fetch).
+    The guard stays active — that is the retained security surface."""
+    monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
+    captured = {}
+
+    monkeypatch.setattr(
+        "nodes.loader.resolve_local_model_dir",
+        lambda name: "/models/diffusion_models/" + name,
+    )
+    monkeypatch.setattr(
+        "nodes.loader.load_model",
+        lambda repo_id, quant, local_files_only: captured.update(
+            repo_id=repo_id, local_files_only=local_files_only
+        )
+        or object(),
+    )
+
+    DGemmaLoader().load(
+        repo_id="ignored-when-dropdown-used",
+        quant="none",
+        local_model_dir="some-local-model",
+    )
+
+    assert captured["repo_id"] == "/models/diffusion_models/some-local-model"
+    assert captured["local_files_only"] is True
+
+
+def test_loader_enabled_dropdown_unresolvable_raises_without_calling_load_model(monkeypatch):
+    """Enabled dropdown + an unresolvable/guard-rejected selection must fail
+    cleanly — `load_model` is never called (no silent network fallback)."""
+    monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
+    monkeypatch.setattr("nodes.loader.resolve_local_model_dir", lambda name: None)
+    load_model_called = []
+    monkeypatch.setattr("nodes.loader.load_model", lambda **kwargs: load_model_called.append(kwargs))
+
+    with pytest.raises(RuntimeError, match="could not resolve local_model_dir"):
+        DGemmaLoader().load(repo_id="x", quant="none", local_model_dir="../escape")
+
+    assert load_model_called == []
 
 
 def test_sampler_declarations():
