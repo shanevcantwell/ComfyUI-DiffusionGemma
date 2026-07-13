@@ -47,7 +47,23 @@ def test_mint_exposes_the_three_named_socket_types():
     assert socket_types.DGEMMA_MODEL == "DGEMMA_MODEL"
     assert socket_types.DGEMMA_CANVAS_STATE == "DGEMMA_CANVAS_STATE"
     assert socket_types.DGEMMA_CANVAS_TRACE == "DGEMMA_CANVAS_TRACE"
-    assert _MINTED == {"DGEMMA_MODEL", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE"}
+    assert _MINTED == {
+        "DGEMMA_MODEL",
+        "DGEMMA_CANVAS_STATE",
+        "DGEMMA_CANVAS_TRACE",
+        "DGEMMA_CONSTRAINTS",
+        "DGEMMA_CONTROL_SIGNALS",
+    }
+
+
+def test_mint_exposes_the_constraint_and_control_signal_socket_types():
+    """ADR-CDG-010 D6 / ADR-CDG-011, issue #64 §3.3: minted ahead of any node
+    wiring them — Phase 1 lands the engine-side payloads
+    (`dgemma/payloads.py`: `Constraints`, `ControlSignals`) and this mint
+    entry only; no node reaches these sockets yet (the surface/widget phase
+    is out of scope, gated behind this one)."""
+    assert socket_types.DGEMMA_CONSTRAINTS == "DGEMMA_CONSTRAINTS"
+    assert socket_types.DGEMMA_CONTROL_SIGNALS == "DGEMMA_CONTROL_SIGNALS"
 
 
 def test_step_event_name_is_not_in_the_mint():
