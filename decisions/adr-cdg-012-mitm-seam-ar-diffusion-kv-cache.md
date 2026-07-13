@@ -350,6 +350,167 @@ re-encode crossing (bottom) is the model's own decoder→encoder loop
 (`:429`) surfaced as the IN-3 node input. OUT-3 records injection identity on
 the trace without duplicating the tensors.
 
+## Delivery & verification contract
+
+*Added 2026-07-13 per operator review of PR #51 — the delivery/acceptance
+contract stated verbatim: "inter-node data channels [are] fully exercised as
+part of 100% code row coverage profiled across the greater system, with actual
+workflow integrations ensuring that when this is wired by the user, at very
+least the complete integration workflow(s) are provided, with a guarantee that
+wiring them up independently in a new workflow will be effortless to get valid
+results."* This section binds the Data-channels definition above to acceptance:
+the channels are not "done" when the shapes are pinned — they are done when
+their code is exercised end-to-end, shipped as working graphs, and provably
+effortless to rewire fresh. It **does not alter** the Decision or the Data
+channels — it names what makes them shippable and what enforces each guarantee,
+because an acceptance bar enforced only by prose is one refactor from gone
+(the greenfield discipline, `harness-tools#18`). Each clause names the failure
+it prevents (anticipated-failure anchoring), consistent with §D's per-channel
+"failure this prevents" register.
+
+### DV.1 — 100% row coverage on channel-crossing code, in the FULL-SUITE profile
+
+**Clause.** Every channel-crossing code row lands at **100% row coverage**,
+measured in the greater-system profile (the full mocked suite), not a
+unit-local run of one test module. The scoped set is the code the §D channels
+traverse:
+
+- the `KVCache` dataclass and its `Provenance`/`EditOp` members (`dgemma/types.py`
+  additions, §D.0);
+- `validate_kv_cache_ingress` and every V1–V6 branch (§D.3) — including each
+  raise path, not just the happy path;
+- the `run_diffusion` `kv_cache` ingress→use path (IN-2, §D.1) and the
+  advance-returns-new-payload emit path (OUT-1/OUT-2, §D.2);
+- trace provenance emission — the `CanvasTrace.injected_cache_provenance`
+  population path (OUT-3, §D.2);
+- the surface node bodies wrapping these (`DGemmaEncode` / `DGemmaDenoise` /
+  the tier-2 save-load nodes) at the thin node/engine seam (ADR-CDG-003).
+
+**Failure this prevents.** A channel-crossing branch — most acutely a V1–V6
+*reject* path or the tier-2 `edit_script` provenance path — that is defined in
+§D but never executed by a test, so a regression that silently disables an
+ingress check ships green. The §D validators are the seam's honesty layer; an
+un-exercised validator is a lying payload's open door.
+
+**Enforcement surface.** A **per-module coverage floor** naming these modules
+at `100`, distinct from the repo-wide number. The repo runs `pytest-cov`
+in-process today (`tests/README.md`: the mocked suite "buys its 100% coverage
+with fakes planted at exactly the boundaries"; `tests/test_dual_context_import.py`
+notes the in-process constraint), but **no committed coverage config declares a
+floor** — the 100% is achieved-by-convention, not gate-enforced. This clause
+requires introducing the mechanism: a `[tool.coverage.report]` section in
+`pyproject.toml` (the repo's single config home) that pins the new channel
+modules at 100% — either via `fail_under = 100` scoped by an `include`/`omit`
+that isolates the channel modules, or (if a single global `fail_under` cannot
+express a per-module floor — see the Open Question below) a dedicated
+coverage-gate test that reads the `.coverage` data and asserts the named
+channel files are at 100%, failing CI by module name. **Scope is explicit and
+not to be inflated:** the floor is the *new channel modules only*. Repo-wide
+coverage is ~99% today with a pre-existing `dgemma/model.py` gap (the
+`from_pretrained` boundary a fake cannot falsify, reachable only by the `live`
+suite per `tests/README.md`); this clause does **not** claim, require, or imply
+repo-wide 100%, and must not be read to regress the model.py gap into a blocker
+it is not.
+
+### DV.2 — shipped, validated integration workflows
+
+**Clause.** The implementation ships **complete, working ComfyUI workflow
+file(s)** exercising the seam end-to-end — source cache → ingress → generate →
+trace/provenance readout — at minimum the **tier-1 honest-cache path**
+(`DGemmaEncode` mints → `DGemmaDenoise` consumes → trace reads back the run),
+plus a **tier-2 perturbed path** *if* per-layer surgery (§5) is in the
+implementation's scope. The workflows live **in-repo under `examples/`**, the
+existing home for shipped graphs (`examples/README.md`: `.api.json` = the
+`/prompt` POST body, `.ui.json` = the canvas format), banked with provenance in
+the same `examples/README.md` table as the existing `ping-smoke` / `p3-trace`
+graphs — consistent with what the pack already ships for its P0–P3 nodes, not a
+new convention.
+
+**Failure this prevents.** A user who installs the pack finds the KV_CACHE
+nodes on the palette but no reference wiring — the seam is buildable in
+principle and unreachable in practice, tribal knowledge locked in the ADR. And
+worse, the *rot* case: a shipped example that silently stops matching the node
+definitions after a signature change — a shipped-but-rotted graph is worse than
+none, because it fails at the user's hands with no CI warning.
+
+**Enforcement surface.** A **workflow-conformance test** that loads each shipped
+`examples/*.json` KV_CACHE graph and validates it against the *current* node
+definitions — node `class_type` names resolve to registered nodes, wired socket
+types match the nodes' declared `INPUT_TYPES`/`RETURN_TYPES` (the `DGEMMA_*`
+native types, §DV.3a), and every required input is present. A node-signature
+change that orphans a shipped workflow then **fails CI by the workflow's file
+name**. This validation surface does **not exist today** (no test currently
+loads `examples/*.json` against node defs — the existing E2E probe in
+`examples/README.md` needs a *running* ComfyUI); this clause requires
+introducing it as a no-GPU, no-running-server static conformance check in the
+mocked suite. (Distinct from the live `.api.json` POST probe, which remains the
+real-server E2E and stays `live`-gated.)
+
+### DV.3 — effortless independent rewiring (the cold-wiring guarantee)
+
+**Clause.** A user wiring the KV_CACHE nodes **fresh in a new workflow** — not
+opening a shipped example — gets valid, non-degenerate results **without tribal
+knowledge**. This is the operator's "guarantee that wiring them up
+independently in a new workflow will be effortless to get valid results,"
+decomposed into three *distinct* enforcement surfaces, because "effortless" is
+not one mechanism:
+
+**DV.3a — invalid connections are unwirable at the graph level.** The new
+sockets are **native `DGEMMA_*` types** minted in `dgemma/types.py`
+(`DGEMMA_KV_CACHE` per §D.0, plus any surgery/provenance socket the node set
+introduces), extending ADR-CDG-001's discipline to this ADR's sockets. ComfyUI
+refuses a wire between incompatible native types at the canvas, so a user
+*cannot* connect a cache output to a canvas input by mistake — the invalid
+graph is unbuildable, not merely discouraged. **Failure this prevents:** a
+mis-wire that type-checks as `*`/`STRING` and fails deep in `run_diffusion`
+instead of at the wire — the ADR-CDG-001 "lying socket" failure on the new
+axis. **Enforcement surface:** the socket strings live in `dgemma/types.py`
+(SSoT), asserted present and distinct by a node-contract test — the same shape
+as the existing native-type contract tests.
+
+**DV.3b — every ingress failure message is self-remedying.** Each V1–V6 reject
+(§D.3) raises a message that names **both** the violated precondition **and**
+the actionable remedy (e.g. V4 vocab mismatch → "cache minted under tokenizer
+X, model loaded is Y; re-mint with the matching model or load model X"). A cold
+user who mis-wires *around* the type system (e.g. a serialized tier-2 artifact
+from a different model, IN-4) is told what is wrong and what to do, not handed a
+bare assertion. **Failure this prevents:** a fail-fast validator that fails
+*opaquely* — technically honest, practically tribal, sending the user to the
+source to decode it. **Enforcement surface:** the §D.3 `test_kv_ingress_*_raises`
+tests are strengthened to assert each message contains **both** the precondition
+token and the remedy token (`pytest.raises(..., match=...)` on both), not merely
+that it raised.
+
+**DV.3c — the minimal legal wiring produces valid output.** Defaults are chosen
+so that the *smallest* legal KV_CACHE graph — `DGemmaEncode` → `DGemmaDenoise`
+with all parameters at default and no perturbation — yields a valid,
+non-degenerate result. The grounded local-run defaults (CLAUDE.md: `max_steps=48
+t=[0.4,0.8] entropy_bound=0.1 confidence=0.005 canvas_length=256`) are the
+starting point; any KV_CACHE-specific default (e.g. `kv_cache=None` meaning
+"mint fresh," IN-2) must keep the minimal graph legal-and-non-degenerate.
+**Failure this prevents:** a node set where "wire the two nodes together" is
+insufficient — a required-but-undefaulted knob, or a default that produces an
+empty/degenerate canvas, so the user must *already know* the magic values to
+get output. **Enforcement surface:** a **cold-wiring test** that constructs the
+minimal node graph **programmatically** (calling the node bodies directly with
+all-default parameters — NOT loading a shipped `examples/*.json`, so it is
+independent of DV.2's fixtures and cannot be satisfied by a hand-tuned example)
+and asserts the result is valid and non-degenerate (converged / non-empty
+committed canvas). This test is the executable form of "effortless."
+
+### DV.4 — enforcement-surface home and gating
+
+The four new enforcement surfaces (DV.1 per-module coverage floor; DV.2
+workflow-conformance test; DV.3a native-socket contract; DV.3b message-content
+assertions; DV.3c cold-wiring test) extend `ARCHITECTURE.md`'s enforcement-
+surface table alongside the §D.3 `KV_CACHE` ingress row, `NOT-YET-IMPLEMENTED`
+until the node pair lands — the doc and the code move together
+(ARCHITECTURE.md's own discipline). None of these clauses is `live`-gated: all
+run in the mocked, no-GPU, no-running-server default suite, so they gate every
+PR, not only a weights-available run. The real-weights smoke test (Open
+Questions) remains the separate `live` gate on *correctness*; DV.1–DV.3 gate
+*deliverability*.
+
 ## Rationale
 
 ### Positive Consequences
@@ -484,12 +645,30 @@ by design.
       default shape. This is a channel-composition question, not a Decision this
       ADR makes.
 
+- [ ] **DV.1 mechanism: can a single `fail_under` express a *per-module* floor,
+      or is a coverage-gate test required?** The operator's bar is 100% on the
+      *new channel modules specifically*, held distinct from repo-wide (~99%,
+      pre-existing `dgemma/model.py` gap). `coverage.py`'s `fail_under` is a
+      single global threshold — it cannot natively assert "these named files at
+      100%, the rest unchanged." Two candidate mechanisms (DV.1): (a) an
+      `include`/`omit`-scoped coverage config run that isolates the channel
+      modules and applies `fail_under = 100` to *that* scoped run, or (b) a
+      dedicated gate test that reads the `.coverage` data and asserts the named
+      channel files at 100%. The bar is **not weakened** by this uncertainty —
+      the number stays 100% on the scoped set regardless of which mechanism
+      lands. **Resolution trigger:** decided when the coverage-gate is
+      implemented alongside the node pair; the mechanism is an implementation
+      choice, the 100%-on-channel-modules floor is not. Recorded here rather
+      than silently picking a mechanism that might not express the per-module
+      floor.
+
 **Resolution plan:** the real-weights smoke test gates all implementation
 past a skeleton; the scope boundary and block-loop-ownership questions are
 recorded as open and must not be silently decided by implementation ahead of
 their resolution triggers. The `CANVAS_STATE`-under-tier-2 tension is recorded
 as open (not decided here) and gates any `CANVAS_STATE`+`KV_CACHE` co-capture
-work.
+work. The DV.1 coverage-mechanism question is recorded as open on *mechanism
+only* — the 100%-on-channel-modules bar itself is not open.
 
 ## Supersession Relationships
 
