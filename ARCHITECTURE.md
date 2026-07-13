@@ -17,8 +17,8 @@ reality.
 
 Doctrine is included by reference, not duplicated (repo `CLAUDE.md`, opinion
 locality): ground-physics invariants live in
-`../harness-tools/docs/ground-physics/GROUND_PHYSICS.md` and the enforceable rule
-set in `../harness-tools/docs/ground-physics/CODE_CONSTITUTION.md`. The handles
+`../operating-doctrine/ground-physics/GROUND_PHYSICS.md` and the enforceable rule
+set in `../operating-doctrine/ground-physics/CODE_CONSTITUTION.md`. The handles
 cited below (`ONE-DOOR`, `STATELESS-CORE`, `ONE-MINT`,
 `EMIT-CANONICAL / PARSE-AT-THE-DOOR`, `IDENTITY⊥ENVELOPE`,
 `CONSERVE-ACROSS-THE-DATA-BOUNDARY`) are resolved there.
@@ -376,12 +376,12 @@ One row per invariant rule, each violation paired with its correct shape.
 | ADR-CDG-004: diffusers pipeline drive seam | Rule 1 — `run_diffusion` single-entry drive contract | `decisions/adr-cdg-004-diffusers-pipeline-drive-seam.md` — Accepted |
 | ADR-CDG-005: `CANVAS_STATE` resumable save-state | Bench seam `CANVAS_STATE` (contract, not display) | `decisions/adr-cdg-005-canvas-state-resumable-savestate.md` — Accepted |
 | ADR-CDG-006: advanced sampler step-window resume | Cross-execution resume (stand-in for the missing UI incrementer) | `decisions/adr-cdg-006-advanced-sampler-step-window-resume.md` — Proposed |
-| ADR-CDG-007: GGUF backend node set | Out-of-scope inference-only backend | `decisions/adr-cdg-007-clear-alpha-gguf-backend-node-set.md` — Proposed |
+| ADR-CDG-007: GGUF backend node set | Out-of-scope inference-only backend | `decisions/adr-cdg-007-clear-alpha-gguf-backend-node-set.md` — Rejected (2026-07-06) |
 | ADR-CDG-008: MCP-center multi-surface topology | Rules 1, 2, 3, 4, 6 — the decided target topology; Phases 1–5 | `decisions/adr-cdg-008-mcp-center-multi-surface-topology.md` — Accepted |
 | ADR-CDG-010 (required, drafting spec in #35) | Rule 7 — two-mechanism givens; composite ordering; `pinned_mask`; engine-installed hooks via R5 | **NOT-YET-WRITTEN** — clauses specified in #35 |
 | ADR-CDG-011 (required, drafting spec in #35) | Rules 6, 7 — declarative socket / closure walker split; units-at-binding; `scheduler.config`-only mutation; same-in/same-out test | **NOT-YET-WRITTEN** — clauses specified in #35 |
 | Issue #35: architecture review | Findings F1–F9, refactor list R1–R6, ADR-CDG-010/011 clauses | `#35` (open, `pri:now`) |
-| ADR-009 / PR #31 (frames↔images) | Handle `CONSERVE-DATA-BOUNDARY` (F7/F9) | PR #31 — in ratification |
+| ADR-CDG-009: N-canvas trace display legibility (frames↔images) | Handle `CONSERVE-DATA-BOUNDARY` (F7/F9) | `decisions/adr-cdg-009-two-canvas-trace-display.md` — Proposed; PR #31 merged |
 
 ---
 
