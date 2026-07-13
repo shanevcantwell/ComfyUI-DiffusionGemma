@@ -48,14 +48,26 @@ import os
 # two levels under the pack root (surfaces/comfyui/, was one level under
 # nodes/), so the relative climb to dgemma/ is THREE dots, not two
 # (ADR-CDG-008 Phase 1 / issue #52 risk R-1 — the riskiest step named in the
-# plan: pytest's absolute `else` branch below would mask a wrong relative
-# depth here, since only the real ComfyUI loader path exercises this
-# branch). Under pytest/standalone the repo root is on sys.path and this
-# module is top-level "surfaces.comfyui" (no leading dot chain reachable),
-# so only the absolute form can resolve. Observed violation: graph smoke
-# test 2026-07-05 (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py
+# plan).
+#
+# GATE CORRECTION vs #52's stated design (found during execution, not
+# preempted by the plan): the gate can no longer be a bare `"." in
+# __package__` check. Under pytest/standalone, this module's OWN absolute
+# package name is "surfaces.comfyui" — which itself contains a dot, because
+# the surface directory is two segments deep — so the naive dotted-check
+# would wrongly take the relative branch even outside ComfyUI (that branch
+# would then try to climb past the top-level package and raise
+# ImportError). The `nodes/` layout never hit this because "nodes" was a
+# single, undotted top-level segment. The real ComfyUI loader's
+# `__package__` is "<synthetic-pack-name>.surfaces.comfyui" (>= 2 dots: one
+# for "comfyui-under-surfaces", one for "surfaces-under-the-pack-name");
+# bare pytest/standalone gives exactly "surfaces.comfyui" (1 dot). Gating on
+# `__package__.count(".") >= 2` distinguishes the two correctly. Observed
+# violation: graph smoke test 2026-07-05 (`loose-ends.md`) for the original
+# nodes/ case; this depth-count correction is a new observed violation from
+# this move's own execution. Enforcement: tests/test_comfyui_loader_context.py
 # and tests/test_dual_context_import.py (the R-1 tripwires).
-if __package__ and "." in __package__:
+if __package__ and __package__.count(".") >= 2:
     from ...dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
     from .socket_types import DGEMMA_MODEL
 else:

@@ -81,8 +81,11 @@ import logging
 # the pack root (surfaces/comfyui/), so the relative climb to dgemma/ is
 # THREE dots (ADR-CDG-008 Phase 1 / issue #52 risk R-1). `.frames_image` and
 # `.socket_types` stay ONE dot — both are siblings in this same directory,
-# unaffected by the pack-root depth change.
-if __package__ and "." in __package__:
+# unaffected by the pack-root depth change. Gate is `__package__.count(".")
+# >= 2`, not a bare dot-presence check — see loader.py's "GATE CORRECTION"
+# comment: this module's own absolute package name ("surfaces.comfyui")
+# contains a dot even under bare pytest, so a naive check would misfire.
+if __package__ and __package__.count(".") >= 2:
     from ...dgemma.loop import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,

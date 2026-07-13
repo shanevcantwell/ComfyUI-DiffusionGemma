@@ -27,8 +27,10 @@ import torch
 # levels under the pack root (surfaces/comfyui/), so the relative climb to
 # dgemma/ is THREE dots (ADR-CDG-008 Phase 1 / issue #52 risk R-1).
 # dgemma.sampling itself is NOT relocated by this phase (Phase 3 is out of
-# scope, Open Question #1 unresolved) — only the import depth changes.
-if __package__ and "." in __package__:
+# scope, Open Question #1 unresolved) — only the import depth changes. Gate
+# is `__package__.count(".") >= 2`, not bare dot-presence — see loader.py's
+# "GATE CORRECTION" comment.
+if __package__ and __package__.count(".") >= 2:
     from ...dgemma.sampling import (
         build_avalanche_curve,
         build_commit_heatmap,
