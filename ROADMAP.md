@@ -40,16 +40,18 @@ enables:
 
 | Refactor | What it enables | Status |
 |---|---|---|
-| **R4** — shared fake-pipeline/scheduler fixture in `tests/conftest.py` (N steps, mutable `scheduler.config`, hook-recording model) | Gates testable composition for R1/R5 — the fixture the ordering tests need | not-started |
-| **R1** — callback-composition layer in `dgemma/loop.py`: ordered participants, canvas-write threading, per-participant exception policy, `_FrameCollector` first | Opens the single hardcoded callback slot (F1, **ONE-DOOR**) to the expansion participants — β-renoise, walker, pin, capture — that everything downstream needs | not-started |
-| **R5** — forward-hook lifecycle context manager; invariant "no hook survives a `run_diffusion` call" | Closes hook-leakage across executions (F4, **STATELESS-CORE**) — the per-position heat field installs and tears down cleanly | not-started |
-| **R3** — diffusers version guard + structural probe (scheduler kwargs, `accepted_index`, `_callback_tensor_inputs`) | Fails loud on a diffusers bump instead of silently reporting a wrong re-derived temperature (F6, **EMIT-CANONICAL**) | not-started |
-| **R2** — socket-type mint module + grep-gate test (no inline `DGEMMA_*` literal outside it) | One mint home for socket strings (F2, **ONE-MINT**); lands with/before CDG-008 Phase 1, in `surfaces/comfyui/socket_types.py` | not-started |
+| **R4** — shared fake-pipeline/scheduler fixture in `tests/conftest.py` (N steps, mutable `scheduler.config`, hook-recording model) | Gates testable composition for R1/R5 — the fixture the ordering tests need | **done** — [PR #44](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/44); `tests/conftest.py:fake_pipeline_factory`, self-tested by `tests/test_conftest_fake_pipeline.py` |
+| **R1** — callback-composition layer in `dgemma/loop.py`: ordered participants, canvas-write threading, per-participant exception policy, `_FrameCollector` first | Opens the single hardcoded callback slot (F1, **ONE-DOOR**) to the expansion participants — β-renoise, walker, pin, capture — that everything downstream needs | **done** — [PR #45](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/45); `dgemma/composite.py:StepEndComposite`, `tests/test_step_end_composite.py` |
+| **R5** — forward-hook lifecycle context manager; invariant "no hook survives a `run_diffusion` call" | Closes hook-leakage across executions (F4, **STATELESS-CORE**) — the per-position heat field installs and tears down cleanly | **done** — [PR #49](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/49); `dgemma/hooks.py:install_logit_shaping_hook`, `tests/test_hook_lifecycle.py` |
+| **R3** — diffusers version guard + structural probe (scheduler kwargs, `accepted_index`, `_callback_tensor_inputs`) | Fails loud on a diffusers bump instead of silently reporting a wrong re-derived temperature (F6, **EMIT-CANONICAL**) | **done** — [PR #48](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/48) gate finding F-1; `dgemma/loop.py:_check_diffusers_version`/`_check_diffusers_structure`, `tests/test_diffusers_version_guard.py` |
+| **R2** — socket-type mint module + grep-gate test (no inline `DGEMMA_*` literal outside it) | One mint home for socket strings (F2, **ONE-MINT**); lands with/before CDG-008 Phase 1, in `surfaces/comfyui/socket_types.py` | **done** — landed with CDG-008 Phase 1, [PR #53](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/53); `tests/test_socket_mint.py` |
 | **R6** — `DiffusionFrame` extension discipline (optional-with-defaults; heavy-field retention policy) | Lets rung-4's heavy `DISTRIBUTION` field ride the frame additively without breaking ADR-CDG-005's small-per-step economy (F3, **EMIT-CANONICAL**); rides research rung R4-observe, analysis functions go to the CDG-008 Phase-3 home | not-started |
 
 Sequencing (issue #35, delta-corrected): **R4 → R1 → R5 cluster + R3** before any
 research rung lands; **R2** with/before CDG-008 Phase 1; rung-4 analysis behind
-CDG-008 Phase 3.
+CDG-008 Phase 3. R1/R2/R3/R4/R5 above are now landed (verified against
+ARCHITECTURE.md's enforcement-surface table and the cited tests); only R6
+remains not-started.
 
 ### The topology move — ADR-CDG-008's five phases
 
@@ -61,11 +63,11 @@ ComfyUI is one peer surface among others. The published repo name stays
 
 | Phase | Move | Status |
 |---|---|---|
-| **1** | Rename `nodes/` → `surfaces/comfyui/`, move `web/` → `surfaces/comfyui/web/` | not-started |
-| **2** | Add `surfaces/mcp/` — the base surface over `load_model` + `run_diffusion` (transcribe `semantic-kinematics-mcp`, with the two `STATELESS-CORE` / `ONE-DOOR` corrections) | not-started |
-| **3** | Relocate analysis out of `dgemma/`'s import graph into a consumer home | not-started |
-| **4** | Add the boundary test: base contract imports no analysis (flips the prose-only row to in-force) | not-started |
-| **5** | Rewrite `ARCHITECTURE.md` against the governance template | **done** — [PR #37](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/37) (merged) |
+| **1** | Rename `nodes/` → `surfaces/comfyui/`, move `web/` → `surfaces/comfyui/web/` | **done** — [PR #53](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/53), issue #52; `surfaces/comfyui/`, `tests/test_comfyui_loader_context.py` |
+| **2** | Add `surfaces/mcp/` — the base surface over `load_model` + `run_diffusion` (transcribe `semantic-kinematics-mcp`, with the two `STATELESS-CORE` / `ONE-DOOR` corrections) | **done** — [PR #54](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/54); `surfaces/mcp/`, `tests/test_mcp_surface_seam.py` |
+| **3** | Relocate analysis out of `dgemma/`'s import graph into a consumer home | **done** — [PR #56](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/56) (merge `e2aefd1`), issue #55; `consumers/analysis.py` |
+| **4** | Add the boundary test: base contract imports no analysis (flips the prose-only row to in-force) | **done** — [PR #56](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/56) (merge `e2aefd1`), issue #55; `tests/test_seam.py::test_dgemma_does_not_import_consumers_package` |
+| **5** | Rewrite `ARCHITECTURE.md` against the governance template | **done, in two passes.** [PR #37](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/37) landed the initial governance-template rewrite (against the then-old topology); this row's numbering was then reused for CDG-008's actual Phase 5 — the final doc pass closing Track A, flipping every Phase-3/4 row to landed once #56 merged (this ADR's own Phase-5 execution note, above). |
 
 Two ADRs are in ratification, named as drafting specs by issue #35's "required
 clauses": **ADR-CDG-010** (givens/constraints — the two-mechanism model: logit
