@@ -6,11 +6,16 @@ Twins `tests/test_model_load.py`'s `TestTransformersVersionGuard` for the
 diffusers side, adapted for a lower-bounded range (`>=0.39.0`) instead of an
 exact-pin series: `TestDiffusersVersionGuard` covers the version-floor check
 (`_check_diffusers_version`), `TestDiffusersStructuralProbe` covers the
-structural probe (`_check_diffusers_structure`) that guards the vendored
-surface a version-floor check alone cannot (a newer-than-floor diffusers is
-*accepted* by the version check but not thereby guaranteed to keep
-`anneal_temperature`'s re-derived formula, `accepted_index`, or the base
-pipeline's `_callback_tensor_inputs` allowlist unchanged).
+structural probe (`_check_diffusers_structure`) that guards the names/shapes
+a version-floor check alone cannot (a newer-than-floor diffusers is
+*accepted* by the version check but not thereby guaranteed to keep the
+scheduler ctor kwargs, `accepted_index`, or the base pipeline's
+`_callback_tensor_inputs` allowlist unchanged), and `TestAnnealFormulaPin`
+covers the one drift neither of those can see (PR #48 gate finding F-1): a
+rewrite of the anneal formula's *body* that keeps every probed name in
+place. The pin drives the REAL installed scheduler's `step()` and asserts
+`anneal_temperature`'s re-derivation matches the temperature it actually
+applied.
 
 The structural-probe tests monkeypatch the REAL installed diffusers classes
 (`EntropyBoundScheduler`, `EntropyBoundSchedulerOutput`,
@@ -28,6 +33,7 @@ from dgemma.loop import (
     _check_diffusers_structure,
     _check_diffusers_version,
     _tuple_version,
+    anneal_temperature,
 )
 
 
@@ -201,3 +207,94 @@ class TestDiffusersStructuralProbe:
         )
 
         _check_diffusers_structure()  # must not raise
+
+
+class TestAnnealFormulaPin:
+    """issue #35 R3 / PR #48 gate finding F-1: the enforcement surface for
+    the one drift the structural probe cannot see — a rewrite of the anneal
+    formula's *body* (`scheduling_entropy_bound.py:153-154`) that keeps
+    every probed name in place.
+
+    `dgemma.loop.anneal_temperature` re-derives that inlined formula because
+    the scheduler doesn't expose it. This pin recovers the temperature the
+    REAL installed scheduler's `step()` actually applied — `step()` scales
+    the raw logits by the annealed temperature exactly once and returns the
+    scaled tensor as `pred_logits` (`scheduling_entropy_bound.py:155,181`),
+    so `input_logits / pred_logits` is elementwise-constant at exactly that
+    temperature — and asserts the re-derivation matches, across first/mid/
+    last steps and multiple `(t_min, t_max, num_inference_steps)` configs.
+
+    Non-vacuity, by construction: the expected value comes out of the real
+    `EntropyBoundScheduler.step()` call, never from constants this suite
+    copied out of the formula (that would just re-assert dgemma against
+    itself — the exact vacuity the PR #48 gate reviewed against). A future
+    accepted diffusers that changes the anneal math while keeping the names
+    fails here loudly instead of `dgemma`'s telemetry silently lying. No
+    probed temperature equals 1.0, so a semantics change in `pred_logits`
+    (e.g. returning UNscaled logits, making the ratio uniformly 1.0) also
+    fails rather than aliasing a pass. Pure CPU tensor math — no weights, no
+    CUDA.
+    """
+
+    # (num_inference_steps, step_idx, t_min, t_max) spanning the schedule:
+    # first step (t=1.0 -> temperature == t_max), exact midpoint, last step,
+    # plus off-default configs so the pin constrains the full affine formula
+    # (both endpoints and the fraction), not one lucky point. At most ONE
+    # point sits at the t=0.5 midpoint: mutation-checking this pin (PR #48
+    # F-1 close-out) showed a reflection mutation (`t_max - (t_max-t_min)*t`)
+    # coincides with the true formula exactly at t=0.5, so midpoint-heavy
+    # cases would alias that whole mutation class to a pass.
+    CASES = [
+        (48, 0, 0.4, 0.8),
+        (48, 24, 0.4, 0.8),
+        (48, 47, 0.4, 0.8),
+        (32, 11, 0.2, 0.9),
+        (10, 9, 0.5, 0.7),
+    ]
+
+    @pytest.mark.parametrize("num_inference_steps, step_idx, t_min, t_max", CASES)
+    def test_rederivation_matches_real_scheduler_applied_temperature(
+        self, num_inference_steps, step_idx, t_min, t_max
+    ):
+        import torch
+        from diffusers import EntropyBoundScheduler
+
+        scheduler = EntropyBoundScheduler(
+            entropy_bound=0.1, t_max=t_max, t_min=t_min, num_inference_steps=num_inference_steps
+        )
+
+        # Deterministic, strictly positive logits (no zeros: the recovery
+        # divides by the returned tensor), small shapes — (batch=1, block=8,
+        # vocab=16) is enough to pin a scalar temperature.
+        logits = torch.linspace(0.5, 3.5, steps=1 * 8 * 16).reshape(1, 8, 16)
+        sample = torch.zeros(1, 8, dtype=torch.long)
+
+        output = scheduler.step(
+            logits,
+            timestep=step_idx,
+            sample=sample,
+            generator=torch.Generator().manual_seed(0),
+        )
+
+        recovered = logits / output.pred_logits
+        # The scheduler applies ONE scalar temperature per step, so the
+        # ratio must be elementwise-constant — this also pins `pred_logits`
+        # still meaning "temperature-scaled logits" at all.
+        assert torch.allclose(recovered, torch.full_like(recovered, recovered.flatten()[0].item()), rtol=1e-5)
+        applied_temperature = recovered.mean().item()
+
+        expected_t, expected_temperature = anneal_temperature(
+            step_idx, num_inference_steps, t_min, t_max
+        )
+        assert applied_temperature == pytest.approx(expected_temperature, rel=1e-5), (
+            f"anneal_temperature's re-derived temperature {expected_temperature} diverged from the "
+            f"temperature the real installed EntropyBoundScheduler.step() actually applied "
+            f"({applied_temperature}) at step {step_idx}/{num_inference_steps}, "
+            f"t_min={t_min}, t_max={t_max} — the vendored anneal formula has drifted "
+            f"(issue #35 R3 residual; update dgemma/loop.py:anneal_temperature and re-verify "
+            f"every consumer of DiffusionFrame.t/.temperature)."
+        )
+        # And the recovered fraction pins `t` itself (temperature is affine
+        # in t with distinct endpoints, so this is determined, not extra):
+        recovered_t = (applied_temperature - t_min) / (t_max - t_min)
+        assert recovered_t == pytest.approx(expected_t, rel=1e-4)

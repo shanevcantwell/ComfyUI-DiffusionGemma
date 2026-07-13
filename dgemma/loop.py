@@ -18,14 +18,29 @@ a fresh `import dgemma`). `anneal_temperature` below re-derives
 `EntropyBoundScheduler.step()`'s inlined anneal formula
 (`scheduling_entropy_bound.py:153-155`, installed diffusers 0.39.0) instead
 of reading it off the scheduler, because the formula isn't exposed on
-`EntropyBoundSchedulerOutput` — a version bump that changes that formula, or
-renames/reshapes `accepted_index`/`.config.t_min`/`.config.t_max`/
-`.num_inference_steps`, or narrows the base pipeline's
-`_callback_tensor_inputs` allowlist `DGemmaPipeline` widens, would make this
-module silently report wrong values with no error at all (the exact
-trust-and-degrade gap ADR-CDG-001 forbids, CLAUDE.md). `_check_diffusers_version`
-+ `_check_diffusers_structure` turn that silent drift into a loud,
-actionable `RuntimeError` naming which structure moved.
+`EntropyBoundSchedulerOutput` — a version bump that renames/reshapes
+`accepted_index`/`.config.t_min`/`.config.t_max`/`.num_inference_steps`, or
+narrows the base pipeline's `_callback_tensor_inputs` allowlist
+`DGemmaPipeline` widens, would make this module silently report wrong values
+with no error at all (the exact trust-and-degrade gap ADR-CDG-001 forbids,
+CLAUDE.md). `_check_diffusers_version` + `_check_diffusers_structure` turn
+*that* drift — the name/shape kind — into a loud, actionable `RuntimeError`
+naming which structure moved.
+
+**What the guards structurally CANNOT see (named residual, PR #48 gate
+finding F-1):** a change to the anneal formula's *body* — the arithmetic at
+`scheduling_entropy_bound.py:153-154` — that keeps every probed name in
+place (same ctor kwargs, same config attrs, same output fields, different
+math). A `hasattr`/`inspect.signature` probe has no purchase on an
+expression inlined inside `step()`. That residual carries its own
+enforcement surface instead: `tests/test_diffusers_version_guard.py:
+TestAnnealFormulaPin` drives the REAL installed scheduler's `step()` with
+known logits, recovers the temperature it actually applied (from
+`pred_logits = model_output / temperature`, the scaled-logits field `step()`
+returns — `scheduling_entropy_bound.py:155,181`), and asserts
+`anneal_temperature`'s re-derivation matches — so an accepted diffusers
+version that rewrites the formula fails that test loudly instead of this
+module silently lying through its `t`/`temperature` telemetry.
 """
 from __future__ import annotations
 
@@ -46,15 +61,21 @@ import torch
 #    entirely fails as an ImportError with no context otherwise.
 # 2. `_check_diffusers_structure`: a version bump ABOVE the floor is
 #    accepted (the declared range says so) but is untested surface for the
-#    vendored formula/shapes this module depends on — so instead of trusting
+#    names/shapes this module reads off diffusers — so instead of trusting
 #    a newer version to keep every probed structure byte-identical, this
 #    probe asserts each one directly, unconditional on version number, and
 #    fails loud naming exactly which structure moved. This is the
 #    range+structural-probe split (not exact-pin): an exact pin would be
 #    both stricter than the declared dependency bound and wrong the moment
-#    diffusers ships a compatible 0.40/0.41 — the probe is what actually
-#    protects `anneal_temperature` and friends against silent drift on
-#    *any* accepted version, including the floor itself.
+#    diffusers ships a compatible 0.40/0.41.
+#
+#    Honest scope: the probe protects the NAMES/SHAPES `anneal_temperature`
+#    and friends read (ctor kwargs, config attrs, output fields, the base
+#    callback allowlist) — it cannot see the anneal formula's *body*, which
+#    `anneal_temperature` re-derives. That formula-body residual is enforced
+#    by `tests/test_diffusers_version_guard.py:TestAnnealFormulaPin`, which
+#    pins the re-derivation against the temperature the REAL installed
+#    scheduler's `step()` actually applies (see the module docstring above).
 REQUIRED_DIFFUSERS_MINIMUM = "0.39.0"
 
 
@@ -69,8 +90,9 @@ def _check_diffusers_version(installed: str | None = None) -> None:
     undocumented internals across that exact tested release; diffusers is
     declared `>=0.39.0` because nothing here forks diffusers, so a newer
     release is intentionally accepted — `_check_diffusers_structure` (below)
-    is what actually guards the vendored surface a version-floor check alone
-    cannot.
+    guards the names/shapes a version-floor check alone cannot, and
+    `tests/test_diffusers_version_guard.py:TestAnnealFormulaPin` guards the
+    re-derived anneal formula's body, which neither check here can see.
 
     `installed` is normally left `None` (reads the real `diffusers.__version__`
     at call time) — the parameter exists so this thin guard is directly
@@ -303,6 +325,13 @@ def anneal_temperature(
     0.39.0) — the formula is inlined directly in `step()`, not exposed on
     `EntropyBoundSchedulerOutput`, so this dgemma layer recomputes it from the
     same inputs rather than reading it off the scheduler.
+
+    Enforcement surface for this replication (issue #35 R3 / PR #48 gate
+    finding F-1): `tests/test_diffusers_version_guard.py:TestAnnealFormulaPin`
+    — the structural probe above cannot see a formula-*body* change, so that
+    test recovers the temperature the real installed scheduler's `step()`
+    actually applied and asserts this function matches it. If you edit this
+    formula, that test is the contract you are editing against.
 
     Returns `(t, temperature)` where `t` is the normalized schedule fraction
     (1.0 at the hottest/first step, decreasing toward but not reaching 0) and
