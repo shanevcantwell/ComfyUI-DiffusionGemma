@@ -40,6 +40,7 @@ import pytest
 import torch
 
 from dgemma.loop import run_diffusion
+from dgemma.payloads import Constraints, Pin
 from dgemma.types import DGemmaModel
 
 
@@ -282,3 +283,145 @@ class TestSameInSameOutTelemetry:
         # would lie if the engine ever leaked scheduler state across calls.
         assert trace2.scheduler_config["entropy_bound"] == pytest.approx(0.1)
         assert trace1.scheduler_config["entropy_bound"] == pytest.approx(0.1)
+
+
+class TestPinStatePerRun:
+    """ADR-CDG-010 Decision 7 (issue #64 Phase 2, plan §5
+    `TestPinStatePerRun`): two identical `run_diffusion(constraints=...)`
+    calls on one loaded (fake) model yield identical `pinned_mask`
+    telemetry — no pin-derived state observable before the payload that
+    created it, and nothing carried over from a previous call's
+    `Constraints`. No pin PARTICIPANT exists yet (Phase 3); this proves the
+    Phase 2 `pinned_mask` derivation itself is per-run stateless."""
+
+    def test_two_identical_calls_with_same_constraints_yield_identical_pinned_mask(self, monkeypatch):
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        _, _, trace1 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, constraints=constraints,
+        )
+        _, _, trace2 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, constraints=constraints,
+        )
+
+        masks1 = [f.pinned_mask.tolist() for f in trace1.frames]
+        masks2 = [f.pinned_mask.tolist() for f in trace2.frames]
+        assert masks1 == masks2
+        assert all(mask == [True] for mask in masks1)
+
+    def test_pinned_mask_does_not_survive_into_a_call_with_no_constraints(self, monkeypatch):
+        """The exact cross-call-leak shape the statelessness surface exists
+        to catch: a run WITH `constraints=` followed by a run with NO
+        `constraints=` must not somehow carry the first run's pin positions
+        forward — `run_diffusion` builds a fresh `_FrameCollector` every
+        call, so there is no shared object for the mask to ride on."""
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        _, _, trace1 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, constraints=constraints,
+        )
+        _, _, trace2 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+        )
+
+        assert all(f.pinned_mask is not None for f in trace1.frames)
+        assert all(f.pinned_mask is None for f in trace2.frames)
+
+
+class TestEffectiveKnobTelemetryStatelessness:
+    """ADR-CDG-011 clause 8 (issue #64 Phase 2): two identical `run_diffusion`
+    calls yield identical `effective_entropy_bound`/`effective_t_min`/
+    `effective_t_max` telemetry, and — shared surface with
+    `TestSameInSameOutTelemetry` above — a mid-call `register_to_config`
+    mutation never survives into the next call's effective-knob readings.
+    No walker exists yet (Phase 4); this proves the Phase 2 read-path itself
+    (scheduler.config, read fresh per callback) is per-run stateless."""
+
+    def test_two_identical_calls_yield_identical_effective_knob_telemetry(self, monkeypatch):
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+
+        _, _, trace1 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
+        )
+        _, _, trace2 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
+        )
+
+        telemetry1 = [(f.effective_entropy_bound, f.effective_t_min, f.effective_t_max) for f in trace1.frames]
+        telemetry2 = [(f.effective_entropy_bound, f.effective_t_min, f.effective_t_max) for f in trace2.frames]
+        assert telemetry1 == telemetry2
+        assert all(t == (pytest.approx(0.1), pytest.approx(0.4), pytest.approx(0.8)) for t in telemetry1)
+
+    def test_mid_call_mutation_of_effective_knobs_does_not_survive_into_next_call(self, monkeypatch):
+        """Same mutation mechanism as `TestSameInSameOutTelemetry`'s sibling
+        test above (`register_to_config` mid-run, the exact write path a
+        future walker uses), but asserting on the NEW `effective_*` frame
+        fields directly rather than only `trace.scheduler_config`."""
+        registry: list = []
+
+        class FakeScheduler:
+            def __init__(self, *, entropy_bound, t_max, t_min, num_inference_steps):
+                self._config = _RecordingFrozenConfig(
+                    entropy_bound=entropy_bound, t_max=t_max, t_min=t_min, num_inference_steps=num_inference_steps
+                )
+                self.num_inference_steps = num_inference_steps
+                registry.append(self)
+
+            @property
+            def config(self):
+                return self._config
+
+            def register_to_config(self, **kwargs):
+                merged = dict(object.__getattribute__(self._config, "_values"))
+                merged.update(kwargs)
+                self._config = _RecordingFrozenConfig(**merged)
+
+        mutate_on_first_call = {"armed": True}
+
+        class FakePipeline:
+            def __init__(self, model, scheduler, processor):
+                self._scheduler = scheduler
+                self.eos_token_id = 999
+
+            def __call__(self, **kwargs):
+                callback = kwargs["callback_on_step_end"]
+                if mutate_on_first_call["armed"]:
+                    self._scheduler.register_to_config(entropy_bound=0.999, t_min=0.11, t_max=0.22)
+                    mutate_on_first_call["armed"] = False
+                for step_idx in range(2):
+                    callback_kwargs = {
+                        "scheduler_output": FakeSchedulerOutput([[True]]),
+                        "canvas": torch.tensor([[step_idx]]),
+                    }
+                    callback(self, step_idx, step_idx, callback_kwargs)
+                return FakePipelineOutput(sequences=[torch.tensor([2], dtype=torch.long)])
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", FakeScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", FakePipeline)
+
+        _, _, trace1 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
+        )
+        _, _, trace2 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
+        )
+
+        # Call 1's frames show the mutated values (the mutation happened
+        # before the pipeline's per-step loop fires any callback in this
+        # fixture, so every frame in call 1 reflects it).
+        assert all(f.effective_entropy_bound == pytest.approx(0.999) for f in trace1.frames)
+        assert all(f.effective_t_min == pytest.approx(0.11) for f in trace1.frames)
+        assert all(f.effective_t_max == pytest.approx(0.22) for f in trace1.frames)
+
+        # Call 2's fresh scheduler was never touched by call 1's mutation.
+        assert all(f.effective_entropy_bound == pytest.approx(0.1) for f in trace2.frames)
+        assert all(f.effective_t_min == pytest.approx(0.4) for f in trace2.frames)
+        assert all(f.effective_t_max == pytest.approx(0.8) for f in trace2.frames)
