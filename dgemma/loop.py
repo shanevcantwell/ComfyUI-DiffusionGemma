@@ -567,24 +567,29 @@ def run_diffusion(
 
     `should_cancel` (issue #38, folded into R1's composer spec per the #35
     handoff): a zero-argument, surface-neutral predicate checked once per
-    step by `dgemma.composite.StepEndComposite`, BEFORE that step's capture —
-    surface-agnostic by construction (ARCHITECTURE.md rule 1): a ComfyUI
-    surface wires this to `comfy.model_management`'s interrupt check, an MCP
-    surface wires it to its own abort signal, and this module never imports
-    either. When the predicate reports `True`, the composite raises
+    step by `dgemma.composite.StepEndComposite`, AFTER that step's capture
+    (ADR-CDG-010 cancellation amendment 2026-07-13, PR #45) — surface-
+    agnostic by construction (ARCHITECTURE.md rule 1): a ComfyUI surface
+    wires this to `comfy.model_management`'s interrupt check, an MCP surface
+    wires it to its own abort signal, and this module never imports either.
+    When the predicate reports `True`, the composite raises
     `DiffusionCancelled`, caught here to return the PARTIAL
-    `(text, CanvasState, CanvasTrace)` built from whatever frames were
-    already captured before the cancelled step — evidence is returned, not
-    raised away (#38's "a cancelled experiment run is still data" clause).
-    `None` (default) means no cancellation wiring; the run always completes
-    or raises a real error, exactly today's behavior.
+    `(text, CanvasState, CanvasTrace)` built from every frame captured so
+    far — INCLUDING the cancelled step's own committed frame, the run's
+    exact truncation point (the scheduler has already committed that step
+    by `callback_on_step_end` time; see `dgemma/composite.py`'s module
+    docstring) — evidence is returned, not raised away (#38's "a cancelled
+    experiment run is still data" clause). `None` (default) means no
+    cancellation wiring; the run always completes or raises a real error,
+    exactly today's behavior.
 
     The single `callback_on_step_end` slot passed to the pipeline is a
-    `dgemma.composite.StepEndComposite` (ADR-CDG-010 Decision 3), not the
-    collector directly — the composite's fixed order is `cancellation check
-    -> capture -> beta-rebuild -> pin`; only `capture` (this collector) and
-    the cancellation seam are wired today, so the composite's behavior here
-    is otherwise identical to invoking the collector alone. Beta-rebuild/pin
+    `dgemma.composite.StepEndComposite` (ADR-CDG-010 Decision 3 + its
+    cancellation amendment), not the collector directly — the composite's
+    fixed order is `capture -> cancellation check -> beta-rebuild -> pin`;
+    only `capture` (this collector) and the cancellation seam are wired
+    today, so the composite's behavior here is otherwise identical to
+    invoking the collector alone. Beta-rebuild/pin
     participants (ADR-CDG-010) and the control-signal walker
     (ADR-CDG-011) are `NOT-YET-IMPLEMENTED` — R1 lands the ordered scaffold
     they slot into, not their bodies.
@@ -649,12 +654,23 @@ def run_diffusion(
         )
     except DiffusionCancelled:
         # #38 partial-return semantics: return the evidence already
-        # captured rather than raising it away. The last captured frame's
-        # own canvas stands in for the pipeline's (never-produced)
+        # captured rather than raising it away. Under the capture-first
+        # amendment the last captured frame IS the cancelled step's own
+        # committed frame — the run's exact truncation point — and its
+        # canvas stands in for the pipeline's (never-produced)
         # `output.sequences` — same excision/decode path as the completed
         # case, so a cancelled run's `CanvasState`/`CanvasTrace` are built
         # the identical way a completed run's are, not a special-cased
         # shape.
+        #
+        # No-frames guard: unreachable through the composite's own flow
+        # (capture precedes the cancellation check, and the collector
+        # always appends a frame before returning), kept as defensive
+        # honesty against a `DiffusionCancelled` raised from anywhere else
+        # in the pipeline call — with zero evidence, re-raising is honest
+        # and `_build_result` would otherwise mint a fabricated-empty
+        # `CanvasState` (or die in `derive_canvas_state` with a less
+        # truthful error).
         if not collector.frames:
             raise
         sequences = collector.frames[-1].canvas

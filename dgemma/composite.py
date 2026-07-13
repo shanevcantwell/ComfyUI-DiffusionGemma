@@ -11,24 +11,30 @@ the pipeline boundary: existing direct-call tests
 (`tests/test_run_diffusion_knobs.py`'s `callback(self, 0, 0, callback_kwargs)`
 pattern) keep working against whatever object occupies that slot.
 
-**Fixed ordering (ADR-CDG-010 Decision 3, ADR-CDG-011 clause 6), engine-owned,
-never caller-configurable:**
+**Fixed ordering (ADR-CDG-010 Decision 3 + its cancellation amendment
+2026-07-13, ADR-CDG-011 clause 6), engine-owned, never caller-configurable:**
 
-    cancellation check -> capture -> beta-rebuild -> pin
+    capture -> cancellation check -> beta-rebuild -> pin
 
-- **Cancellation runs first.** It is a read-only check with no canvas
-  dependency (issue #38's fold-in): if the caller wants out, checking before
-  capture avoids capturing a frame for a step that is about to be abandoned,
-  and avoids running any canvas-writer for a step whose result will never be
-  used. Raising `DiffusionCancelled` here is caught by `run_diffusion`
+- **Capture runs first — before the cancellation check and before any
+  canvas-writer** (ADR-CDG-010 Decision 3 + amendment, PR #45). This
+  callback fires at `callback_on_step_end`, AFTER the scheduler's `step()`
+  has already committed this step's canvas
+  (`pipeline_diffusion_gemma.py:365-371` -> `:404-407`) — so at the moment
+  cancellation could trip, the step's canvas is a *committed* frame, not an
+  in-flight partial. Capturing before the cancellation check means a
+  cancelled run's trace retains its exact truncation point: the committed
+  frame of the very step the caller cancelled on. An instrumentation-first
+  pack pays one capture to keep that evidence (#38's "a cancelled
+  experiment run is still data"); the cancel-first alternative (rejected —
+  see the ADR amendment) silently discarded it.
+- **Cancellation runs second — after capture, before every canvas-writer**
+  (issue #38's fold-in): the read-only cancel check still gates all writer
+  work, so no beta-rebuild/pin pass runs for a step whose result will never
+  be used. Raising `DiffusionCancelled` here is caught by `run_diffusion`
   (`dgemma/loop.py`), which returns the partial `CanvasTrace` built from
-  whatever frames were already captured — a cancelled run's partial evidence
-  is not discarded (#38's "return what exists" clause).
-- **Capture runs before any canvas-writer** (ADR-CDG-010 Decision 3): it must
-  read model-committed, pre-pin truth. Placing capture immediately after the
-  cancellation check (which never writes the canvas) preserves this — capture
-  is still the first of the writer-adjacent participants to see the step's
-  canvas.
+  the frames captured so far — INCLUDING this step's truncation-point
+  frame (#38's "return what exists" clause).
 - **Beta-rebuild runs before pin.** Renoise/rebuild participants must finish
   writing before pin re-asserts, or a pin's re-assertion could be immediately
   overwritten by a renoise pass that doesn't know the cell was just pinned.
@@ -128,7 +134,9 @@ class _CancellationParticipant:
     on a later call (not expected from a real interrupt flag, but not this
     participant's business to guard against) still cancels once tripped,
     because the composite doesn't get a second chance to run this step's
-    capture/writers after raising.
+    writers after raising. By the time this check runs, capture has already
+    recorded the step's committed frame (the amendment's capture-first
+    ordering) — cancellation truncates the run, never the evidence.
     """
 
     should_cancel: Callable[[], bool] | None = None
@@ -156,7 +164,7 @@ class StepEndComposite:
     no beta-rebuild/pin participant exists yet (ADR-CDG-010's own two-
     mechanism participants are R2/R5 scope), so both default to `()`.
 
-    `__call__` runs, in this fixed order: the cancellation check, `capture`,
+    `__call__` runs, in this fixed order: `capture`, the cancellation check,
     every `beta_rebuild` participant (in list order), every `pin` participant
     (in list order). A canvas-writer's returned `{"canvas": ...}` is threaded
     into `callback_kwargs["canvas"]` for the NEXT participant in the list, so
@@ -179,12 +187,17 @@ class StepEndComposite:
         self._cancellation = _CancellationParticipant(should_cancel=self.should_cancel)
 
     def __call__(self, pipe: Any, global_step: int, step_idx: int, callback_kwargs: dict) -> dict:
-        # 1. Cancellation — read-only, no canvas dependency; raises before
-        #    capture/writers run for a step about to be abandoned.
-        self._cancellation(pipe, global_step, step_idx, callback_kwargs)
-
-        # 2. Capture — must see the pre-writer canvas (ADR-CDG-010 Decision 3).
+        # 1. Capture — must see the pre-writer canvas (ADR-CDG-010 Decision
+        #    3), and runs BEFORE the cancellation check (ADR-CDG-010
+        #    amendment 2026-07-13, PR #45): the scheduler has already
+        #    committed this step's canvas by callback time, so capturing
+        #    first retains the truncation-point frame on a cancelled run.
         self.capture(pipe, global_step, step_idx, callback_kwargs)
+
+        # 2. Cancellation — read-only; raises after this step's committed
+        #    frame is captured but before any writer runs for a step whose
+        #    result will never be used.
+        self._cancellation(pipe, global_step, step_idx, callback_kwargs)
 
         # 3. Beta-rebuild, then 4. pin — canvas-writers, in that fixed order;
         #    each sees the previous writer's output via callback_kwargs

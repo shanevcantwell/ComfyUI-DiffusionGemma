@@ -182,13 +182,21 @@ class TestOrderingIsStructural:
 
 class TestCancellationSeam:
     """Issue #38, folded into R1's composer spec: the cancel check has a
-    defined position (first, before capture/writers) and a defined
+    defined position (second — AFTER capture, before every canvas-writer;
+    ADR-CDG-010 cancellation amendment 2026-07-13, PR #45) and a defined
     exception path (`DiffusionCancelled`, propagating out of the composite
     for `run_diffusion` to catch — see `tests/test_run_diffusion_cancel.py`
     for the full `run_diffusion`-level partial-return behavior; this class
     covers the composite's own contract in isolation)."""
 
-    def test_should_cancel_true_raises_before_capture_runs(self, fake_pipeline_factory):
+    def test_should_cancel_true_raises_after_capturing_the_truncation_frame(self, fake_pipeline_factory):
+        """The amendment's load-bearing flip: the cancelled step's canvas is
+        already scheduler-committed by `callback_on_step_end` time, so
+        capture MUST run before the cancellation check — the trace keeps
+        the exact truncation-point frame. (Pre-amendment, cancel-first,
+        this assertion was `capture_calls == []`; the flip is deliberate,
+        pinning the new order — a regression back to cancel-first fails
+        here.)"""
         capture_calls: list = []
 
         def capture(pipe, global_step, step_idx, callback_kwargs):
@@ -198,15 +206,44 @@ class TestCancellationSeam:
         step_end = StepEndComposite(capture=capture, should_cancel=lambda: True)
         built = fake_pipeline_factory(num_inference_steps=3)
 
+        with pytest.raises(DiffusionCancelled) as exc_info:
+            built.pipeline(
+                num_inference_steps=3,
+                callback_on_step_end=step_end,
+                callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+            )
+        # Cancellation fires on the very first step, but only AFTER that
+        # step's committed frame was captured — exactly one capture call.
+        assert capture_calls == [0]
+        assert exc_info.value.step_idx == 0
+
+    def test_cancelled_step_runs_no_canvas_writers(self, fake_pipeline_factory):
+        """The half of the old cancel-first rationale that survives the
+        amendment: cancellation still precedes every canvas-writer, so no
+        beta-rebuild/pin pass runs for a step whose result will never be
+        used — only the evidence (capture) side of the step completes."""
+        writer_log: list = []
+        beta = _RecordingParticipant("beta_rebuild", writer_log, canvas_value=7)
+        pin = _RecordingParticipant("pin", writer_log, canvas_value=99)
+        capture_calls: list = []
+
+        def capture(pipe, global_step, step_idx, callback_kwargs):
+            capture_calls.append(step_idx)
+            return {}
+
+        step_end = StepEndComposite(
+            capture=capture, should_cancel=lambda: True, beta_rebuild=(beta,), pin=(pin,)
+        )
+        built = fake_pipeline_factory(num_inference_steps=3)
+
         with pytest.raises(DiffusionCancelled):
             built.pipeline(
                 num_inference_steps=3,
                 callback_on_step_end=step_end,
                 callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
             )
-        # Cancellation fires on the very first step, before capture — no
-        # capture call is ever recorded.
-        assert capture_calls == []
+        assert capture_calls == [0]
+        assert writer_log == []
 
     def test_should_cancel_false_never_raises_capture_runs_every_step(self, fake_pipeline_factory):
         capture_calls: list = []
@@ -235,11 +272,11 @@ class TestCancellationSeam:
 
         assert capture_calls == [0, 1, 2, 3]
 
-    def test_cancel_after_n_steps_stops_further_capture(self, fake_pipeline_factory):
-        """A predicate that flips True partway through must stop capture
-        from running on the step where it trips — proving the check
-        genuinely gates the rest of that step's participants rather than
-        merely being observed post-hoc."""
+    def test_cancel_after_n_steps_captures_through_the_truncation_step(self, fake_pipeline_factory):
+        """A predicate that flips True partway through stops the run on the
+        step where it trips — but that step's committed frame is still
+        captured (the amendment's evidence policy): capture runs through
+        and including the truncation step, and no step after it."""
         capture_calls: list = []
         state = {"count": 0}
 
@@ -261,7 +298,9 @@ class TestCancellationSeam:
                 callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
             )
         assert exc_info.value.step_idx == 2
-        assert capture_calls == [0, 1]
+        # Steps 0 and 1 completed normally; step 2 (the truncation step) was
+        # captured and THEN cancelled; steps 3-4 never ran.
+        assert capture_calls == [0, 1, 2]
 
     def test_diffusion_cancelled_carries_step_idx(self):
         exc = DiffusionCancelled(step_idx=5)
