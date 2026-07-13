@@ -2,12 +2,18 @@
 
 Plain Python + torch/transformers/diffusers. Imports and runs with **zero
 ComfyUI present** — that is the whole reason this package exists, split out
-from `nodes/` (see `tests/test_seam.py`, the enforcement surface). `nodes/`
-imports from here; this package never imports from `nodes/` or `comfy`.
+from `nodes/` (see `tests/test_seam.py`, the enforcement surface). `surfaces/`
+imports from here; this package never imports from `surfaces/`, `consumers/`,
+or `comfy`.
 
-Owns the model (`model.py`), the dataclasses (`types.py`), the denoising loop
-(`loop.py`), and — as of Phase 3 — the pure trace-analysis functions
-(`sampling.py`: heatmap/avalanche-curve builders, mask-token corroboration).
+Owns the model (`model.py`), the dataclasses (`types.py`), and the denoising
+loop (`loop.py`). Derived trace-analysis (heatmap/avalanche-curve builders,
+mask-token corroboration) is **not** part of the core's public face — it
+moved to `consumers/analysis.py` (ADR-CDG-008 Phase 3; Open Question #1
+resolved to `consumers/`, see the ADR's amendment note and issue #55). The
+core emits the canonical `CanvasTrace`; analysis parses it as a downstream
+consumer, never the reverse (`tests/test_seam.py`'s CDG-008 Phase 4
+assertion enforces that `import dgemma` never pulls `consumers.*` in).
 `schedule.py` lands in a later phase (plan.md).
 """
 from __future__ import annotations
@@ -23,12 +29,6 @@ from .loop import (
     run_diffusion,
 )
 from .model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
-from .sampling import (
-    MaskTokenCorroboration,
-    build_avalanche_curve,
-    build_commit_heatmap,
-    corroborate_no_mask_token,
-)
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame
 
 __all__ = [
@@ -36,7 +36,6 @@ __all__ = [
     "CanvasTrace",
     "DGemmaModel",
     "DiffusionFrame",
-    "MaskTokenCorroboration",
     "DEFAULT_CONFIDENCE",
     "DEFAULT_ENTROPY_BOUND",
     "DEFAULT_GEN_LENGTH",
@@ -46,9 +45,6 @@ __all__ = [
     "DEFAULT_T_MIN",
     "DEFAULT_REPO_ID",
     "THINK_TOKEN",
-    "build_avalanche_curve",
-    "build_commit_heatmap",
-    "corroborate_no_mask_token",
     "load_model",
     "run_diffusion",
 ]

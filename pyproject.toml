@@ -43,8 +43,7 @@ dev = ["pytest", "ruff"]
 # SDK is therefore optional, exactly like ComfyUI itself is absent-by-design
 # from this pack's core dependencies (`tests/test_seam.py`). A ComfyUI-only
 # install (the `dependencies` list above) never needs this extra; only
-# `surfaces/mcp/server.py` (and `python -m surfaces.mcp.server` / the
-# `comfyui-diffusiongemma-mcp` script below) requires it.
+# `surfaces/mcp/server.py` (via `python -m surfaces.mcp.server`) requires it.
 mcp = ["mcp>=1.0.0"]
 
 # ComfyUI Registry metadata (comfy-cli / registry.comfy.org).

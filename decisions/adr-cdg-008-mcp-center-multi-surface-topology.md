@@ -190,20 +190,25 @@ the *only* option that lets a test assert the boundary.
 
 ## Open Questions
 
-- [ ] **Where does analysis land — `consumers/` or `surfaces/analysis/`?**
+- [x] **Where does analysis land — `consumers/` or `surfaces/analysis/`?**
       Analysis is a consumer of the trace, but `DGemmaTrace` is *also* a ComfyUI
       surface node that wraps it. Candidate split: pure trace-analysis functions
       (the current `dgemma/sampling.py` body) → a surface-neutral `consumers/`
       (or `analysis/`) module; the ComfyUI-shaped `DGemmaTrace` adapter stays in
       `surfaces/comfyui/` and imports the consumer. **Resolution trigger:**
       settle when the relocation phase is planned (a `plan` pass over this ADR),
-      before any file moves.
+      before any file moves. **Resolved 2026-07-13 → `consumers/`.** See the
+      amendment below (transcribed from issue #55 §1, the Phase 3+4 plan pass).
 - [ ] **Does `CanvasTrace` (`dgemma/types.py`) stay in the core, or move to a
       shared contract module the consumers import?** It is the emitted canonical
       type, so it plausibly stays core-side as the contract surface both the core
       and its consumers depend on. **Resolution trigger:** decide alongside the
       analysis-relocation question; default is "trace type stays in `dgemma/` as
-      the contract, analysis *functions* move out."
+      the contract, analysis *functions* move out." **Confirmed 2026-07-13:** the
+      default held — issue #55 §2's move map moves only the four analysis
+      functions/dataclass; `CanvasTrace` and the rest of `dgemma/types.py` stay
+      in `dgemma/`, unmoved, as verified by `dgemma/loop.py`'s imports before
+      execution (it imports nothing from `sampling`).
 - [ ] **Is this refactor large enough to need a `decompose-problem` /
       `plan` pass before execution?** The roadmap below is sequenced but not
       step-level. **Resolution:** yes — recommend a `plan` pass over Phases 1–4
@@ -213,6 +218,72 @@ the *only* option that lets a test assert the boundary.
 **Resolution plan:** all three are settled during a `plan` pass over the roadmap
 below; none blocks *recording* this direction, and none should be resolved by
 silently moving files ahead of that pass.
+
+### Amendment 2026-07-13 — Open Question #1 resolved: `consumers/`
+
+Recorded on execution of Phases 3+4 (issue #55, the plan pass this ADR's Open
+Question #1 named as the resolution trigger). Transcribed from issue #55 §1.
+
+**Decision: `consumers/` (top-level, sibling to `surfaces/` and `dgemma/`).**
+One-sentence rationale: analysis **parses an already-emitted `CanvasTrace`**
+and never wraps `load_model`/`run_diffusion`, so it is categorically a
+consumer, not a surface — and `consumers/` is the only name that files it by
+its true role while keeping the surface-tier definition ("a thin adapter over
+the one contract") uncontaminated.
+
+**The `DGemmaTrace` dual-role wrinkle splits cleanly, and the split is already
+on disk:** `DGemmaTrace` is *also* a ComfyUI surface node wrapping the
+analysis, but this does not muddy the decision. The **pure functions**
+(`consumers/analysis.py`, formerly `dgemma/sampling.py`) construct no ComfyUI
+tensor, import no socket type, and take/return plain `CanvasTrace` / lists / a
+dataclass — consumer-tier. The **node** (`surfaces/comfyui/trace.py:DGemmaTrace`)
+is the ComfyUI adapter: it imports the pure functions and wraps their plain
+results into `IMAGE`/`STRING` sockets — surface-tier, staying in
+`surfaces/comfyui/`. The node importing a consumer is not a layering
+inversion: both the node and the consumer sit above the core; the node is a
+surface that happens to present a consumer's output, a normal composition, not
+a seam crossing.
+
+**Rejected options:**
+
+- **`surfaces/analysis/`** — rejected. Would file consumer code *inside the
+  surface tier*, contradicting ARCHITECTURE.md rule 2 ("Each `surfaces/*`
+  module is a thin adapter: unpack args → call one `dgemma.*` function → wrap
+  the result"). Analysis calls neither `load_model` nor `run_diffusion`; it
+  would be the one `surfaces/*` module that is not a surface, forcing an
+  exception into a rule whose whole value is having none. The Phase-4 boundary
+  test also reads more honestly as "core imports no `consumers`" than "core
+  imports no `surfaces.analysis` (but does import `surfaces.comfyui` from the
+  pack entry point)".
+- **Leave it in `dgemma/`, assert consumer status in prose** — rejected. This
+  is the exact status quo failure ADR-CDG-008 Option C already rejected: the
+  docstring claims consumer status while `__init__.py` re-exports it; prose
+  and code disagree and only code runs. Relocation is the only option that
+  lets Phase 4 assert the boundary.
+- **A shared `contracts/` module holding `CanvasTrace` + analysis together** —
+  rejected. Conflates the emitted *type* (core-side, Open Question #2 default)
+  with the *derived analysis* (which must leave). Open Question #2 already
+  decided `CanvasTrace` stays in `dgemma/types.py`; a shared module would
+  re-open a settled question for no gain.
+
+**Ecosystem note (checked, reported honestly):** neither `../llauncher` nor
+`../harness-tools` nor `../semantic-kinematics-mcp` has a `consumers/` or
+`analysis/` directory — there is no sibling precedent to converge on. The
+decision rests entirely on this ADR's own diagram and the role semantics
+above, not on cross-repo mirroring. `consumers/` matches the ADR diagram's
+label; that is the strongest available anchor.
+
+Executed on `feat/roadmap-cdg008-p3p4-consumers` (Phases 3+4): `dgemma/sampling.py`
+moved to `consumers/analysis.py`; `dgemma/__init__.py`'s analysis re-exports
+removed outright (hard removal, no deprecation shim — pre-1.0, zero external
+callers, and a shim would defeat Phase 4's boundary assertion by construction);
+`surfaces/comfyui/trace.py` repointed. See issue #55 for the full plan.
+
+(The "Core imports no analysis" row in the Enforcement surfaces table above is
+left as the decision-time snapshot, same convention as the Phase 1 "Core
+imports no surface" row above it — the live, landed status is tracked in
+`ARCHITECTURE.md`'s enforcement-surface table, not re-written into this ADR's
+body after the fact.)
 
 ## Sequenced cleanup roadmap (recorded next-actions — NOT executed in this ADR)
 

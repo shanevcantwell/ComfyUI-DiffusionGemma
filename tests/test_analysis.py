@@ -1,13 +1,14 @@
-"""`dgemma/sampling.py` — pure functions over a synthetic `CanvasTrace` (P3
-steps 3-4). No ComfyUI, no torch-autograd/pipeline dependency (ADR-CDG-003):
-everything here is hand-computable against small, explicit frames.
+"""`consumers/analysis.py` — pure functions over a synthetic `CanvasTrace`
+(relocated from `dgemma/sampling.py`, ADR-CDG-008 Phase 3 / issue #55). No
+ComfyUI, no torch-autograd/pipeline dependency (ADR-CDG-003): everything
+here is hand-computable against small, explicit frames.
 """
 from __future__ import annotations
 
 import pytest
 import torch
 
-from dgemma.sampling import (
+from consumers.analysis import (
     MaskTokenCorroboration,
     build_avalanche_curve,
     build_commit_heatmap,

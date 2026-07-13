@@ -1,16 +1,17 @@
-"""nodes/trace.py adapts without logic (ADR-CDG-003): unpack -> call the
-`dgemma.sampling` functions -> wrap into `IMAGE`/`STRING`. Mirrors
-`tests/test_loader_contract.py`'s thin-wrapper test shape: monkeypatch the
-exact `dgemma.sampling` calls and assert `DGemmaTrace.render` is a pure
+"""surfaces/comfyui/trace.py adapts without logic (ADR-CDG-003): unpack ->
+call the `consumers.analysis` functions -> wrap into `IMAGE`/`STRING`.
+Mirrors `tests/test_loader_contract.py`'s thin-wrapper test shape:
+monkeypatch the exact `consumers.analysis` calls (as imported into
+`surfaces.comfyui.trace`) and assert `DGemmaTrace.render` is a pure
 pass-through/wrap around their outputs, plus a small set of direct
 tensor-shape assertions for the one piece of real (ComfyUI-sanctioned, see
-nodes/trace.py's own docstring) wrapping logic in this file.
+surfaces/comfyui/trace.py's own docstring) wrapping logic in this file.
 """
 from __future__ import annotations
 
 import torch
 
-from dgemma.sampling import MaskTokenCorroboration
+from consumers.analysis import MaskTokenCorroboration
 from surfaces.comfyui.trace import DGemmaTrace
 
 
@@ -57,7 +58,7 @@ def test_render_calls_sampling_functions_and_wraps_results(monkeypatch):
     node = DGemmaTrace()
     image, summary = node.render(canvas_trace=sentinel_trace, cell_px=4)
 
-    # No logic of its own: every `dgemma.sampling` call received the same
+    # No logic of its own: every `consumers.analysis` call received the same
     # trace object, unmodified — and `cell_px` threads straight through as
     # `scale` (the scaling math is engine-side, ADR-CDG-003).
     assert captured["heatmap_trace"] is sentinel_trace
@@ -100,7 +101,7 @@ def test_render_defaults_cell_px_to_6(monkeypatch):
 
 
 def test_render_end_to_end_scaled_image_dimensions():
-    """One unmocked pass (real `dgemma.sampling` functions) pinning the
+    """One unmocked pass (real `consumers.analysis` functions) pinning the
     scaled IMAGE dimensions: a 2-frame, 3-position trace at cell_px=4 must
     produce a (1, 2*4, 3*4, 3) tensor — the operator-visible fix."""
     from dgemma.types import CanvasTrace, DiffusionFrame

@@ -74,6 +74,8 @@ def test_trace_resolves_relative_import_under_dotted_package_context(synthetic_p
     assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
     assert "." in module.__package__
     assert module.DGemmaTrace.FUNCTION == "render"
-    # dgemma.sampling itself is NOT relocated by this phase (Phase 3 is out
-    # of scope, ADR-CDG-008 Open Question #1 unresolved) — this stays as-is.
-    assert module.build_commit_heatmap.__module__ == f"{synthetic_pack_root}.dgemma.sampling"
+    # `consumers/` is a top-level pack-root child, exactly like `dgemma/`
+    # (ADR-CDG-008 Phase 3 / Open Question #1 resolved to `consumers/`,
+    # issue #55 §2) — the relative-import depth from surfaces/comfyui/ is
+    # unchanged, only the middle segment moved.
+    assert module.build_commit_heatmap.__module__ == f"{synthetic_pack_root}.consumers.analysis"
