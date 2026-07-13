@@ -11,6 +11,14 @@ take apart.
 > **live per-step view** of the canvas denoising as it runs, a **picture
 > flipbook** of the whole process, and a **trace node** (commit heatmap +
 > summary) to read what happened. Verified on real weights across two GPUs.
+>
+> **VRAM footprint today: ~50GB bf16 + CPU spill, needs a ≥48GB card.**
+> `quant="none"` is the only load path (bitsandbytes can't touch this
+> model's fused MoE experts — see "What works today" below); the model
+> card's ~18GB quantized / consumer-GPU footprint is **not yet reachable
+> through this pack**. A real quantized load path is tracked in
+> [issue #4](../../issues/4).
+>
 > Where it's headed lives in the [roadmap](plan.md).
 
 | Phase | What landed | Evidence |
