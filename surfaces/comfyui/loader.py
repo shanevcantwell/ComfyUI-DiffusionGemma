@@ -1,4 +1,4 @@
-"""nodes/loader.py — DGemmaLoader: thin ComfyUI adapter (ADR-CDG-003).
+"""surfaces/comfyui/loader.py — DGemmaLoader: thin ComfyUI adapter (ADR-CDG-003).
 
 Unpacks widget inputs, calls one `dgemma.*` function, wraps the result in a
 tuple. No logic lives here — if a `for` loop or a loading decision ever
@@ -43,15 +43,36 @@ import os
 # root __init__.py — no blanket try/except, which masks real failures).
 # ComfyUI loads the pack as a package named after its directory path
 # (`/srv/dev/ComfyUI/nodes.py:2233,2241`) and never puts the pack root on
-# sys.path, so this module's __package__ is "<pack>.nodes" (dotted) and only
-# the relative `..dgemma` can resolve. Under pytest/standalone the repo root
-# is on sys.path and this module is top-level "nodes" (no dot), so only the
-# absolute form can resolve. Observed violation: graph smoke test 2026-07-05
-# (`loose-ends.md`); enforcement: tests/test_comfyui_loader_context.py.
-if __package__ and "." in __package__:
-    from ..dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+# sys.path, so this module's __package__ is "<pack>.surfaces.comfyui"
+# (dotted) and only the relative import can resolve. This module now lives
+# two levels under the pack root (surfaces/comfyui/, was one level under
+# nodes/), so the relative climb to dgemma/ is THREE dots, not two
+# (ADR-CDG-008 Phase 1 / issue #52 risk R-1 — the riskiest step named in the
+# plan).
+#
+# GATE CORRECTION vs #52's stated design (found during execution, not
+# preempted by the plan): the gate can no longer be a bare `"." in
+# __package__` check. Under pytest/standalone, this module's OWN absolute
+# package name is "surfaces.comfyui" — which itself contains a dot, because
+# the surface directory is two segments deep — so the naive dotted-check
+# would wrongly take the relative branch even outside ComfyUI (that branch
+# would then try to climb past the top-level package and raise
+# ImportError). The `nodes/` layout never hit this because "nodes" was a
+# single, undotted top-level segment. The real ComfyUI loader's
+# `__package__` is "<synthetic-pack-name>.surfaces.comfyui" (>= 2 dots: one
+# for "comfyui-under-surfaces", one for "surfaces-under-the-pack-name");
+# bare pytest/standalone gives exactly "surfaces.comfyui" (1 dot). Gating on
+# `__package__.count(".") >= 2` distinguishes the two correctly. Observed
+# violation: graph smoke test 2026-07-05 (`loose-ends.md`) for the original
+# nodes/ case; this depth-count correction is a new observed violation from
+# this move's own execution. Enforcement: tests/test_comfyui_loader_context.py
+# and tests/test_dual_context_import.py (the R-1 tripwires).
+if __package__ and __package__.count(".") >= 2:
+    from ...dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from .socket_types import DGEMMA_MODEL
 else:
     from dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
 # Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
 # until weights actually live under ComfyUI model dirs. See the module
@@ -213,7 +234,7 @@ class DGemmaLoader:
             spec["optional"] = {"local_model_dir": (list_local_model_dirs(),)}
         return spec
 
-    RETURN_TYPES = ("DGEMMA_MODEL",)
+    RETURN_TYPES = (DGEMMA_MODEL,)
     RETURN_NAMES = ("model",)
     FUNCTION = "load"
     CATEGORY = "DiffusionGemma"

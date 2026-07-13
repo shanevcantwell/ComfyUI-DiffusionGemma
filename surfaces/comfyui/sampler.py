@@ -1,4 +1,4 @@
-"""nodes/sampler.py — DGemmaSampler: thin ComfyUI adapter (ADR-CDG-003).
+"""surfaces/comfyui/sampler.py — DGemmaSampler: thin ComfyUI adapter (ADR-CDG-003).
 
 P2 promotes the entropy-bound params, seed, and the thinking toggle to
 widgets (plan.md Phase 2). Emits `STRING` (decoded text) **plus**
@@ -34,7 +34,7 @@ A fifth output, `frames_image` (issue #21, reworked from a standalone
 `DGemmaFlipbook` node into a second sampler output): the same decoded
 `frames` strings rendered as a single stacked
 `(N, H, W, 3)` float32 `[0, 1]` `IMAGE` batch via
-`nodes.frames_image.render_frames_to_image_batch` — the "watch it reason"
+`surfaces.comfyui.frames_image.render_frames_to_image_batch` — the "watch it reason"
 series made watchable/shareable (e.g. `SaveAnimatedWEBP`/VHS downstream), not
 just inspectable as text. Reuses the `frames` list `decode_frames` already
 produced (one decode, two renderings) rather than re-decoding
@@ -56,6 +56,12 @@ ADR-CDG-001). This node already holds `model.processor` and already decodes
 `frames` itself, so rendering the image batch here instead keeps
 `CANVAS_TRACE` pure.
 
+`DGEMMA_MODEL` / `DGEMMA_CANVAS_STATE` / `DGEMMA_CANVAS_TRACE` socket-type
+strings come from the `socket_types` mint module (#35 R2, ADR-CDG-008 Phase
+1) — no inline `DGEMMA_*` literal at this site; see
+`surfaces/comfyui/socket_types.py`. `DGEMMA_STEP_EVENT` below is NOT part of
+that mint — it's a WebSocket event name, not a ComfyUI socket type.
+
 **Named trap (plan.md Risks): this MUST NOT touch `comfy.utils.ProgressBar`'s
 `preview=` slot.** That path is structurally image-typed downstream
 (`server.py:1293-1301`, `ProgressBar.update_absolute` -> `send_image`, which
@@ -68,11 +74,19 @@ from __future__ import annotations
 
 import logging
 
-# Dual-context import, explicit package-depth gate — see nodes/loader.py for
-# the full rationale (ComfyUI loader context vs. pytest/standalone; observed
-# violation 2026-07-05, enforced by tests/test_comfyui_loader_context.py).
-if __package__ and "." in __package__:
-    from ..dgemma.loop import (
+# Dual-context import, explicit package-depth gate — see
+# surfaces/comfyui/loader.py for the full rationale (ComfyUI loader context
+# vs. pytest/standalone; observed violation 2026-07-05, enforced by
+# tests/test_comfyui_loader_context.py). This module lives two levels under
+# the pack root (surfaces/comfyui/), so the relative climb to dgemma/ is
+# THREE dots (ADR-CDG-008 Phase 1 / issue #52 risk R-1). `.frames_image` and
+# `.socket_types` stay ONE dot — both are siblings in this same directory,
+# unaffected by the pack-root depth change. Gate is `__package__.count(".")
+# >= 2`, not a bare dot-presence check — see loader.py's "GATE CORRECTION"
+# comment: this module's own absolute package name ("surfaces.comfyui")
+# contains a dot even under bare pytest, so a naive check would misfire.
+if __package__ and __package__.count(".") >= 2:
+    from ...dgemma.loop import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
         DEFAULT_GEN_LENGTH,
@@ -83,6 +97,7 @@ if __package__ and "." in __package__:
         run_diffusion,
     )
     from .frames_image import render_frames_to_image_batch
+    from .socket_types import DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, DGEMMA_MODEL
 else:
     from dgemma.loop import (
         DEFAULT_CONFIDENCE,
@@ -94,7 +109,12 @@ else:
         decode_frames,
         run_diffusion,
     )
-    from nodes.frames_image import render_frames_to_image_batch
+    from surfaces.comfyui.frames_image import render_frames_to_image_batch
+    from surfaces.comfyui.socket_types import (
+        DGEMMA_CANVAS_STATE,
+        DGEMMA_CANVAS_TRACE,
+        DGEMMA_MODEL,
+    )
 
 # Event name for the live per-step push (plan.md Phase 3 (a)). Namespaced
 # under the pack's own prefix — `send_sync`'s receiving side has no
@@ -169,7 +189,7 @@ class DGemmaSampler:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": ("DGEMMA_MODEL",),
+                "model": (DGEMMA_MODEL,),
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
                 "num_inference_steps": (
@@ -223,7 +243,7 @@ class DGemmaSampler:
             },
         }
 
-    RETURN_TYPES = ("STRING", "DGEMMA_CANVAS_STATE", "DGEMMA_CANVAS_TRACE", "STRING", "IMAGE")
+    RETURN_TYPES = ("STRING", DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, "STRING", "IMAGE")
     RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "images")
     # `frames_image` is a single stacked (N, H, W, 3) batch tensor, NOT a
     # list — False here, unlike `frames`' True (see this module's docstring:

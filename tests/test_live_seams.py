@@ -38,7 +38,7 @@ from dgemma.loop import (
 )
 from dgemma.model import load_model
 from dgemma.types import DGemmaModel
-from nodes.sampler import DGemmaSampler
+from surfaces.comfyui.sampler import DGemmaSampler
 
 pytestmark = pytest.mark.live
 

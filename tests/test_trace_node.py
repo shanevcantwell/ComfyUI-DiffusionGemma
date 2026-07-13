@@ -11,7 +11,7 @@ from __future__ import annotations
 import torch
 
 from dgemma.sampling import MaskTokenCorroboration
-from nodes.trace import DGemmaTrace
+from surfaces.comfyui.trace import DGemmaTrace
 
 
 def test_declarations():
@@ -50,9 +50,9 @@ def test_render_calls_sampling_functions_and_wraps_results(monkeypatch):
         captured["corroboration_trace"] = trace
         return MaskTokenCorroboration(verdict="evidence_against_sentinel")
 
-    monkeypatch.setattr("nodes.trace.build_commit_heatmap", fake_build_commit_heatmap)
-    monkeypatch.setattr("nodes.trace.build_avalanche_curve", fake_build_avalanche_curve)
-    monkeypatch.setattr("nodes.trace.corroborate_no_mask_token", fake_corroborate_no_mask_token)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", fake_build_commit_heatmap)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", fake_build_avalanche_curve)
+    monkeypatch.setattr("surfaces.comfyui.trace.corroborate_no_mask_token", fake_corroborate_no_mask_token)
 
     node = DGemmaTrace()
     image, summary = node.render(canvas_trace=sentinel_trace, cell_px=4)
@@ -85,10 +85,10 @@ def test_render_defaults_cell_px_to_6(monkeypatch):
         captured["scale"] = scale
         return [[1]]
 
-    monkeypatch.setattr("nodes.trace.build_commit_heatmap", fake_build_commit_heatmap)
-    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", fake_build_commit_heatmap)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0])
     monkeypatch.setattr(
-        "nodes.trace.corroborate_no_mask_token",
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
         lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
     )
 
@@ -127,10 +127,10 @@ def test_render_labels_committed_fraction_as_block_local(monkeypatch):
     """ADR-CDG-009 / issue #26: the summary must say `committed_fraction` is
     block-local (resets at each canvas boundary), not just print bare
     numbers a reader could misread as a global-progress sawtooth/re-melt."""
-    monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
-    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0, 0.0, 1.0])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0, 0.0, 1.0])
     monkeypatch.setattr(
-        "nodes.trace.corroborate_no_mask_token",
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
         lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
     )
 
@@ -143,10 +143,10 @@ def test_render_labels_committed_fraction_as_block_local(monkeypatch):
 
 
 def test_render_reports_fixed_sentinel_candidate_in_summary(monkeypatch):
-    monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
-    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0])
     monkeypatch.setattr(
-        "nodes.trace.corroborate_no_mask_token",
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
         lambda trace: MaskTokenCorroboration(verdict="sentinel_found", candidate_sentinel_id=99),
     )
 
@@ -161,10 +161,10 @@ def test_render_reports_vacuous_verdict_distinctly_in_summary(monkeypatch):
     "supported" wording genuine evidence earns — the vacuous case gets its
     own line, so the summary can't overclaim corroboration on zero
     evidence."""
-    monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
-    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", lambda trace, scale=1: [[1]])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0])
     monkeypatch.setattr(
-        "nodes.trace.corroborate_no_mask_token",
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
         lambda trace: MaskTokenCorroboration(verdict="vacuous"),
     )
 
@@ -179,10 +179,10 @@ def test_render_reports_vacuous_verdict_distinctly_in_summary(monkeypatch):
 def test_heatmap_to_image_degenerate_empty_heatmap_does_not_raise(monkeypatch):
     """Defensive edge case: an empty trace's heatmap must not crash tensor
     construction — degrade to a minimal placeholder image instead."""
-    monkeypatch.setattr("nodes.trace.build_commit_heatmap", lambda trace, scale=1: [])
-    monkeypatch.setattr("nodes.trace.build_avalanche_curve", lambda trace: [])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", lambda trace, scale=1: [])
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [])
     monkeypatch.setattr(
-        "nodes.trace.corroborate_no_mask_token",
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
         lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
     )
 

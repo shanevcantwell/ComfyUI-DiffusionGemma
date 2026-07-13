@@ -1,9 +1,9 @@
-"""nodes/*.py adapt without logic (ADR-CDG-003): unpack kwargs -> call one
+"""surfaces/comfyui/*.py adapt without logic (ADR-CDG-003): unpack kwargs -> call one
 `dgemma.*` function -> wrap the result in a tuple, nothing more. Verified by
 monkeypatching the exact `dgemma.*` call each node makes and asserting the
 node method is pure pass-through/wrap.
 
-ComfyUI-absent-safe import strategy: `nodes/loader.py` and `nodes/sampler.py`
+ComfyUI-absent-safe import strategy: `surfaces/comfyui/loader.py` and `surfaces/comfyui/sampler.py`
 import nothing from `comfy` at module level (this venv has no `comfy` package
 at all, so any such import would already have raised at collection time —
 the second test below is belt-and-suspenders on the same invariant
@@ -12,8 +12,8 @@ the second test below is belt-and-suspenders on the same invariant
 Issue #17 (ratification 2026-07-13) — the `folder_paths` dropdown SHIPS
 DISABLED by default. The HF-identifier flow (`repo_id` STRING + `local_files_only`
 BOOLEAN) is the PRIMARY, visible load path; the dropdown scan/resolve glue
-(`nodes.loader.list_local_model_dirs`/`resolve_local_model_dir`) is shipped and
-tested but held behind `nodes.loader._LOCAL_FOLDERS_ENABLED` (default False)
+(`surfaces.comfyui.loader.list_local_model_dirs`/`resolve_local_model_dir`) is shipped and
+tested but held behind `surfaces.comfyui.loader._LOCAL_FOLDERS_ENABLED` (default False)
 until weights actually live under ComfyUI model dirs (enable trigger: #15 GGUF
 graduation / #4 conventional checkpoint placement). While disabled the dropdown
 is omitted from `INPUT_TYPES` entirely (hidden, not de-defaulted). The
@@ -27,9 +27,9 @@ import sys
 import pytest
 import torch
 
-import nodes.loader as loader_module
-from nodes.loader import DGemmaLoader
-from nodes.sampler import DGemmaSampler
+import surfaces.comfyui.loader as loader_module
+from surfaces.comfyui.loader import DGemmaLoader
+from surfaces.comfyui.sampler import DGemmaSampler
 
 
 class _StubModel:
@@ -144,7 +144,7 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
         captured["local_files_only"] = local_files_only
         return sentinel
 
-    monkeypatch.setattr("nodes.loader.load_model", fake_load_model)
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
     result = node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
@@ -168,7 +168,7 @@ def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
         captured["local_files_only"] = local_files_only
         return object()
 
-    monkeypatch.setattr("nodes.loader.load_model", fake_load_model)
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
     node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
@@ -186,11 +186,11 @@ def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch
     resolve_calls = []
 
     monkeypatch.setattr(
-        "nodes.loader.resolve_local_model_dir",
+        "surfaces.comfyui.loader.resolve_local_model_dir",
         lambda name: resolve_calls.append(name) or "/models/should-not-be-used",
     )
     monkeypatch.setattr(
-        "nodes.loader.load_model",
+        "surfaces.comfyui.loader.load_model",
         lambda repo_id, quant, local_files_only: captured.update(repo_id=repo_id) or object(),
     )
 
@@ -214,11 +214,11 @@ def test_loader_enabled_dropdown_resolves_through_guard_and_forces_local(monkeyp
     captured = {}
 
     monkeypatch.setattr(
-        "nodes.loader.resolve_local_model_dir",
+        "surfaces.comfyui.loader.resolve_local_model_dir",
         lambda name: "/models/diffusion_models/" + name,
     )
     monkeypatch.setattr(
-        "nodes.loader.load_model",
+        "surfaces.comfyui.loader.load_model",
         lambda repo_id, quant, local_files_only: captured.update(
             repo_id=repo_id, local_files_only=local_files_only
         )
@@ -239,9 +239,9 @@ def test_loader_enabled_dropdown_unresolvable_raises_without_calling_load_model(
     """Enabled dropdown + an unresolvable/guard-rejected selection must fail
     cleanly — `load_model` is never called (no silent network fallback)."""
     monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", True)
-    monkeypatch.setattr("nodes.loader.resolve_local_model_dir", lambda name: None)
+    monkeypatch.setattr("surfaces.comfyui.loader.resolve_local_model_dir", lambda name: None)
     load_model_called = []
-    monkeypatch.setattr("nodes.loader.load_model", lambda **kwargs: load_model_called.append(kwargs))
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", lambda **kwargs: load_model_called.append(kwargs))
 
     with pytest.raises(RuntimeError, match="could not resolve local_model_dir"):
         DGemmaLoader().load(repo_id="x", quant="none", local_model_dir="../escape")
@@ -331,9 +331,9 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         captured["render_kwargs"] = kwargs
         return sentinel_image_batch
 
-    monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
-    monkeypatch.setattr("nodes.sampler.decode_frames", fake_decode_frames)
-    monkeypatch.setattr("nodes.sampler.render_frames_to_image_batch", fake_render_frames_to_image_batch)
+    monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
+    monkeypatch.setattr("surfaces.comfyui.sampler.decode_frames", fake_decode_frames)
+    monkeypatch.setattr("surfaces.comfyui.sampler.render_frames_to_image_batch", fake_render_frames_to_image_batch)
 
     node = DGemmaSampler()
     result = node.sample(
@@ -388,7 +388,7 @@ def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkey
     `N == len(frames)` — never a list of N single-frame tensors. A list here
     would fan out per-frame under ComfyUI's `OUTPUT_IS_LIST` machinery and
     break `PreviewImage`'s scrubber, `SaveAnimatedWEBP`, and VHS, all of
-    which expect one batch tensor (`nodes/sampler.py`'s own docstring).
+    which expect one batch tensor (`surfaces/comfyui/sampler.py`'s own docstring).
 
     `run_diffusion`/`decode_frames` are mocked (as every other test in this
     file mocks them) but `render_frames_to_image_batch` runs FOR REAL here —
@@ -414,8 +414,8 @@ def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkey
     def fake_decode_frames(processor, frames):
         return decoded_frames
 
-    monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
-    monkeypatch.setattr("nodes.sampler.decode_frames", fake_decode_frames)
+    monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
+    monkeypatch.setattr("surfaces.comfyui.sampler.decode_frames", fake_decode_frames)
 
     node = DGemmaSampler()
     result = node.sample(
@@ -457,7 +457,7 @@ def test_sampler_forwards_non_default_thinking_and_confidence(monkeypatch):
         captured["kwargs"] = kwargs
         return ("text", "state", _StubTrace())
 
-    monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+    monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
 
     node = DGemmaSampler()
     node.sample(
@@ -499,7 +499,7 @@ def _assert_result_with_no_captured_frames(result, *, text: str, state: str, tra
 
 class TestLiveFramePush:
     """P3 step 5's own regression coverage: the `PromptServer` import surface
-    risk (plan.md Risks — first time `nodes/` imports live server
+    risk (plan.md Risks — first time `surfaces/comfyui/` imports live server
     infrastructure). `server`/`comfy` are not installed in this venv at all
     (`tests/test_seam.py`'s own grounding), so the "absent" branch below is
     the actual condition every other test in this suite already runs under;
@@ -518,7 +518,7 @@ class TestLiveFramePush:
             on_frame(_FakeFrame())  # the collector always calls on_frame per step
             return ("text", "state", trace_stub)
 
-        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+        monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         result = node.sample(
@@ -561,7 +561,7 @@ class TestLiveFramePush:
             on_frame(_FakeFrame())
             return ("text", "state", _StubTrace())
 
-        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+        monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         node.sample(
@@ -604,7 +604,7 @@ class TestLiveFramePush:
             on_frame(_FakeFrame())  # must not raise
             return ("text", "state", trace_stub)
 
-        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+        monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         result = node.sample(
@@ -652,7 +652,7 @@ class TestLiveFramePush:
             on_frame(_FakeFrame())
             return ("text", "state", trace_stub)
 
-        monkeypatch.setattr("nodes.sampler.run_diffusion", fake_run_diffusion)
+        monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
 
         node = DGemmaSampler()
         with caplog.at_level("WARNING"):

@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from nodes.frames_image import (
+from surfaces.comfyui.frames_image import (
     _block_local_captions,
     _load_font,
     _wrap_text,
@@ -100,7 +100,7 @@ class TestHeadlessFontFallback:
     fonts happen to be on THIS machine)."""
 
     def test_load_font_falls_back_to_default_when_no_ttf_available(self, monkeypatch):
-        import nodes.frames_image as frames_image_mod
+        import surfaces.comfyui.frames_image as frames_image_mod
 
         monkeypatch.setattr(frames_image_mod, "_MONOSPACE_FONT_CANDIDATES", ("/nonexistent/path/does-not-exist.ttf",))
 
@@ -115,7 +115,7 @@ class TestHeadlessFontFallback:
         """Full render, forced onto the `load_default()` fallback path — the
         actual headless scenario the constraint cares about, not just the
         font loader in isolation."""
-        import nodes.frames_image as frames_image_mod
+        import surfaces.comfyui.frames_image as frames_image_mod
 
         monkeypatch.setattr(frames_image_mod, "_MONOSPACE_FONT_CANDIDATES", ())
 

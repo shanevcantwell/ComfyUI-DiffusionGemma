@@ -1,15 +1,15 @@
-"""nodes/loader.py's `folder_paths` scanning/resolution glue (issue #17).
+"""surfaces/comfyui/loader.py's `folder_paths` scanning/resolution glue (issue #17).
 
 `folder_paths` is a ComfyUI-runtime module, genuinely absent in this venv
-(`nodes.loader.folder_paths is None` — see the narrow `try/except ImportError`
-at the top of `nodes/loader.py`, the same treatment `dgemma/model.py` already
+(`surfaces.comfyui.loader.folder_paths is None` — see the narrow `try/except ImportError`
+at the top of `surfaces/comfyui/loader.py`, the same treatment `dgemma/model.py` already
 gives the `transformers` import). Every test here injects a fake `folder_paths`
-module object via `monkeypatch.setattr("nodes.loader.folder_paths", ...)` so
+module object via `monkeypatch.setattr("surfaces.comfyui.loader.folder_paths", ...)` so
 `list_local_model_dirs`/`resolve_local_model_dir` are exercised as they would
 run inside a live ComfyUI process, without needing ComfyUI installed.
 
 Layout convention used throughout: a "valid model dir" is a directory
-containing `config.json` (the sentinel — see `nodes/loader.py`'s own
+containing `config.json` (the sentinel — see `surfaces/comfyui/loader.py`'s own
 docstring for why: transformers checkpoints are shard directories, so
 `folder_paths.get_filename_list`/`get_full_path` — both file-oriented — can't
 enumerate or resolve them).
@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-import nodes.loader as loader_module
+import surfaces.comfyui.loader as loader_module
 
 
 class FakeFolderPaths:

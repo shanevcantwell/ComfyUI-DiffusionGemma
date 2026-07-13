@@ -110,10 +110,11 @@ re-exported by `dgemma/__init__.py:26-31,49-51` (the tracked debt, CDG-008 Phase
 ### Surface tier — peer surfaces over the one contract (target: `surfaces/*`)
 
 **What lives here:**
-- `surfaces/comfyui/` — the ComfyUI node graph. **Currently `nodes/`** (`loader.py`,
-  `sampler.py`, `trace.py`, `frames_image.py`) + top-level `web/`; the move to
-  `surfaces/comfyui/` (with `web/` → `surfaces/comfyui/web/`) is
-  `NOT-YET-IMPLEMENTED` (CDG-008 Phase 1).
+- `surfaces/comfyui/` — the ComfyUI node graph (`loader.py`, `sampler.py`,
+  `trace.py`, `frames_image.py`, `socket_types.py`) + `surfaces/comfyui/web/`.
+  **Landed** — CDG-008 Phase 1 (issue #52), relocated from `nodes/` + top-level
+  `web/`. `surfaces/__init__.py` is the empty package-marker parent this and
+  the future `surfaces/mcp/` share.
 - `surfaces/mcp/` — the base MCP surface over `load_model` + `run_diffusion`.
   `NOT-YET-IMPLEMENTED` (CDG-008 Phase 2; transcribe `semantic-kinematics-mcp` with
   the two corrections — stateless run-state, keep the automated boundary test).
@@ -146,10 +147,11 @@ re-exported by `dgemma/__init__.py:26-31,49-51` (the tracked debt, CDG-008 Phase
 
 - **The published repo name `ComfyUI-DiffusionGemma`** — conserved identity
   (`IDENTITY⊥ENVELOPE`), registry-mirrored and remote-live. The internal directory
-  vocabulary changes (`nodes/` → `surfaces/comfyui/`); the repo name does not.
-  Renaming the repo is explicitly out of scope (ADR-CDG-008 Decision-2, Option B
-  rejected). This is a scoping fact, not an exception: the layering invariant
-  governs internal envelope, not the conserved external handle.
+  vocabulary changed (`nodes/` → `surfaces/comfyui/`, CDG-008 Phase 1, landed);
+  the repo name does not. Renaming the repo is explicitly out of scope
+  (ADR-CDG-008 Decision-2, Option B rejected). This is a scoping fact, not an
+  exception: the layering invariant governs internal envelope, not the
+  conserved external handle.
 
 - **`CanvasTrace` (and the `dgemma/types.py` contract dataclasses) living in the
   core** — the emitted canonical type sits core-side as the contract surface both
@@ -176,7 +178,7 @@ re-exported by `dgemma/__init__.py:26-31,49-51` (the tracked debt, CDG-008 Phase
         v
 +-----------------------------------------------------------+
 | surfaces/                                                 |
-|   comfyui/  (was nodes/ + web/)   mcp/  (NEW base surface)|  -- peers
+|   comfyui/  (landed, was nodes/ + web/)  mcp/  (Phase 2)  |  -- peers
 +-----------------------------------------------------------+
         |  load_model + run_diffusion  -- THE ONE CONTRACT (the door)
         v
@@ -210,12 +212,12 @@ seam**, so every surface inherits it. Its shape is decided but
 
 - **Live view is not a composite participant** (#35 delta Correction 2). It stays on
   the existing engine-side `on_frame` read-only observer seam
-  (`nodes/sampler.py:136-159` pattern; `run_diffusion(on_frame=…)`,
+  (`surfaces/comfyui/sampler.py:136-159` pattern; `run_diffusion(on_frame=…)`,
   `dgemma/loop.py:477`): receives a built `DiffusionFrame`, return ignored,
   structurally read-only, needs no position among canvas-writers. Pre-pin truth
   reaches it as *frame fields* (`pinned_mask`, effective knobs), not by observer
   ordering. This is the **only executable crossing** the surface owns. *In force
-  today as a read-only observer* (`nodes/sampler.py:114-161`, `_build_on_frame`).
+  today as a read-only observer* (`surfaces/comfyui/sampler.py:114-161`, `_build_on_frame`).
 
 - **Declarative payloads on `run_diffusion`** (`constraints=`, `control_signals=`,
   `capture=`) — validated at ingress: schedule length == steps; control values
@@ -306,10 +308,10 @@ implemented.
 
 | Violation | Why it breaks the invariant | Evidence (`path:symbol`) | Resolved by |
 |-----------|----------------------------|--------------------------|-------------|
-| Surface tier is named `nodes/` (a ComfyUI word) + top-level `web/`; no `surfaces/` parent, no peer MCP surface | Rule 2 — the name puts ComfyUI at the center, leaving no room for peer surfaces | `nodes/loader.py`, `nodes/sampler.py`, `nodes/trace.py`; `__init__.py:53` (`WEB_DIRECTORY = "./web"`) | `NOT-YET-IMPLEMENTED` — CDG-008 Phase 1 (R2 rides the move) |
+| ~~Surface tier is named `nodes/` (a ComfyUI word) + top-level `web/`; no `surfaces/` parent~~ **RESOLVED (naming half)** | Rule 2 — the name puts ComfyUI at the center, leaving no room for peer surfaces | `surfaces/comfyui/{loader,sampler,trace,frames_image}.py`; `surfaces/comfyui/web/live_view.js`; `__init__.py` (`WEB_DIRECTORY = "./surfaces/comfyui/web"`) | **Resolved (naming half)** — CDG-008 Phase 1 (issue #52). The MCP-peer half of this row (a second surface actually existing) stays open below. |
 | No MCP surface exists | Rule 2 — MCP is the decided base surface | `NOT-YET-IMPLEMENTED` — no `surfaces/mcp/` on disk | CDG-008 Phase 2 |
-| Analysis lives inside the core's import graph and is re-exported by the core's public face | Rule 3 — analysis is a consumer; the core must not export it | `dgemma/__init__.py:26-31,49-51` (re-exports `build_commit_heatmap`, `build_avalanche_curve`, `corroborate_no_mask_token`); `dgemma/sampling.py` (bodies) | `NOT-YET-IMPLEMENTED` — CDG-008 Phase 3 (relocate) + Phase 4 (boundary test) |
-| Socket strings re-typed as bare literals per node site; no mint module | Rule 4 — `ONE-MINT` violated; the vocabulary is authored N times | `nodes/loader.py:46` (`RETURN_TYPES = ("DGEMMA_MODEL",)`), `nodes/sampler.py:172,202`, `nodes/trace.py:80` — inline `DGEMMA_*` literals | `NOT-YET-IMPLEMENTED` — #35 R2 (mint module + grep-gate; interim `nodes/socket_types.py` → `surfaces/comfyui/socket_types.py` post-Phase-1) |
+| Analysis lives inside the core's import graph and is re-exported by the core's public face | Rule 3 — analysis is a consumer; the core must not export it | `dgemma/__init__.py:26-31,49-51` (re-exports `build_commit_heatmap`, `build_avalanche_curve`, `corroborate_no_mask_token`); `dgemma/sampling.py` (bodies) | `NOT-YET-IMPLEMENTED` — CDG-008 Phase 3 (relocate) + Phase 4 (boundary test). Not preempted by Phase 1 — `dgemma/sampling.py` stays in `dgemma/` this branch (ADR-CDG-008 Open Question #1 unresolved). |
+| ~~Socket strings re-typed as bare literals per node site; no mint module~~ **RESOLVED** | Rule 4 — `ONE-MINT` violated; the vocabulary is authored N times | `surfaces/comfyui/socket_types.py` (the mint: `DGEMMA_MODEL`, `DGEMMA_CANVAS_STATE`, `DGEMMA_CANVAS_TRACE`); every node-site literal replaced by an import from it | **Resolved** — #35 R2 (issue #52). `tests/test_socket_mint.py` (grep-gate + round-trip, asserts against the module object). |
 | ~~Single hardcoded callback binding; no composition / ordering / exception layer~~ **RESOLVED** | Rule 7 — five expansion participants want the slot with ordering semantics | `dgemma/composite.py:StepEndComposite` (fixed order: capture → cancellation → beta-rebuild → pin; ADR-CDG-010 cancellation amendment 2026-07-13); wired at `dgemma/loop.py:step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel)` | **Resolved** — #35 R1 (PR #45). Beta-rebuild/pin participant bodies remain `NOT-YET-IMPLEMENTED` (ADR-CDG-010 R2/R5); the composite scaffold and ordering are in force. |
 | ~~No enforcement that a forward hook is torn down after a run~~ **RESOLVED** | Rule 6 — F4: an un-torn-down hook from run A shapes run B | `dgemma/hooks.py:install_logit_shaping_hook` (the sole `register_forward_hook` installation path, `try/finally` teardown); wired at `dgemma/loop.py:run_diffusion`'s `with install_logit_shaping_hook(dgemma_model.model, logit_hook): output = pipeline(...)` | **Resolved** — #35 R5 (F4). `tests/test_hook_lifecycle.py` (clean, cancelled, and raising paths all assert `live_hook_count == 0`). |
 | ~~Cross-run statelessness of walker/pin is incidental (fresh scheduler per run), not enforced~~ **RESOLVED** | Rule 6 — F5: mutated `scheduler.config` + accumulated pin mask are cross-call-mutable state | `dgemma/loop.py:run_diffusion` constructs a fresh `EntropyBoundScheduler`/`_FrameCollector`/`StepEndComposite` every call, never caching one; `tests/test_run_diffusion_statelessness.py:TestSchedulerFreshPerCall` asserts two calls build two distinct scheduler objects | **Resolved** — #35 R5 (F5) / ADR-CDG-011 F5 test. `tests/test_run_diffusion_statelessness.py:TestSameInSameOutTelemetry` asserts identical calls yield identical telemetry and a mid-call `register_to_config` mutation never survives into the next call. |
@@ -320,11 +322,11 @@ implemented.
 
 | Conforming point | Rule | Evidence (`path:symbol`) |
 |------------------|------|--------------------------|
-| Core imports with zero ComfyUI present; subprocess asserts no `comfy`/`nodes` leak | 1 | `tests/test_seam.py:36-63`; `dgemma/__init__.py` |
+| Core imports with zero ComfyUI present; subprocess asserts no `comfy`/`nodes`/`surfaces` leak | 1 | `tests/test_seam.py:36-63` (extended per CDG-008 Phase 1 to also reject `surfaces.*`); `dgemma/__init__.py` |
 | Contract is single-entry, canonical: `run_diffusion` always returns `(text, CanvasState, CanvasTrace)`, never a bare string | 1 | `dgemma/loop.py:465,478` (return type); `load_model` at `dgemma/model.py:157` |
-| Node bodies are thin adapters; no denoising-step loop in a surface body | 2 | `nodes/loader.py`, `nodes/sampler.py`, `nodes/trace.py` (ADR-CDG-003) |
-| Native socket types, not `SIGMAS`/`LATENT` (no lying payload) | 5 | `nodes/sampler.py:202` (`DGEMMA_CANVAS_STATE`, `DGEMMA_CANVAS_TRACE`); ADR-CDG-001 |
-| Live per-step view is a read-only observer, not a socket stream | 7 | `nodes/sampler.py:114-161` (`_build_on_frame`, `on_frame`); `run_diffusion(on_frame=…)` at `dgemma/loop.py:477` |
+| Node bodies are thin adapters; no denoising-step loop in a surface body | 2 | `surfaces/comfyui/loader.py`, `surfaces/comfyui/sampler.py`, `surfaces/comfyui/trace.py` (ADR-CDG-003; relocated from `nodes/` per CDG-008 Phase 1) |
+| Native socket types, not `SIGMAS`/`LATENT` (no lying payload) | 5 | `surfaces/comfyui/socket_types.py` (`DGEMMA_MODEL`, `DGEMMA_CANVAS_STATE`, `DGEMMA_CANVAS_TRACE`, minted once per #35 R2); `surfaces/comfyui/sampler.py` (consumes the mint); ADR-CDG-001 |
+| Live per-step view is a read-only observer, not a socket stream | 7 | `surfaces/comfyui/sampler.py:114-161` (`_build_on_frame`, `on_frame`); `run_diffusion(on_frame=…)` at `dgemma/loop.py:477` |
 
 *Reachability note:* every row above is audited against reachable code. Rows whose
 subject does not yet exist carry `NOT-YET-IMPLEMENTED` with the R-item / phase that
@@ -339,12 +341,12 @@ names its test / type / review surface and its status.
 
 | Invariant | Enforcement surface | Status |
 |-----------|---------------------|--------|
-| Core imports no surface (`dgemma/` never imports `comfy.*` / `nodes.*`) | `tests/test_seam.py:36-63` (subprocess `import dgemma`, `sys.modules` leak check) | **In force.** Must extend to reject `surfaces.*` after the Phase-1 rename. |
+| Core imports no surface (`dgemma/` never imports `comfy.*` / `nodes.*` / `surfaces.*`) | `tests/test_seam.py:36-63` (subprocess `import dgemma`, `sys.modules` leak check) | **In force.** Extended per CDG-008 Phase 1 (issue #52 §4) — the leak check now also rejects `surfaces`/`surfaces.*`, in addition to the still-checked `nodes`/`nodes.*`. |
 | Core imports no analysis (base contract imports no consumer module) | Subprocess assertion (analysis not in `sys.modules` after `import dgemma`) | `NOT-YET-IMPLEMENTED` — prose-only today (`dgemma/sampling.py` docstring), contradicted by `dgemma/__init__.py:26-31`. Created by CDG-008 Phase 4 (after Phase 3 relocation). |
 | Surfaces are peers over one contract (no logic in a surface body) | ADR-CDG-003's "no `for`-loop-over-steps in a surface body", generalized to `surfaces/*` | Reviewed by eye + `tests/test_trace_node.py` (`DGemmaTrace.render` purity). No mechanized cross-surface import-graph rule. Residual debt, not structural impossibility. |
 | Canonical trace, parsed at the door | `run_diffusion` return-type (`dgemma/loop.py:478`); ADR-CDG-004 | **In force at the type level.** |
 | Conserved repo identity (`ComfyUI-DiffusionGemma` unchanged across the rename) | Registry mirror + remote (`IDENTITY⊥ENVELOPE`); no code change touches it | **In force by omission** — the roadmap must not touch the repo name. |
-| Socket vocabulary minted once (no inline `DGEMMA_*` literal outside the mint module) | Grep-gate test asserting against the module object (only the path string churns with Phase 1) | `NOT-YET-IMPLEMENTED` — #35 R2. |
+| Socket vocabulary minted once (no inline `DGEMMA_*` literal outside the mint module) | Grep-gate test asserting against the module object (only the path string churns with Phase 1) | **In force** — #35 R2 (issue #52). `tests/test_socket_mint.py` (mint-exposure check + grep-gate over `surfaces/comfyui/*.py` + live-node round-trip against the minted set). |
 | Composition ordering (capture pre-pin; β-rebuild before pin; pin last writer) | Ordered-composite test over the shared fake-pipeline fixture: `tests/test_step_end_composite.py:TestFixedOrdering`, `TestOrderingIsStructural` (`dgemma/composite.py:StepEndComposite`) | **In force** — #35 R1 (over R4's fixture). ADR-CDG-010. |
 | Zero hooks after run ("no hook survives a `run_diffusion` call") | Forward-hook lifecycle context-manager test, clean + raising | **In force** — #35 R5 (F4). `dgemma/hooks.py:install_logit_shaping_hook` (sole install path, `try/finally` teardown); `tests/test_hook_lifecycle.py` (clean, `DiffusionCancelled`, and raising paths, unit-level and through `run_diffusion`). |
 | Same-in/same-out walker/pin statelessness (identical calls → identical effective-knob telemetry) | Same-in/same-out test on one loaded model | **In force** — #35 R5 / ADR-CDG-011 F5. `dgemma/loop.py:run_diffusion` builds a fresh scheduler/collector/composite every call; `tests/test_run_diffusion_statelessness.py` (fresh-object proof + identical-telemetry + mutation-non-survival). CDG-008 Phase-2 MCP state manager must never cache a scheduler. |
@@ -364,8 +366,8 @@ One row per invariant rule, each violation paired with its correct shape.
 
 | Violation | Valid form |
 |-----------|------------|
-| A `nodes/*.py` body loops over denoising steps | The body unpacks args, calls `run_diffusion` once, wraps the result (ADR-CDG-003) |
-| `dgemma/*.py` does `import comfy` / `from nodes import …` | The surface imports the core; the core imports nothing surface-shaped (rule 1) |
+| A `surfaces/comfyui/*.py` body loops over denoising steps | The body unpacks args, calls `run_diffusion` once, wraps the result (ADR-CDG-003) |
+| `dgemma/*.py` does `import comfy` / `from surfaces import …` | The surface imports the core; the core imports nothing surface-shaped (rule 1) |
 | A new analysis function added to `dgemma/sampling.py` | Added to the Phase-3 consumer home (`consumers/` / `surfaces/analysis/`), importing `CanvasTrace` (rule 3) |
 | `RETURN_TYPES = ("DGEMMA_CANVAS_TRACE",)` inline at a new node site | Reference the socket string from the mint module; grep-gate rejects the inline literal (rule 4) |
 | An entropy budget passed as a `SIGMAS` tensor; a `DISTRIBUTION` socket carrying only a scalar | A native `DGEMMA_*` type carrying the real payload, validated at ingress (rule 5) |
@@ -402,11 +404,13 @@ One row per invariant rule, each violation paired with its correct shape.
 the alignment refactor is now scoped (ADR-CDG-008) and reviewed (#35).*
 
 **Track 1 — CDG-008 alignment (Phases 1–5).** Sequenced, dependency-respecting:
-Phase 1 rename `nodes/` → `surfaces/comfyui/` (+ `web/`); Phase 2 add `surfaces/mcp/`
-(transcribe `semantic-kinematics-mcp` with the two corrections); Phase 3 relocate
-analysis out of `dgemma/`; Phase 4 add the base-contract-imports-no-analysis test;
+**Phase 1 (landed, issue #52) renamed `nodes/` → `surfaces/comfyui/` (+ `web/` →
+`surfaces/comfyui/web/`), riding #35 R2 (the socket-type mint,
+`surfaces/comfyui/socket_types.py`)**; Phase 2 add `surfaces/mcp/` (transcribe
+`semantic-kinematics-mcp` with the two corrections); Phase 3 relocate analysis
+out of `dgemma/`; Phase 4 add the base-contract-imports-no-analysis test;
 Phase 5 this document. Execution order is set by #35's delta: **R4 (shared fixture)
-before R1 (composition layer)**, then R5; R3 anytime; R2 with/before Phase 1;
+before R1 (composition layer)**, then R5; R3 anytime; R2 landed with Phase 1;
 rung-4 analysis behind Phase 3.
 
 **Track 2 — research expansion.** The liquid-phase-decoding bench
@@ -425,4 +429,5 @@ Graduation trigger: a confirmed H0 → an ADR (a socket type / scheduler seam). 
 - Whether `CanvasTrace` moves to a shared contract module — ADR-CDG-008 Open Question
   #2; default is "stays in `dgemma/`."
 - Whether the refactor needs a `plan` pass before touching `__init__.py`'s discovery
-  contract — ADR-CDG-008 Open Question #3; resolution: yes.
+  contract — ADR-CDG-008 Open Question #3; resolution: yes. **Satisfied by issue #52**
+  (the plan pass) and executed by this Phase-1 branch.

@@ -1,10 +1,13 @@
-"""nodes/trace.py — DGemmaTrace: thin ComfyUI adapter (ADR-CDG-003).
+"""surfaces/comfyui/trace.py — DGemmaTrace: thin ComfyUI adapter (ADR-CDG-003).
 
 Post-hoc analysis over a complete `DGEMMA_CANVAS_TRACE` socket (plan.md Phase
-3 (b) — unaffected by the (a) live-view split; see `nodes/sampler.py`'s
+3 (b) — unaffected by the (a) live-view split; see `surfaces/comfyui/sampler.py`'s
 docstring). Calls the pure `dgemma.sampling` functions (steps 3-4: heatmap,
 avalanche curve, mask-token corroboration) and wraps their plain-list/
-dataclass results into ComfyUI-native socket types.
+dataclass results into ComfyUI-native socket types. `dgemma/sampling.py`
+itself is NOT relocated by this phase — ADR-CDG-008 Open Question #1
+(analysis's eventual `consumers/`/`surfaces/analysis/` home) is Phase 3,
+explicitly out of scope here.
 
 The one piece of non-trivial code in this file — building an `IMAGE` tensor
 from a plain `list[list[int]]` — is the ADR-CDG-003-sanctioned exception, not
@@ -19,20 +22,28 @@ from __future__ import annotations
 
 import torch
 
-# Dual-context import, explicit package-depth gate — see nodes/loader.py for
-# the full rationale.
-if __package__ and "." in __package__:
-    from ..dgemma.sampling import (
+# Dual-context import, explicit package-depth gate — see
+# surfaces/comfyui/loader.py for the full rationale. This module lives two
+# levels under the pack root (surfaces/comfyui/), so the relative climb to
+# dgemma/ is THREE dots (ADR-CDG-008 Phase 1 / issue #52 risk R-1).
+# dgemma.sampling itself is NOT relocated by this phase (Phase 3 is out of
+# scope, Open Question #1 unresolved) — only the import depth changes. Gate
+# is `__package__.count(".") >= 2`, not bare dot-presence — see loader.py's
+# "GATE CORRECTION" comment.
+if __package__ and __package__.count(".") >= 2:
+    from ...dgemma.sampling import (
         build_avalanche_curve,
         build_commit_heatmap,
         corroborate_no_mask_token,
     )
+    from .socket_types import DGEMMA_CANVAS_TRACE
 else:
     from dgemma.sampling import (
         build_avalanche_curve,
         build_commit_heatmap,
         corroborate_no_mask_token,
     )
+    from surfaces.comfyui.socket_types import DGEMMA_CANVAS_TRACE
 
 
 def _heatmap_to_image(heatmap: list[list[int]]) -> torch.Tensor:
@@ -102,7 +113,7 @@ class DGemmaTrace:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "canvas_trace": ("DGEMMA_CANVAS_TRACE",),
+                "canvas_trace": (DGEMMA_CANVAS_TRACE,),
                 # Nearest-neighbor upscale factor (operator finding,
                 # 2026-07-05: a raw steps×positions map — 256×11 observed —
                 # is unreadably small). Threads straight through to
