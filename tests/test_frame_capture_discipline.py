@@ -9,6 +9,14 @@ entropy (Decision 3's always-on row), and capture-pre-pin ordering
 NOT implemented here (P-B/P-C) — this suite only asserts their FIELDS exist
 and default to `None` under the same additive-optional discipline, not their
 derivation.
+
+**Issue #64 Phase 2 addition:** `pinned_mask` (ADR-CDG-010 Decision 4) and
+`effective_entropy_bound`/`effective_t_min`/`effective_t_max` (ADR-CDG-011
+clause 7) join the same additive-optional discipline this module already
+enforces — `TestAdditiveOptionalFieldDiscipline` is extended to cover all
+four new fields, and two new classes (`TestPinnedMask`,
+`TestEffectiveKnobTelemetry`) pin their derivation per the plan's §5 test
+design (issue #64, gate-ratified 2026-07-13).
 """
 from __future__ import annotations
 
@@ -19,6 +27,7 @@ import torch
 
 from dgemma.composite import StepEndComposite
 from dgemma.loop import _FrameCollector
+from dgemma.payloads import Constraints, Pin
 from dgemma.types import CanvasTrace, DiffusionFrame
 
 
@@ -41,6 +50,11 @@ class TestAdditiveOptionalFieldDiscipline:
         assert frame.top_k_ids is None
         assert frame.top_k_weights is None
         assert frame.distribution is None
+        # Issue #64 Phase 2 additions — same additive-optional discipline.
+        assert frame.pinned_mask is None
+        assert frame.effective_entropy_bound is None
+        assert frame.effective_t_min is None
+        assert frame.effective_t_max is None
 
     def test_canvas_trace_constructs_with_only_pre_r6_positional_args(self):
         frame = DiffusionFrame(
@@ -59,7 +73,10 @@ class TestAdditiveOptionalFieldDiscipline:
         import dataclasses
 
         frame_fields = {f.name: f for f in dataclasses.fields(DiffusionFrame)}
-        for name in ("entropy", "top_k_ids", "top_k_weights", "distribution"):
+        for name in (
+            "entropy", "top_k_ids", "top_k_weights", "distribution",
+            "pinned_mask", "effective_entropy_bound", "effective_t_min", "effective_t_max",
+        ):
             assert frame_fields[name].default is None
 
         trace_fields = {f.name: f for f in dataclasses.fields(CanvasTrace)}
@@ -264,3 +281,197 @@ class TestCapturePrePinOrdering:
         # of the pin rewrite.
         expected_entropy = torch.distributions.Categorical(logits=logits[0]).entropy()
         assert torch.allclose(collector.frames[0].entropy, expected_entropy, atol=1e-5)
+
+
+def _fake_scheduler_with_config(
+    num_inference_steps: int = 4, entropy_bound: float = 0.1, t_min: float = 0.4, t_max: float = 0.8
+):
+    """A `.config`-bearing fake scheduler (mirrors `tests/conftest.py`'s
+    `FakeFrozenConfig`/`FakeEntropyBoundScheduler` shape at the exact surface
+    `_FrameCollector`'s effective-knob telemetry reads: `.config.
+    entropy_bound`/`.t_min`/`.t_max`, mutable only via `register_to_config`).
+    """
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class FakeConfig:
+        entropy_bound: float
+        t_min: float
+        t_max: float
+
+    @dataclass
+    class FakeScheduler:
+        num_inference_steps: int
+        _config: FakeConfig = field(default=None)
+
+        def __post_init__(self):
+            if self._config is None:
+                self._config = FakeConfig(entropy_bound=entropy_bound, t_min=t_min, t_max=t_max)
+
+        @property
+        def config(self):
+            return self._config
+
+        def register_to_config(self, **kwargs):
+            merged = {
+                "entropy_bound": self._config.entropy_bound,
+                "t_min": self._config.t_min,
+                "t_max": self._config.t_max,
+            }
+            merged.update(kwargs)
+            self._config = FakeConfig(**merged)
+
+    return FakeScheduler(num_inference_steps)
+
+
+class TestPinnedMask:
+    """ADR-CDG-010 Decision 4, issue #64 Phase 2 (gate correction A1):
+    `pinned_mask` is derived from a supplied `Constraints` payload's pin
+    positions — `True` at every pinned position, `None` when no constraints
+    were given. No pin participant exists yet (Phase 3): this is the
+    validated-then-ignored payload's positions read directly, not an
+    observed per-step write, and the mask is constant across every frame in
+    the run (the D6 hard-pin, position-static invariant this phase's
+    computation is scoped to — see `DiffusionFrame.pinned_mask`'s docstring
+    for the scope guard)."""
+
+    def test_pinned_mask_none_when_no_constraints_supplied(self):
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8)
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        assert collector.frames[0].pinned_mask is None
+
+    def test_pinned_mask_none_when_constraints_has_no_pins(self):
+        """`Constraints()`'s default empty-tuple pins is a no-op, matching
+        `None` (ADR-CDG-010's `Constraints` docstring) — the mask stays
+        absent, never an all-`False` tensor standing in for "no pins"."""
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, constraints=Constraints(pins=())
+        )
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        assert collector.frames[0].pinned_mask is None
+
+    def test_pinned_mask_true_at_every_pinned_position(self):
+        constraints = Constraints(pins=(Pin(position=0, token_id=5), Pin(position=2, token_id=9)))
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, constraints=constraints
+        )
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True, True, True]]))
+
+        mask = collector.frames[0].pinned_mask
+        assert mask is not None
+        assert mask.tolist() == [True, False, True, False]
+
+    def test_pinned_mask_true_regardless_of_scheduler_commit_reading(self):
+        """D4 trace-honesty test: a pinned cell's `pinned_mask` is `True`
+        even on a step where the scheduler's own `accepted_index` says that
+        position was NOT committed — `pinned_mask` reports the constraint
+        layer's claim, independent of the model's commit reading."""
+        constraints = Constraints(pins=(Pin(position=1, token_id=3),))
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, constraints=constraints
+        )
+        # Position 1 (the pinned one) reads as NOT accepted by the scheduler.
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, False, True]]))
+
+        assert collector.frames[0].pinned_mask.tolist() == [False, True, False]
+
+    def test_pinned_mask_constant_across_every_frame_in_the_run(self):
+        """The D6 position-static invariant this phase's computation relies
+        on: the same mask rides every frame of one run, not just the first
+        callback."""
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(3), t_min=0.4, t_max=0.8, keep_frames="all", constraints=constraints
+        )
+        for step_idx in range(3):
+            collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True, True]]))
+
+        for frame in collector.frames:
+            assert frame.pinned_mask.tolist() == [True, False]
+
+
+class TestEffectiveKnobTelemetry:
+    """ADR-CDG-011 clause 7, issue #64 Phase 2: `DiffusionFrame`'s
+    `effective_entropy_bound`/`effective_t_min`/`effective_t_max` reflect
+    `scheduler.config`'s value AT THAT CALLBACK — never a static ctor
+    snapshot or a binding's declared curve. No walker exists yet (Phase 4);
+    this pins the read-path honesty a future walker's writes will surface
+    through, proven here via a direct `register_to_config` mutation (the
+    same mechanism a walker uses, ADR-CDG-011 Decision 4)."""
+
+    def test_effective_fields_reflect_ctor_config_with_no_mutation(self):
+        scheduler = _fake_scheduler_with_config(entropy_bound=0.1, t_min=0.4, t_max=0.8)
+        collector = _FrameCollector(scheduler=scheduler, t_min=0.4, t_max=0.8)
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        frame = collector.frames[0]
+        assert frame.effective_entropy_bound == pytest.approx(0.1)
+        assert frame.effective_t_min == pytest.approx(0.4)
+        assert frame.effective_t_max == pytest.approx(0.8)
+
+    def test_effective_fields_reflect_mid_run_config_mutation(self):
+        """A mid-run `register_to_config` mutation (the exact write
+        mechanism a future walker performs, ADR-CDG-011 Decision 4) must
+        show up in the NEXT captured frame's `effective_*` fields — the
+        telemetry-honesty enforcement the plan's `TestEffectiveKnobTelemetry`
+        names: a walker bug that silently fails to write through would be
+        invisible if this read path fell back to the binding's static
+        curve instead of the scheduler's actually-read value."""
+        scheduler = _fake_scheduler_with_config(
+            num_inference_steps=3, entropy_bound=0.1, t_min=0.4, t_max=0.8
+        )
+        collector = _FrameCollector(scheduler=scheduler, t_min=0.4, t_max=0.8, keep_frames="all")
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+        scheduler.register_to_config(entropy_bound=0.05, t_min=0.2, t_max=0.6)
+        collector.on_step_end(None, 1, 1, _callback_kwargs([[True, True]]))
+
+        first, second = collector.frames
+        assert first.effective_entropy_bound == pytest.approx(0.1)
+        assert first.effective_t_min == pytest.approx(0.4)
+        assert first.effective_t_max == pytest.approx(0.8)
+
+        assert second.effective_entropy_bound == pytest.approx(0.05)
+        assert second.effective_t_min == pytest.approx(0.2)
+        assert second.effective_t_max == pytest.approx(0.6)
+
+    def test_t_and_temperature_reflect_live_t_min_t_max_after_mutation(self):
+        """`t`/`temperature` (the pre-existing anneal fields) must be
+        consistent with the mutated `effective_t_min`/`effective_t_max`, not
+        the original ctor values — a walker-mutated anneal range is one
+        honest reading, not two disagreeing ones."""
+        scheduler = _fake_scheduler_with_config(
+            num_inference_steps=2, entropy_bound=0.1, t_min=0.4, t_max=0.8
+        )
+        collector = _FrameCollector(scheduler=scheduler, t_min=0.4, t_max=0.8, keep_frames="all")
+
+        scheduler.register_to_config(t_min=0.1, t_max=0.3)
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        frame = collector.frames[0]
+        from dgemma.loop import anneal_temperature
+
+        expected_t, expected_temperature = anneal_temperature(
+            step_idx=0, num_inference_steps=2, t_min=0.1, t_max=0.3
+        )
+        assert frame.t == pytest.approx(expected_t)
+        assert frame.temperature == pytest.approx(expected_temperature)
+        assert frame.effective_t_min == pytest.approx(0.1)
+        assert frame.effective_t_max == pytest.approx(0.3)
+
+    def test_effective_entropy_bound_none_when_scheduler_has_no_config(self):
+        """Named degradation (mirrors `resolve_vocab_size`'s stub fallback):
+        a bare pre-R4-style test double exposing only `.num_inference_steps`
+        (no `.config` at all) must not crash — `effective_entropy_bound`
+        reads `None` (no ctor fallback exists for it), while `effective_t_min`/
+        `effective_t_max` fall back to the ctor `t_min`/`t_max` this
+        collector was constructed with."""
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8)
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        frame = collector.frames[0]
+        assert frame.effective_entropy_bound is None
+        assert frame.effective_t_min == pytest.approx(0.4)
+        assert frame.effective_t_max == pytest.approx(0.8)

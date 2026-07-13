@@ -218,6 +218,28 @@ class TestFrameCollector:
         result = collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))
         assert result == {}
 
+    def test_new_optional_fields_default_to_none(self):
+        """Issue #64 Phase 2: `pinned_mask`/`effective_entropy_bound`/
+        `effective_t_min`/`effective_t_max` join `DiffusionFrame` under the
+        same additive-optional discipline (ADR-CDG-014 Decision 1) already
+        covering `entropy`/`top_k_ids`/`top_k_weights`/`distribution` — a
+        collector driven with a bare pre-Phase-2 scheduler fake (no
+        `.config`, no `constraints=`) must default all four to `None` rather
+        than raising or fabricating a value. Full derivation coverage lives
+        in `tests/test_frame_capture_discipline.py`'s `TestPinnedMask`/
+        `TestEffectiveKnobTelemetry`."""
+        collector = _FrameCollector(scheduler=FakeScheduler(1), t_min=0.4, t_max=0.8)
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True]]))
+
+        frame = collector.frames[0]
+        assert frame.pinned_mask is None
+        assert frame.effective_entropy_bound is None
+        # No `.config` on this bare fake -> t_min/t_max fall back to the
+        # collector's own ctor values, not None (they have a real fallback;
+        # only entropy_bound has no ctor twin).
+        assert frame.effective_t_min == pytest.approx(0.4)
+        assert frame.effective_t_max == pytest.approx(0.8)
+
 
 class TestFrameCollectorEffectiveDenominator:
     """Issue #20: `anneal_temperature`'s denominator must be the scheduler's

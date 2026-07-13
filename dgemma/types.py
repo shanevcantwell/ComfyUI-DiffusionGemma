@@ -128,6 +128,59 @@ class DiffusionFrame:
     populate this field (P-C scope); it exists now under the
     additive-optional discipline so the frame shape is decided once."""
 
+    pinned_mask: Any | None = None
+    """ADR-CDG-010 Decision 4: boolean `[gen_length]` tensor/sequence, `True`
+    at every canvas position the constraint layer re-asserts this frame —
+    the field that keeps a frame's commit information honest by
+    distinguishing "the model committed this" from "the constraint layer
+    forced this regardless of what the model would have chosen".
+
+    **Issue #64 Phase 2 scope (gate correction A1):** no pin participant
+    exists yet (Phase 3 — `PinParticipant` is `NOT-YET-IMPLEMENTED`), so this
+    field is populated directly from a supplied `Constraints` payload's pin
+    positions when one is given — the validated-then-ignored payload's
+    positions still describe *which cells would be pinned*, even though
+    nothing yet writes them. This is a static-from-`Constraints.pins`
+    computation, valid **only because and only while** pins are
+    position-static (the D6 id-level hard-pin invariant: a hard pin
+    re-asserts the same positions every step, so "which cells the constraint
+    layer touches this frame" is provably the constant pin-position set for
+    the whole run). It is **not** licensed in general — ADR-CDG-010 Open
+    Question 3 explicitly parks a future soft/dynamic constraint that could
+    re-pin different cells per step, at which point this static shortcut
+    would silently become a lying trace. **Labeled door, not welded shut:**
+    a future dynamic/re-pinning constraint type must switch capture to
+    observe the pin participant's actual per-step write instead of deriving
+    this field from the static pin set.
+
+    `None` when no `Constraints` payload was supplied this run (additive-
+    optional discipline, ADR-CDG-014 Decision 1) — never an all-`False`
+    mask standing in for "no pins"."""
+
+    effective_entropy_bound: float | None = None
+    """ADR-CDG-011 clause 7 (honest telemetry): `scheduler.config.
+    entropy_bound` read at THIS callback, i.e. the value `step()` actually
+    consumed producing this frame — never the `run_diffusion` ctor snapshot
+    or a control-signal binding's static curve. A walker (Phase 4,
+    `NOT-YET-IMPLEMENTED`) that mutates `scheduler.config` mid-run makes this
+    field diverge from the run's requested `entropy_bound`; a walker bug
+    that silently fails to write through is therefore visible in the trace
+    rather than papered over. `None` only when the scheduler exposes no
+    `.config.entropy_bound` at all (never populated this phase means a
+    scheduler-shape regression, not a normal path — every real/fake
+    scheduler in this suite exposes it)."""
+
+    effective_t_min: float | None = None
+    """Companion to `effective_entropy_bound`: `scheduler.config.t_min` read
+    at this callback (ADR-CDG-011 clause 7). Feeds the same live-`t_min`
+    read `anneal_temperature` now uses for `t`/`temperature` (see
+    `_FrameCollector`), so a walker-mutated `t_min` is reflected consistently
+    across `t`/`temperature` and this field."""
+
+    effective_t_max: float | None = None
+    """Companion to `effective_entropy_bound`/`effective_t_min`:
+    `scheduler.config.t_max` read at this callback (ADR-CDG-011 clause 7)."""
+
     @property
     def committed_fraction(self) -> float:
         """Scalar commit fraction — defined only for single-example frames."""

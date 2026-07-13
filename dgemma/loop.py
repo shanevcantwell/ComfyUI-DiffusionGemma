@@ -345,6 +345,31 @@ def anneal_temperature(
     return t, temperature
 
 
+def _build_pinned_mask(constraints: "Constraints | None", canvas: Any) -> Any | None:
+    """Derive `DiffusionFrame.pinned_mask` from a validated `Constraints`
+    payload (ADR-CDG-010 Decision 4, issue #64 Phase 2, gate correction A1).
+
+    Static-from-`Constraints.pins` by construction: a boolean tensor shaped
+    like one example's canvas (`canvas.shape[-1]`), `True` at every
+    `pin.position`. Valid only because and only while pins are
+    position-static (see `DiffusionFrame.pinned_mask`'s docstring for the
+    full scope-guard reasoning) — no pin participant exists yet (Phase 3), so
+    this reflects "which cells WOULD be pinned", not an observed write.
+
+    `None` when `constraints` is `None` or carries no pins (`Constraints()`
+    default, or an explicit `Constraints(pins=())`) — additive-optional
+    discipline (ADR-CDG-014 Decision 1): absence, never an all-`False` mask
+    standing in for "no pins".
+    """
+    if constraints is None or not constraints.pins:
+        return None
+    canvas_len = canvas.shape[-1]
+    mask = torch.zeros(canvas_len, dtype=torch.bool)
+    for pin in constraints.pins:
+        mask[pin.position] = True
+    return mask
+
+
 @dataclass
 class _FrameCollector:
     """Per-step frame collector driving `callback_on_step_end`.
@@ -409,6 +434,35 @@ class _FrameCollector:
     began. Detection is `step_idx <= previous`, not `step_idx == 0`, so a
     future mid-schedule start (variation runs, `loose-ends.md`) whose first
     step_idx is nonzero still registers as a new block.
+
+    **Effective-knob telemetry (ADR-CDG-011 clause 7, issue #64 Phase 2):**
+    `entropy_bound`/`t_min`/`t_max` are read fresh off `self.scheduler.config`
+    on every callback — the same "never cached, always effective" discipline
+    issue #20 already established for `num_inference_steps` above, extended
+    to the three walker-mutable knobs (ADR-CDG-011's `MUTABLE_TARGETS`). No
+    walker exists yet to write through them (Phase 4, `NOT-YET-IMPLEMENTED`),
+    but reading live now — rather than only once a walker lands — is what
+    makes a future walker bug that silently fails to write through visible
+    in the trace the day it ships, instead of requiring a second migration of
+    this read site. The ctor `t_min`/`t_max` fields remain: they are the
+    values `anneal_temperature` falls back to when `self.scheduler` exposes
+    no `.config` at all (a bare unit-test double lighter than the real
+    scheduler/R4 fixture) — a named degradation, not a raise, mirroring
+    `resolve_vocab_size`'s stub fallback. Every real `EntropyBoundScheduler`
+    and the R4 `FakeEntropyBoundScheduler` fixture expose `.config`, so this
+    fallback is exercised only by pre-R4-style bare test doubles.
+
+    **`pinned_mask` (ADR-CDG-010 Decision 4, issue #64 Phase 2, gate
+    correction A1):** derived once at construction from `constraints.pins`
+    when a `Constraints` payload is supplied — `None` otherwise. No pin
+    participant exists yet (Phase 3), so this is the validated-then-ignored
+    payload's positions read directly, not an observed per-step write. Valid
+    **only because and only while** pins are position-static (the D6
+    hard-pin invariant: a hard pin re-asserts the same positions every step,
+    so the pinned-position set is provably constant for the whole run) — see
+    `DiffusionFrame.pinned_mask`'s docstring for the full A1 scope-guard
+    reasoning and the labeled door for a future dynamic/re-pinning constraint
+    type.
     """
 
     scheduler: Any
@@ -419,13 +473,27 @@ class _FrameCollector:
     #20; see this class's docstring)."""
 
     t_min: float
+    """Fallback anneal `t_min` used only when `self.scheduler` exposes no
+    `.config.t_min` (see the class docstring's effective-knob-telemetry
+    section) — otherwise superseded every callback by the live config read."""
+
     t_max: float
+    """Fallback anneal `t_max`, same fallback-only role as `t_min` above."""
+
     keep_frames: Literal["last", "all"] = "last"
     on_frame: Callable[[DiffusionFrame], None] | None = None
+    constraints: "Constraints | None" = None
+    """ADR-CDG-010 Decision 4 / issue #64 Phase 2: the validated `Constraints`
+    payload (or `None`), used only to derive each frame's static `pinned_mask`
+    at construction time — see the class docstring's `pinned_mask` section.
+    Not otherwise read; no participant consumes this yet (Phase 3)."""
+
     frames: list[DiffusionFrame] = field(default_factory=list)
     steps_used: int = 0
     _canvas_idx: int = -1
     _prev_step_idx: int | None = None
+    _pinned_mask: Any | None = field(default=None, init=False, repr=False)
+    _pinned_mask_built: bool = field(default=False, init=False, repr=False)
 
     def on_step_end(self, pipe: Any, global_step: int, step_idx: int, callback_kwargs: dict) -> dict:
         """`callback_on_step_end(pipe, global_step, step_idx, callback_kwargs)`.
@@ -452,6 +520,22 @@ class _FrameCollector:
         without requesting `logits` in `callback_on_step_end_tensor_inputs`
         (additive-optional discipline — absence, never a zero-valued
         stand-in, ADR-CDG-014 Decision 1/2).
+
+        **Effective-knob telemetry (ADR-CDG-011 clause 7, issue #64 Phase
+        2):** `entropy_bound`/`t_min`/`t_max` are read off `self.scheduler.
+        config` fresh THIS callback — the values `step()` actually consumed
+        producing this frame — falling back to the ctor `self.t_min`/
+        `self.t_max` (and `None` for `entropy_bound`, which has no ctor
+        fallback) only when `self.scheduler` exposes no `.config` at all.
+        `t`/`temperature` are recomputed from the live `t_min`/`t_max`, so a
+        walker-mutated anneal range (Phase 4) is reflected consistently
+        across `t`/`temperature` and the `effective_*` fields together.
+
+        **`pinned_mask` (ADR-CDG-010 Decision 4, issue #64 Phase 2):** built
+        once, lazily, from `self.constraints.pins` on the first callback and
+        reused for every subsequent frame this run — see the class
+        docstring's `pinned_mask` section for the A1 scope-guard reasoning.
+        `None` when no `Constraints` payload was supplied.
         """
         scheduler_output = callback_kwargs["scheduler_output"]
         canvas = callback_kwargs["canvas"]
@@ -467,7 +551,14 @@ class _FrameCollector:
             self._canvas_idx += 1
         self._prev_step_idx = step_idx
 
-        t, temperature = anneal_temperature(step_idx, self.scheduler.num_inference_steps, self.t_min, self.t_max)
+        config = getattr(self.scheduler, "config", None)
+        effective_t_min = getattr(config, "t_min", self.t_min) if config is not None else self.t_min
+        effective_t_max = getattr(config, "t_max", self.t_max) if config is not None else self.t_max
+        effective_entropy_bound = getattr(config, "entropy_bound", None) if config is not None else None
+
+        t, temperature = anneal_temperature(
+            step_idx, self.scheduler.num_inference_steps, effective_t_min, effective_t_max
+        )
         # Mean over the block dim ONLY — one fraction per example, never a
         # batch-blended scalar (review finding, 2026-07-05).
         committed_per_example = tuple(accepted_index.float().mean(dim=-1).tolist())
@@ -485,6 +576,10 @@ class _FrameCollector:
                 # single-example consumer expects.
                 entropy = entropy[0]
 
+        if not self._pinned_mask_built:
+            self._pinned_mask = _build_pinned_mask(self.constraints, canvas)
+            self._pinned_mask_built = True
+
         frame = DiffusionFrame(
             canvas_idx=self._canvas_idx,
             step_idx=step_idx,
@@ -493,6 +588,10 @@ class _FrameCollector:
             committed_fraction_per_example=committed_per_example,
             canvas=canvas,
             entropy=entropy,
+            pinned_mask=self._pinned_mask,
+            effective_entropy_bound=effective_entropy_bound,
+            effective_t_min=effective_t_min,
+            effective_t_max=effective_t_max,
         )
         self.steps_used += 1
         if self.keep_frames == "last":
@@ -907,17 +1006,19 @@ def run_diffusion(
     `constraints=` and `logit_hook=` is rejected at ingress (H1, below) —
     two logit-mask sources on one door (ADR-CDG-010 D5).
 
-    `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011, issue #64
-    Phase 1): declarative payloads, validated at ingress
-    (`dgemma.ingress.validate_ingress`) and — in THIS phase only —
-    otherwise ignored: no participant is built from them yet
-    (`PinParticipant`/`WalkerParticipant`/the logit-mask hook builder land in
-    Phases 3/4). A validated payload therefore changes nothing about this
-    call's behavior beyond the reject paths; a run with a valid payload
-    behaves identically to a run with `None` (the Phase 1 regression floor,
-    issue #64 §6). Each is validated-then-ignored independently: an invalid
-    payload still raises (the reject paths are live now), it just isn't yet
-    turned into engine behavior when valid.
+    `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011, issue #64):
+    declarative payloads, validated at ingress (`dgemma.ingress.
+    validate_ingress`). No participant is built from `control_signals=`/
+    `capture=` yet (`WalkerParticipant`/the capture-tier knobs land in later
+    phases) — those two remain validated-then-ignored beyond the reject
+    paths this phase. `constraints=` gains ONE Phase-2 effect ahead of the
+    Phase-3 `PinParticipant`: its pins drive each frame's `pinned_mask`
+    (`DiffusionFrame.pinned_mask`, ADR-CDG-010 D4) — no canvas write happens
+    yet (no pin participant exists), so a run with `constraints=` still
+    produces byte-identical `text`/`canvas`/telemetry to the same run with
+    `constraints=None`; only the trace's `pinned_mask` field differs. An
+    invalid payload of any of the three still raises at ingress regardless of
+    phase.
 
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
@@ -930,7 +1031,14 @@ def run_diffusion(
     `CanvasState.canvas_ids` (post-excision) does not carry. Each captured
     `DiffusionFrame` also carries `entropy` (ADR-CDG-014 Decision 3/4, issue
     #14): per-position predictive entropy derived from that step's pre-pin
-    `logits`, always populated (Tier 0's always-on default).
+    `logits`, always populated (Tier 0's always-on default); `pinned_mask`
+    (ADR-CDG-010 D4, issue #64 Phase 2): `True` at every supplied
+    `Constraints` pin position, `None` when no constraints were given; and
+    `effective_entropy_bound`/`effective_t_min`/`effective_t_max`
+    (ADR-CDG-011 clause 7, issue #64 Phase 2): the `entropy_bound`/`t_min`/
+    `t_max` values `scheduler.config` actually held at that callback — the
+    honest-telemetry fields a future control-signal walker (Phase 4) writes
+    through.
 
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
@@ -978,6 +1086,7 @@ def run_diffusion(
         t_max=t_max,
         keep_frames=keep_frames,
         on_frame=on_frame,
+        constraints=constraints,
     )
     step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel)
 
