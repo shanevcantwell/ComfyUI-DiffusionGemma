@@ -251,6 +251,7 @@ _check_diffusers_structure()
 from diffusers import DiffusionGemmaPipeline, EntropyBoundScheduler  # noqa: E402
 
 from .composite import DiffusionCancelled, StepEndComposite  # noqa: E402
+from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame  # noqa: E402
 
 # Grounded defaults (CLAUDE.md / plan.md — first local run, Q4_K_M).
@@ -750,6 +751,7 @@ def run_diffusion(
     keep_frames: Literal["last", "all"] = "all",
     on_frame: Callable[[DiffusionFrame], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    logit_hook: ForwardHookFn | None = None,
 ) -> tuple[str, CanvasState, CanvasTrace]:
     """Drive one prompt through the block-diffusion denoising loop.
 
@@ -835,6 +837,20 @@ def run_diffusion(
     (ADR-CDG-011) are `NOT-YET-IMPLEMENTED` — R1 lands the ordered scaffold
     they slot into, not their bodies.
 
+    `logit_hook` (#35 R5, F4; ADR-CDG-010 Decision 5): an optional forward
+    hook installed on `dgemma_model.model` for exactly the duration of the
+    one pipeline call below, via `dgemma.hooks.install_logit_shaping_hook` —
+    the ONLY sanctioned installation path for a hook on this door (the only
+    logit-shaping door per issue #28: a callback-returned `{"logits": ...}`
+    is silently discarded by the installed pipeline). `None` (today's only
+    real call shape — no `constraints=` ingress exists yet) installs
+    nothing and leaves zero hooks registered, trivially satisfying
+    `STATELESS-CORE`'s "no hook survives a `run_diffusion` call" (rule 6):
+    the context manager's `try/finally` guarantees teardown on the pipeline
+    call's clean return, on `DiffusionCancelled` (caught below), and on any
+    other exception raised mid-run — the hook is torn down before this
+    function's own exception handling (or return) is reached in every case.
+
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
     the scheduler's class name and the entropy/temperature config passed to
@@ -884,15 +900,22 @@ def run_diffusion(
         prompt_kwargs = {"prompt": prompt}
 
     try:
-        output = pipeline(
-            **prompt_kwargs,
-            gen_length=gen_length,
-            num_inference_steps=num_inference_steps,
-            confidence_threshold=confidence,
-            generator=generator,
-            callback_on_step_end=step_end,
-            callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
-        )
+        # `install_logit_shaping_hook` (#35 R5, F4): the ONE place `dgemma/`
+        # installs a forward hook on the loaded model, torn down by its own
+        # `finally` on every exit from this `with` block — clean return,
+        # `DiffusionCancelled` below, or any other exception propagating out
+        # of `pipeline(...)`. No hook survives past this block under any of
+        # the three paths (ADR-CDG-010 Decision 5, ARCHITECTURE.md rule 6).
+        with install_logit_shaping_hook(dgemma_model.model, logit_hook):
+            output = pipeline(
+                **prompt_kwargs,
+                gen_length=gen_length,
+                num_inference_steps=num_inference_steps,
+                confidence_threshold=confidence,
+                generator=generator,
+                callback_on_step_end=step_end,
+                callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+            )
     except DiffusionCancelled:
         # #38 partial-return semantics: return the evidence already
         # captured rather than raising it away. Under the capture-first

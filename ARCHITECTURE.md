@@ -235,7 +235,13 @@ seam**, so every surface inherits it. Its shape is decided but
 - **Forward-hook lifecycle context manager** (R5, F4): the logit mask is the
   engine-installed forward hook on `pipe.model` (the only logit door per #28 —
   callback-returned `{"logits": …}` is silently discarded). Invariant: **no hook
-  survives a `run_diffusion` call**, tested clean and raising. `NOT-YET-IMPLEMENTED`.
+  survives a `run_diffusion` call**, tested clean and raising. **In force**
+  (`dgemma/hooks.py:install_logit_shaping_hook`, wired at
+  `dgemma/loop.py:run_diffusion`'s `with install_logit_shaping_hook(...)`
+  wrapping the pipeline call; `tests/test_hook_lifecycle.py`). The mask
+  itself (a `constraints=`-built hook function) is still `NOT-YET-IMPLEMENTED`
+  (ADR-CDG-010's own participants, R2/future scope) — R5 lands the lifecycle
+  primitive every future hook installer must go through, not the mask body.
 
 - **Control signals as CV / LFO** (ADR-CDG-011, grounded in #23): a unitless
   per-step control signal (precomputed tensor — step count is known pre-run, so
@@ -289,10 +295,14 @@ structurally unrepresentable.
 ## Current conformance (honest) — Branch B (audited)
 
 The invariant above is the target. The code **partially** conforms: the core/surface
-seam (rules 1, 2 in part, 5 in part) is in force; the MCP surface, the surface-side
-naming, the analysis relocation, the mint module, the cross-run statelessness
-enforcement, and the entire step-end intervention layer (rules 3, 4, 6, 7 and most
-of 2) are not yet implemented.
+seam (rules 1, 2 in part, 5 in part) is in force; rule 6's cross-run statelessness
+enforcement is now in force for the two invariants #35 named (F4's hook
+teardown, F5's fresh-scheduler same-in/same-out — #35 R5); the MCP surface, the
+surface-side naming, the analysis relocation, the mint module, and most of the
+step-end intervention layer (rules 3, 4, 7 and most of 2 — the composite
+scaffold from R1 and the hook lifecycle from R5 are in force, but the
+constraints/control-signal participant bodies themselves are not) are not yet
+implemented.
 
 | Violation | Why it breaks the invariant | Evidence (`path:symbol`) | Resolved by |
 |-----------|----------------------------|--------------------------|-------------|
@@ -301,8 +311,8 @@ of 2) are not yet implemented.
 | Analysis lives inside the core's import graph and is re-exported by the core's public face | Rule 3 — analysis is a consumer; the core must not export it | `dgemma/__init__.py:26-31,49-51` (re-exports `build_commit_heatmap`, `build_avalanche_curve`, `corroborate_no_mask_token`); `dgemma/sampling.py` (bodies) | `NOT-YET-IMPLEMENTED` — CDG-008 Phase 3 (relocate) + Phase 4 (boundary test) |
 | Socket strings re-typed as bare literals per node site; no mint module | Rule 4 — `ONE-MINT` violated; the vocabulary is authored N times | `nodes/loader.py:46` (`RETURN_TYPES = ("DGEMMA_MODEL",)`), `nodes/sampler.py:172,202`, `nodes/trace.py:80` — inline `DGEMMA_*` literals | `NOT-YET-IMPLEMENTED` — #35 R2 (mint module + grep-gate; interim `nodes/socket_types.py` → `surfaces/comfyui/socket_types.py` post-Phase-1) |
 | ~~Single hardcoded callback binding; no composition / ordering / exception layer~~ **RESOLVED** | Rule 7 — five expansion participants want the slot with ordering semantics | `dgemma/composite.py:StepEndComposite` (fixed order: capture → cancellation → beta-rebuild → pin; ADR-CDG-010 cancellation amendment 2026-07-13); wired at `dgemma/loop.py:step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel)` | **Resolved** — #35 R1 (PR #45). Beta-rebuild/pin participant bodies remain `NOT-YET-IMPLEMENTED` (ADR-CDG-010 R2/R5); the composite scaffold and ordering are in force. |
-| No enforcement that a forward hook is torn down after a run | Rule 6 — F4: an un-torn-down hook from run A shapes run B | `NOT-YET-IMPLEMENTED` — no lifecycle context manager exists (hook seam not yet built; #28 names `register_forward_hook` as the target door) | #35 R5 |
-| Cross-run statelessness of walker/pin is incidental (fresh scheduler per run), not enforced | Rule 6 — F5: mutated `scheduler.config` + accumulated pin mask are cross-call-mutable state | `NOT-YET-IMPLEMENTED` — no same-in/same-out test; containment is today's fresh-per-run happenstance | #35 R5 / ADR-CDG-011 F5 test |
+| ~~No enforcement that a forward hook is torn down after a run~~ **RESOLVED** | Rule 6 — F4: an un-torn-down hook from run A shapes run B | `dgemma/hooks.py:install_logit_shaping_hook` (the sole `register_forward_hook` installation path, `try/finally` teardown); wired at `dgemma/loop.py:run_diffusion`'s `with install_logit_shaping_hook(dgemma_model.model, logit_hook): output = pipeline(...)` | **Resolved** — #35 R5 (F4). `tests/test_hook_lifecycle.py` (clean, cancelled, and raising paths all assert `live_hook_count == 0`). |
+| ~~Cross-run statelessness of walker/pin is incidental (fresh scheduler per run), not enforced~~ **RESOLVED** | Rule 6 — F5: mutated `scheduler.config` + accumulated pin mask are cross-call-mutable state | `dgemma/loop.py:run_diffusion` constructs a fresh `EntropyBoundScheduler`/`_FrameCollector`/`StepEndComposite` every call, never caching one; `tests/test_run_diffusion_statelessness.py:TestSchedulerFreshPerCall` asserts two calls build two distinct scheduler objects | **Resolved** — #35 R5 (F5) / ADR-CDG-011 F5 test. `tests/test_run_diffusion_statelessness.py:TestSameInSameOutTelemetry` asserts identical calls yield identical telemetry and a mid-call `register_to_config` mutation never survives into the next call. |
 | ~~No diffusers version guard (the transformers guard's missing twin)~~ **RESOLVED** | Rule 5 — `anneal_temperature` re-derives the vendored formula and would silently report wrong values on a bump | `dgemma/loop.py:_check_diffusers_version` (version-floor guard, twin of `dgemma/model.py:78`'s `_check_transformers_version`, adapted for the `>=0.39.0` range bound) + `dgemma/loop.py:_check_diffusers_structure` (structural probe: scheduler ctor kwargs, `EntropyBoundSchedulerOutput.accepted_index`, base `DiffusionGemmaPipeline._callback_tensor_inputs`); both invoked at module import time, `dgemma/loop.py:_check_diffusers_version(); _check_diffusers_structure()`. The probe covers names/shapes only — it cannot see the anneal formula's *body*; that slice is enforced by `tests/test_diffusers_version_guard.py:TestAnnealFormulaPin` (pins `anneal_temperature` against the temperature the real installed `EntropyBoundScheduler.step()` actually applies, recovered from `pred_logits`) | **Resolved** — #35 R3 (formula-body slice closed per PR #48 gate finding F-1). `tests/test_diffusers_version_guard.py` (23 tests: version-floor accept/reject + fallback path, structural probe pass/fail per probed structure, formula pin across schedule points/configs). |
 | Declarative-payload ingress (`constraints=`, `control_signals=`, `capture=`) not present | Rule 7 — `run_diffusion` cannot yet accept validated declarative intervention | `dgemma/loop.py:465-478` (`run_diffusion` signature has `on_frame` but no `constraints`/`control_signals`/`capture`) | `NOT-YET-IMPLEMENTED` — ADR-CDG-010/011 |
 
@@ -336,8 +346,8 @@ names its test / type / review surface and its status.
 | Conserved repo identity (`ComfyUI-DiffusionGemma` unchanged across the rename) | Registry mirror + remote (`IDENTITY⊥ENVELOPE`); no code change touches it | **In force by omission** — the roadmap must not touch the repo name. |
 | Socket vocabulary minted once (no inline `DGEMMA_*` literal outside the mint module) | Grep-gate test asserting against the module object (only the path string churns with Phase 1) | `NOT-YET-IMPLEMENTED` — #35 R2. |
 | Composition ordering (capture pre-pin; β-rebuild before pin; pin last writer) | Ordered-composite test over the shared fake-pipeline fixture: `tests/test_step_end_composite.py:TestFixedOrdering`, `TestOrderingIsStructural` (`dgemma/composite.py:StepEndComposite`) | **In force** — #35 R1 (over R4's fixture). ADR-CDG-010. |
-| Zero hooks after run ("no hook survives a `run_diffusion` call") | Forward-hook lifecycle context-manager test, clean + raising | `NOT-YET-IMPLEMENTED` — #35 R5 (F4). |
-| Same-in/same-out walker/pin statelessness (identical calls → identical effective-knob telemetry) | Same-in/same-out test on one loaded model | `NOT-YET-IMPLEMENTED` — #35 R5 / ADR-CDG-011 F5. CDG-008 Phase-2 MCP state manager must never cache a scheduler. |
+| Zero hooks after run ("no hook survives a `run_diffusion` call") | Forward-hook lifecycle context-manager test, clean + raising | **In force** — #35 R5 (F4). `dgemma/hooks.py:install_logit_shaping_hook` (sole install path, `try/finally` teardown); `tests/test_hook_lifecycle.py` (clean, `DiffusionCancelled`, and raising paths, unit-level and through `run_diffusion`). |
+| Same-in/same-out walker/pin statelessness (identical calls → identical effective-knob telemetry) | Same-in/same-out test on one loaded model | **In force** — #35 R5 / ADR-CDG-011 F5. `dgemma/loop.py:run_diffusion` builds a fresh scheduler/collector/composite every call; `tests/test_run_diffusion_statelessness.py` (fresh-object proof + identical-telemetry + mutation-non-survival). CDG-008 Phase-2 MCP state manager must never cache a scheduler. |
 | Diffusers version guard + structural probe (scheduler kwargs, `accepted_index`, `_callback_tensor_inputs`) | Range guard (`>=0.39.0`, matching `pyproject.toml`'s declared bound) patterned on `dgemma/model.py:78` (`_check_transformers_version`) + a structural probe independent of version number: `dgemma/loop.py:_check_diffusers_version`, `dgemma/loop.py:_check_diffusers_structure`; enforced by `tests/test_diffusers_version_guard.py` | **In force** — #35 R3. Names/shapes only: the probe cannot see the anneal formula's body — split out as its own row below. |
 | Anneal formula fidelity (`anneal_temperature`'s re-derivation == the temperature the installed scheduler's `step()` actually applies) | Formula-pin test driving the REAL installed `EntropyBoundScheduler.step()` (expected value recovered from `pred_logits`, never from constants copied into the test): `tests/test_diffusers_version_guard.py:TestAnnealFormulaPin` | **In force** — #35 R3 / PR #48 gate finding F-1. |
 | Declarative payloads only into `run_diffusion` (no surface-built closures/hooks) | Ingress validation (schedule length == steps; values in binding range; ids in-vocab; fail on unknown) + the composite holding only engine-built participants | `NOT-YET-IMPLEMENTED` — ADR-CDG-010/011 ingress clauses. |
