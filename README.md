@@ -142,8 +142,8 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 - Knob response is **not a smooth dial**: block-autoregression makes output
   respond discontinuously to threshold knobs (plateaus and cliffs — issue #10
   has measured sweeps).
-- Raw pre-excision canvas ids aren't yet exposed on any socket (issue #11) —
-  wanted for token-level trace analysis.
+- Raw pre-excision canvas ids are captured engine-side as of 0.3.0, not yet
+  exposed on any socket (issue #11) — wanted for token-level trace analysis.
 - Quantized loading for consumer cards **below the ~24 GB offload floor**
   (8–16 GB) is unresolved
   (issue #4) — the AWQ-INT4/compressed-tensors candidate surveyed there was
