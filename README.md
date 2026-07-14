@@ -84,6 +84,24 @@ You can't catch that by reading the final text. You can watch it happen here.
   noise level `(t, temperature, step_idx)`, so traces from different runs stay
   comparable.
 
+### What the telemetry does and doesn't show
+
+DiffusionGemma's per-step telemetry (`committed_fraction`, the commit heatmap, and
+`DGemmaTrace`) measures **commit dynamics** — *when* each canvas position freezes as the
+diffusion process anneals. This is real and useful for observing annealing progression.
+
+It does **not** measure **provenance** — *whether* a frozen token was computed by the
+diffusion process from in-canvas evidence, or emitted one-shot from the model's memorized
+autoregressive prior. Under default usage these can diverge: content can freeze early and
+unchanged from a memorized answer-shape, producing a clean annealing curve while doing no
+checkable work in-canvas (observed in the 2026-07-14 gatsby-counts probe). Read the commit
+telemetry as *"when did this position settle,"* never as *"this position was
+diffusion-computed."* Provenance-sensitive workflows (constraints/pins, KV-cache injection,
+per-token commit emission) are the way to separate the two; see the resolution path below.
+
+See the [gatsby-counts experiment record](https://github.com/shanevcantwell/design-docs/blob/main/experiments/2026-07-14-dg-gatsby-counts-ar-prior-latch/README.md)
+for the evidence, and [issue #78](../../issues/78) for the full finding and resolution path.
+
 ## Install
 
 ```bash

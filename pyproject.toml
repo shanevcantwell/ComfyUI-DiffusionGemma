@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-diffusiongemma"
-version = "0.3.0"
+version = "0.3.1"
 description = "ComfyUI node pack for DiffusionGemma — uniform-state discrete diffusion text generation, made instrumentable."
 readme = "README.md"
 license = { file = "LICENSE" }
