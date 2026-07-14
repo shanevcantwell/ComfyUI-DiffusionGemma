@@ -1,11 +1,10 @@
+# Manual-dispatch only by design: publish is an explicit release act, never a
+# merge side effect. The required REGISTRY_ACCESS_TOKEN repo secret is
+# deliberately absent until reconstruction (see session task ledger /
+# next-release reconstruction).
 name: Publish to Comfy registry
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "pyproject.toml"
 
 permissions:
   issues: write
@@ -14,10 +13,6 @@ jobs:
   publish-node:
     name: Publish Custom Node to registry
     runs-on: ubuntu-latest
-    # REGISTRY_ACCESS_TOKEN is an Environment secret (environment `env`); a job
-    # must declare that environment to read it, or the token resolves empty and
-    # `comfy node publish --token` fails (see run 28865742308).
-    environment: env
     if: ${{ github.repository_owner == 'shanevcantwell' }}
     steps:
       - name: Check out code
