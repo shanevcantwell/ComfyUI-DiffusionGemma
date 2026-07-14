@@ -4,6 +4,18 @@ This changelog starts at 0.3.0 — no retroactive entries for earlier releases.
 
 All notable user-facing changes to this project are documented here.
 
+## [0.3.1] — 2026-07-14
+### Documentation
+- Measurement-validity callout: per-step telemetry (`committed_fraction`, the commit
+  heatmap, `DGemmaTrace`) measures *commit dynamics* (when a position freezes), not
+  *provenance* (whether the frozen token was diffusion-computed from in-canvas evidence
+  or emitted one-shot from the model's memorized autoregressive prior). The two can
+  diverge under default usage, evidenced by the
+  [2026-07-14 gatsby-counts experiment](https://github.com/shanevcantwell/design-docs/blob/main/experiments/2026-07-14-dg-gatsby-counts-ar-prior-latch/README.md)
+  (0/14 numeral revisions; counts frozen against evidence the canvas never contained).
+  Added to the README as "What the telemetry does and doesn't show." No code changes
+  this release. See [issue #78](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/78).
+
 ## [0.3.0] — 2026-07-13
 ### Fixed
 - Identical seeds/knobs now reliably reproduce identical output across runs on one loaded model: forward hooks are torn down after every run, and the scheduler/run-state is rebuilt fresh per call (was: a leaked hook or cached scheduler config could contaminate the next run).
