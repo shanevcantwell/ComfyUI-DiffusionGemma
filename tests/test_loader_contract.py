@@ -400,9 +400,19 @@ def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkey
     # `canvas_trace.frames`, and the flipbook's per-image canvas key is derived
     # from the same list, ADR-CDG-009 §2). Two canvases here (0,0 → 1): the
     # observed thinking+answer case, exercising the N-canvas caption path.
+    # Also carries the fields `_build_frame_metadata` (issue #84, DECISION
+    # S-1) reads off each frame — `step_idx`/`t`/`temperature`/
+    # `committed_fraction_per_example`/`entropy`, mirroring the real
+    # `DiffusionFrame` shape closely enough for the banner-metadata build to
+    # run against this stub the same way it runs against a real frame.
     class _StubFrame:
-        def __init__(self, canvas_idx):
+        def __init__(self, canvas_idx, step_idx=0):
             self.canvas_idx = canvas_idx
+            self.step_idx = step_idx
+            self.t = 0.5
+            self.temperature = 0.6
+            self.committed_fraction_per_example = (0.5,)
+            self.entropy = None
 
     sentinel_trace = _StubTrace()
     sentinel_trace.frames = (_StubFrame(0), _StubFrame(0), _StubFrame(1))

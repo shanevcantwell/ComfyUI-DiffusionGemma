@@ -47,6 +47,19 @@ ONE stacked batch tensor, not a list of N single-frame tensors — the shape
 an `IMAGE` output (a list here would fan out per-frame and break every one of
 those consumers).
 
+**Metadata banner (issue #84, DECISION S-1, implementer's call — no new
+widget):** `_build_frame_metadata` builds one `FrameMetadata` per decoded
+frame from `canvas_trace.frames` (mirrors the `canvas_indices` construction
+immediately above it) and threads it into `render_frames_to_image_batch` as
+`frame_metadata=`, always on — operator requirement (a) asks to "draw all
+available frame metadata into the flipbook," and every field
+`FrameMetadata` needs (`t`/`temperature`/`committed_fraction`) is already
+unconditionally populated on `DiffusionFrame`, so there is no meaningful
+"banner off" state to gate behind a widget the way `thinking` gates an
+experimental path. `mean_entropy` alone can render `—` per-frame
+(`DiffusionFrame.entropy`'s own additive-optional discipline, ADR-CDG-014)
+without that absence needing a whole-banner toggle.
+
 **Why a sampler output, not a standalone node (issue #21 rework):** the
 earlier `DGemmaFlipbook` node took `CANVAS_TRACE` alone and needed a
 tokenizer to decode it, but `CANVAS_TRACE` never carried one — forcing
@@ -96,7 +109,7 @@ if __package__ and __package__.count(".") >= 2:
         decode_frames,
         run_diffusion,
     )
-    from .frames_image import render_frames_to_image_batch
+    from .frames_image import FrameMetadata, render_frames_to_image_batch
     from .socket_types import DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, DGEMMA_MODEL
 else:
     from dgemma.loop import (
@@ -109,7 +122,7 @@ else:
         decode_frames,
         run_diffusion,
     )
-    from surfaces.comfyui.frames_image import render_frames_to_image_batch
+    from surfaces.comfyui.frames_image import FrameMetadata, render_frames_to_image_batch
     from surfaces.comfyui.socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
@@ -129,6 +142,38 @@ DGEMMA_STEP_EVENT = "dgemma.sampler.step"
 FRAMES_IMAGE_WIDTH = 512
 FRAMES_IMAGE_FONT_SIZE = 20
 FRAMES_IMAGE_CAPTION_STEP_INDEX = True
+
+
+def _build_frame_metadata(frames: list) -> list:
+    """Build the per-image `FrameMetadata` key (issue #84, DECISION S-1)
+    from `canvas_trace.frames`, threaded into `render_frames_to_image_batch`
+    the SAME way `canvas_indices` already is (parallel list, one entry per
+    decoded frame, built here rather than inside the render helper — the
+    render helper stays plain-data-in, ADR-CDG-003).
+
+    `mean_entropy` is a scalar reduction of `DiffusionFrame.entropy`
+    (`float32[canvas_len]` or `None`) — cheap (`~1 KB/step` tensor, ADR-CDG-014
+    Decision 3) and the one non-trivial computation in this function; still
+    not denoising-loop logic (rule 2), just an adapter-side reduction of a
+    value the core already computed. `None` propagates as `None` (never a
+    fabricated `0.0`), matching `DiffusionFrame.entropy`'s own "`None` means
+    not captured this run" discipline."""
+    metadata = []
+    for frame in frames:
+        mean_entropy = float(frame.entropy.mean().item()) if frame.entropy is not None else None
+        metadata.append(
+            FrameMetadata(
+                step_idx=frame.step_idx,
+                total_steps=len(frames),
+                t=frame.t,
+                temperature=frame.temperature,
+                committed_fraction=frame.committed_fraction_per_example[0]
+                if len(frame.committed_fraction_per_example) == 1
+                else None,
+                mean_entropy=mean_entropy,
+            )
+        )
+    return metadata
 
 
 def _build_on_frame(unique_id):
@@ -285,11 +330,16 @@ class DGemmaSampler:
         # the N-canvas `canvas k/N · step i/M` form keyed per image rather than
         # a flat running index reconstructed by a fragile 1:1 zip.
         canvas_indices = [frame.canvas_idx for frame in canvas_trace.frames]
+        # Per-image metadata key (issue #84, DECISION S-1): threaded the
+        # same way as canvas_indices above — one FrameMetadata per decoded
+        # frame, parallel to `frames`.
+        frame_metadata = _build_frame_metadata(canvas_trace.frames)
         frames_image = render_frames_to_image_batch(
             frames,
             width=FRAMES_IMAGE_WIDTH,
             font_size=FRAMES_IMAGE_FONT_SIZE,
             caption_step_index=FRAMES_IMAGE_CAPTION_STEP_INDEX,
             canvas_indices=canvas_indices,
+            frame_metadata=frame_metadata,
         )
         return (text, canvas_state, canvas_trace, frames, frames_image)

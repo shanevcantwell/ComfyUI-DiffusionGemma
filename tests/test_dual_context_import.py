@@ -79,3 +79,29 @@ def test_trace_resolves_relative_import_under_dotted_package_context(synthetic_p
     # issue #55 §2) — the relative-import depth from surfaces/comfyui/ is
     # unchanged, only the middle segment moved.
     assert module.build_commit_heatmap.__module__ == f"{synthetic_pack_root}.consumers.analysis"
+
+
+def test_tally_audit_node_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `surfaces/comfyui/tally_audit.py`'s dual-context
+    gate (issue #84) — same shape as the trace.py test above, proving the
+    relative climb to `consumers.tally_audit` resolves under a genuinely
+    dotted `__package__`."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.tally_audit")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__
+    assert module.DGemmaTallyAudit.FUNCTION == "audit"
+    assert module.audit_frames.__module__ == f"{synthetic_pack_root}.consumers.tally_audit"
+
+
+def test_consumers_tally_audit_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `consumers/tally_audit.py`'s own dual-context
+    gate (issue #84) — `consumers/` is a top-level pack-root child (same
+    depth as `dgemma/`), so importing it directly (not only transitively
+    via the surface node above) under a dotted package context proves its
+    own relative-import branch independently."""
+    module = importlib.import_module(f"{synthetic_pack_root}.consumers.tally_audit")
+
+    assert module.__package__ == f"{synthetic_pack_root}.consumers"
+    assert "." in module.__package__
+    assert module.DiffusionFrame.__module__ == f"{synthetic_pack_root}.dgemma.types"
