@@ -275,3 +275,11 @@ class TestWrapText:
         font = _load_font(16)
         lines = _wrap_text("first\nsecond", font, max_width=1000)
         assert lines == ["first", "second"]
+
+    def test_blank_paragraph_yields_blank_line_not_vanishing(self):
+        """Issue #74: a blank line between paragraphs (an empty paragraph
+        after splitting on '\\n') must survive as an empty string in the
+        output, preserving vertical spacing, rather than being dropped."""
+        font = _load_font(16)
+        lines = _wrap_text("first\n\nsecond", font, max_width=1000)
+        assert lines == ["first", "", "second"]
