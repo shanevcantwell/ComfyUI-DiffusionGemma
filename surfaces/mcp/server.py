@@ -115,5 +115,5 @@ def main() -> None:
     asyncio.run(run_server())
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — conventional process-entry guard, not exercised via import
     main()
