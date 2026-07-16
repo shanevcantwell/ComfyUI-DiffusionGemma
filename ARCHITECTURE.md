@@ -27,7 +27,12 @@ cited below (`ONE-DOOR`, `STATELESS-CORE`, `ONE-MINT`,
 
 ## The invariant (read this first)
 
-Seven rules. All seven apply simultaneously.
+Eight rules. All eight apply simultaneously. Rules 1–7 govern the core/surface seam
+(*what lives below the door and how surfaces reach through it*); rule 8 governs the tier
+*above* the surfaces (*who sequences the calls the surfaces expose*). The count grew by
+one when the 2026-07-16 family-congruence read (issue #92) found CDG had carried the
+core/surface contract faithfully but dropped the orchestration tier both family members
+name — see rule 8 and the *Orchestration / consumer plane* layer below.
 
 1. **One core, one contract.** `dgemma/` is the sole contract: its public face is
    `load_model` (`dgemma/model.py:157`) and `run_diffusion` (`dgemma/loop.py:465`,
@@ -83,12 +88,71 @@ Seven rules. All seven apply simultaneously.
    `on_frame` observer, whose return is ignored. *(→ #35 delta Corrections 2/3,
    ADR-CDG-010/011 · `ONE-DOOR`)*
 
+8. **Consumers orchestrate; they do not extend.** Run sequencing — sweeps, loops,
+   batteries, multi-run comparison — belongs to the tier *above* the surfaces, never
+   inside a surface body and never accreted into the core. A consumer composes and
+   sequences calls to already-contracted surface primitives; every capability it uses
+   already exists below it as a `load_model` / `run_diffusion` wrapper. The consumers of
+   this pack are humans driving the ComfyUI graph, agents driving MCP clients, scripts,
+   and the E2E driver (`tests/e2e/driver.py`, the existing in-repo instance — it
+   sequences whole battery scenarios over the surfaces, importing nothing from
+   `dgemma`/`surfaces`/`consumers`, ADR-CDG-013 Decision 1). A consumer that reaches past
+   the surface contract to touch core internals — or a code path added to the core that
+   exists solely to serve one consumer's sequencing need — is the violation this rule
+   names. This is sk-mcp's rule 3 transcribed to CDG's contract
+   (`../semantic-kinematics-mcp/docs/ARCHITECTURE.md` §The invariant, rule 3: *"Consumers
+   orchestrate; they do not extend… They exercise no novel pathways in the core"*), with
+   its **EXTERNAL** framing taken deliberately.
+
+   **⚠ Word-collision warning (adopt sk-mcp's EXTERNAL framing, reject prompt-prix's
+   internal one).** "Orchestration" names two opposite sides of a contract boundary
+   across the family, and CDG must not conflate them. In **sk-mcp** the *Orchestration /
+   consumer plane* sits **above** the MCP contract — external consumers sequencing
+   contracted calls (`../semantic-kinematics-mcp/docs/ARCHITECTURE.md` §The layers,
+   *Orchestration / consumer plane*). In **prompt-prix** "ORCHESTRATION" names the
+   **internal** top layer *below* its own entry points — `BatteryRunner` /
+   `ConsistencyRunner` / `ComparisonSession` calling `execute_test_case()`
+   (`../prompt-prix/docs/ARCHITECTURE.md` §Four-Layer Architecture, the ORCHESTRATION box
+   and §Layer Import Rules). Same word, opposite side of the door. **CDG adopts sk-mcp's
+   external sense**: orchestration is the plane of consumers *above* `surfaces/*`, not an
+   internal runner tier the core would grow. (Precedent for issuing this warning
+   explicitly rather than trusting the shared word: the repo `CLAUDE.md`'s own
+   P0–P3-node-pack-phases vs. CDG-008-topology-phases note — "same word, different
+   ledgers.") *(→ sk-mcp §The invariant rule 3 + §The layers · `ONE-DOOR` · rule 2 below
+   the door)*
+
 ---
 
 ## The layers
 
 Top (consumer) to bottom (substrate). Directory names in **target** form per
 ADR-CDG-008 §Decision-2; the current on-disk names are noted where they differ.
+
+### Orchestration / consumer plane — sequences the surfaces (rule 8)
+
+**What lives here (all EXTERNAL to the pack, above `surfaces/*`):** humans driving the
+ComfyUI node graph; agents and MCP clients driving `surfaces/mcp/`; scripts; and the E2E
+driver (`tests/e2e/driver.py`), the one in-repo instance — it sequences whole battery
+scenarios over the surfaces and, per ADR-CDG-013 Decision 1, imports nothing from
+`dgemma`/`surfaces`/`consumers` (the black-box independence enforced by
+`tests/e2e/test_e2e_import_guard.py`, already an *In force* row in the enforcement table).
+This mirrors sk-mcp's *Orchestration / consumer plane*
+(`../semantic-kinematics-mcp/docs/ARCHITECTURE.md` §The layers) — the tier that "compose[s]
+and sequence[s] calls to contracted primitives" and "exercise[s] no novel pathways in the
+core."
+
+**Rules (rule 8):**
+- A consumer composes and sequences already-contracted surface primitives. Sweeps, loops,
+  batteries, multi-run comparison live here — never in a surface body, never accreted into
+  the core.
+- A consumer that bypasses the surface contract to touch core internals, or a core code
+  path added to serve one consumer's sequencing, is an instant fail (rule 8 · the
+  *Orchestration / consumer plane* half of sk-mcp's rules 3–4).
+- **EXTERNAL framing, per the word-collision warning on rule 8:** this is sk-mcp's sense
+  of "orchestration" (above the contract), not prompt-prix's internal `BatteryRunner`
+  tier (below its entry points, `../prompt-prix/docs/ARCHITECTURE.md` §Four-Layer
+  Architecture). CDG grows no internal runner tier; if batch sequencing needs a home, it
+  is a consumer above `surfaces/*` or a new surface primitive, never core-resident logic.
 
 ### Consumers — derived analysis (`consumers/`)
 
@@ -153,6 +217,74 @@ analysis math relocated to `consumers/analysis.py` (CDG-008 Phase 3, issue #55)
 
 ---
 
+## Lifecycle & tenancy — the plane CDG has not built yet (honest absence)
+
+Rule 6 governs cross-*run* statelessness within a loaded model; it says nothing about the
+*lifecycle* of the ~53 GB load itself — who starts it, who owns the process, how many
+tenants share the card. Both family members name a lifecycle plane; CDG carried the
+core/surface contract faithfully but left this one blank. Stated honestly as an absence,
+in the same NOT-YET-IMPLEMENTED register the rest of this document uses for undesigned
+target.
+
+**Current fact (2026-07-16).** CDG loads DiffusionGemma **in-process, single-tenant**:
+whatever process calls `load_model` (a ComfyUI worker, or a `surfaces/mcp/` server via
+`StateManager.load`) holds the ~53 GB weights in *its own* address space for its lifetime.
+The 48 GB RTX-8000 dev box fits **one** such load at a time (model-card ≥60 GB bf16; local
+runs are quantized/offloaded per repo `CLAUDE.md` §Grounded facts). There is **no
+lifecycle delegation**: nothing external starts, stops, swaps, or arbitrates tenancy of
+the load. `StateManager` (`surfaces/mcp/state_manager.py`) persists only the model object
+(rule 6 · CDG-008 Phase 2 Correction 1) — it is a *holder*, not a *lifecycle owner*. Two
+surfaces cannot today share one resident load; each would load its own copy, and two
+copies do not fit.
+
+**The family's two answers (cited, neither adopted here):**
+
+- **prompt-prix — in-process pool, "one model at a time per server."** prompt-prix keeps
+  lifecycle *inside* the process via a `ServerPool` that "enforces the model-drain guard —
+  one model at a time per server to prevent VRAM swap"
+  (`../prompt-prix/docs/ARCHITECTURE.md` §local-inference-pool), the `current_model` drain
+  guard being the enabler of its pipelined scheduling (ibid. §Battery Execution). Tenancy
+  is arbitrated by an in-process component, not delegated out.
+- **sk-mcp — out-of-process llauncher delegation.** sk-mcp pushes lifecycle *out of the
+  core* entirely: "model-server lifecycle is delegated out of the core to llauncher"
+  (`../semantic-kinematics-mcp/docs/ARCHITECTURE.md` §The invariant, rule 1), and its
+  *Lifecycle plane (out of process)* states "llauncher owns the start/stop/swap/status
+  lifecycle of model servers… sk-mcp tools target an already-running endpoint; they do
+  not start, stop, or monitor model servers" (ibid. §The layers). Its "Why stateless"
+  §externalized-lifecycle names the failure this prevents: "The moment sk-mcp holds it,
+  the separation breaks and sk-mcp becomes a process manager."
+
+**Anticipated evolution — served-engine topology (ADR-candidate, named not decided).**
+The fork this section exists to name: a **served-engine** topology — one resident engine
+process owns the single ~53 GB load; `surfaces/comfyui/` and `surfaces/mcp/` become
+*clients* of that engine rather than in-process peers each holding their own copy;
+lifecycle (start/stop/swap/status of the engine) is **llauncher-owned**, sk-mcp's answer
+adopted over prompt-prix's in-process pool because CDG already runs on the llauncher
+substrate (repo `CLAUDE.md` §Environment). This **amends ADR-CDG-008's in-process-peer
+assumption** — CDG-008's "surfaces are peers over the core" (rule 2) tacitly assumes each
+peer can hold the load in-process; a served engine makes surfaces *remote* clients of a
+single resident load, which the 48 GB card's single-tenancy will eventually force. This
+amendment **names the fork; it does not decide it.** The decision is a separate bracket
+(operator sets requirements, per issue #92 process note).
+
+- **Trigger** (the observation that promotes the ADR-candidate to a written ADR): a
+  *second concurrent surface needing the resident model* — e.g. an MCP client and a
+  ComfyUI graph both wanting the loaded weights at once, which single-tenant in-process
+  loading cannot satisfy on the 48 GB card. Until that trigger fires, in-process
+  single-tenant is the honest current state and the served-engine topology stays an
+  ADR-candidate, not a plan.
+
+*Enforcement surface for the tenancy fact:* today the single-tenancy is enforced only by
+the *physics of the card* (two ~53 GB loads do not fit 48 GB) plus rule 6's holder-only
+`StateManager` (`tests/test_mcp_statelessness.py`, which asserts no run-state is cached
+but does **not** assert single-tenancy) — **known-fragile, review-only** as an
+architectural invariant, pending the served-engine ADR that would give it a real
+enforcement surface (an engine-client boundary test analogous to the seam tests). Named
+per GROUND_PHYSICS discipline 6 (assigned enforcement): the surface is the hardware limit
+plus prose, and this paragraph is that prose stating its own fragility.
+
+---
+
 ## What the invariant does NOT govern (out of scope)
 
 - **The published repo name `ComfyUI-DiffusionGemma`** — conserved identity
@@ -183,6 +315,15 @@ analysis math relocated to `consumers/analysis.py` (CDG-008 Phase 3, issue #55)
 ## Diagram
 
 ```
++-----------------------------------------------------------+
+| ORCHESTRATION / CONSUMER PLANE  (rule 8; EXTERNAL, above) |
+|   humans @ ComfyUI graph . MCP clients/agents . scripts   |
+|   tests/e2e/driver.py  (in-repo instance; imports nothing |
+|     from dgemma/surfaces/consumers -- ADR-CDG-013 Dec.1)  |
+|   -- sequences surfaces; adds no core pathway (rule 8)     |
++-----------------------------------------------------------+
+        |  surface calls only (never into the core directly)
+        v
    consumers/  (analysis: parses CanvasTrace)          -- landed (Phase 3)
         |  parses
         v
@@ -198,9 +339,16 @@ analysis math relocated to `consumers/analysis.py` (CDG-008 Phase 3, issue #55)
 +-----------------------------------------------------------+
         |
    torch . transformers . diffusers   -- shared substrate (out of scope, beside not through)
+
+   [lifecycle & tenancy plane -- NOT-YET-BUILT: today in-process single-tenant;
+    served-engine (llauncher-owned) is an ADR-candidate, not decided -- see the
+    "Lifecycle & tenancy" section above]
 ```
 
-The contract boundary is the `load_model` + `run_diffusion` line; every governed
+The orchestration/consumer plane sits **above** the surfaces (rule 8, EXTERNAL sense per
+the word-collision warning); it reaches the core *only* through surface calls, never
+laterally into `dgemma/`. The contract boundary is the `load_model` + `run_diffusion`
+line; every governed
 surface arrow crosses it. Shared substrate sits beside the layers, not through the
 door.
 
@@ -380,6 +528,8 @@ names its test / type / review surface and its status.
 | Shared fake-pipeline/scheduler fixture (N steps, mutable `config`, hook-recording model, `{"canvas":…}` application) | `tests/conftest.py:fake_pipeline_factory` (`FakeEntropyBoundScheduler`, `HookRecordingModel`, `FakeDiffusionGemmaPipeline`); self-tests in `tests/test_conftest_fake_pipeline.py` | **In force.** #35 R4. "Mutable `config`" resolved against the real `diffusers` `FrozenDict` (write-raises; mutation only via `register_to_config`, verified against the installed-wheel source) — see `tests/conftest.py`'s module docstring. |
 | Frames↔images index correspondence not untagged | Per-image frame-key tag or explicit no-zip contract (`CONSERVE-DATA-BOUNDARY`) | `NOT-YET-IMPLEMENTED` — #35 F7/F9, reconciled in ADR-009 / PR #31 ratification. |
 | E2E battery imports nothing from `dgemma`/`surfaces`/`consumers` (black-box independence, ADR-CDG-013 Decision 1) | `tests/e2e/test_e2e_import_guard.py` (subprocess `sys.modules` leak check, mirroring `tests/test_seam.py`'s shape, + a static AST scan) | **In force** — battery phase E0 (issue #59). |
+| Consumers orchestrate; they do not extend (rule 8 — sweeps/loops/batteries sequence surface primitives; no consumer-serving path accretes into the core) | Review-only + the existing rule-2 no-denoising-loop-in-surface-body posture (a sequencing loop belongs *above* the surfaces, not inside one; a body that grew one would already trip the surface-body review). The one in-repo consumer, `tests/e2e/driver.py`, is additionally *mechanically* black-boxed by the E2E import guard above (ADR-CDG-013 Decision 1) — but that guard proves independence of the driver, not the general rule | **Review-only — known-fragile** (GROUND_PHYSICS discipline 6). No mechanized cross-tier rule asserts "no consumer-serving path in the core" the way `tests/test_seam.py` asserts import direction; prose + the rule-2 review gate carry it today. A mechanizable surface (e.g. a consumer-plane import-graph rule) awaits the served-engine ADR that would give the tier a code boundary. Named honestly per issue #92 scope item 3. |
+| Lifecycle & tenancy of the ~53 GB load (in-process single-tenant today; no lifecycle delegation) | The physics of the 48 GB card (two ~53 GB loads do not fit) + rule 6's holder-only `StateManager` (`tests/test_mcp_statelessness.py` — asserts no run-state cached, does **not** assert single-tenancy) | **Review-only — known-fragile** (GROUND_PHYSICS discipline 6). The current single-tenancy is enforced by hardware limit + prose, not a test. The served-engine topology (ADR-candidate, §Lifecycle & tenancy) is the future home of a real enforcement surface (an engine-client boundary test) — **named, not decided**, trigger = a second concurrent surface needing the resident model. |
 | Node-pack coverage measured inside the ComfyUI subprocess and merged with unit-suite data (ADR-CDG-013 Decision 4) | `[tool.coverage.run]` (`pyproject.toml`: `parallel`, `concurrency=["thread"]`, `sigterm`, `source=["dgemma","surfaces","consumers"]`) + `sitecustomize.py` (`coverage.process_startup()`, a no-op unless `COVERAGE_PROCESS_START` is set) + `coverage combine` | **In force (mechanism verified E0; not yet exercised against a real battery run — E1/live phases pending the three operator-scheduled preconditions in issue #59 §5)**. |
 | Per-scenario green + combined-coverage readback banked to issue #59 / plan.md ("done" = all E2E scenarios green on the live model) | Battery run evidence, banked per ADR-CDG-013 Implementation Notes | `NOT-YET-IMPLEMENTED` — battery phases E2–E4 (issue #59). E0 landed the harness skeleton + S1; this phase (P2) adds S2 (full-knob), S3 (thinking-toggle, marked `xfail(strict=True)` against issue #9 — expected RED once live), and S4 (trace readout) to `tests/e2e/test_battery.py`/`driver.py`. All four scenarios (S1–S4) remain correctly SKIP-gated pending the three operator-scheduled live preconditions in issue #59 §5 — no scenario has run against the live model yet, so "green on the live model" is still unproven; only the harness/assertion code is built and unit-proven pre-infra. |
 
@@ -401,6 +551,20 @@ One row per invariant rule, each violation paired with its correct shape.
 | A surface passes a closure/hook into `run_diffusion` to shape logits | Pass declarative `constraints=` / `control_signals=`; the engine installs the hook, validated at ingress (rule 7) |
 | Capture ordered after pin (records constraint-asserted tokens as model-committed) | Capture runs before any canvas-writer; `pinned_mask` distinguishes the two (rule 7, ADR-CDG-010) |
 | Mutating `num_inference_steps` mid-run | Reject at ingress; mutate only `scheduler.config` values `step()` reads fresh (rule 7, ADR-CDG-011) |
+| A sweep/loop/battery written *inside* a surface body (the ComfyUI node runs N configs itself) or accreted into the core to serve one surface | The sequencing lives in the orchestration/consumer plane *above* `surfaces/*`; the surface exposes one contracted primitive the consumer calls N times (rule 8, EXTERNAL sense) |
+| A consumer capability that exists on only one surface — e.g. the structured run-config/run-log that today rides `surfaces/comfyui/`'s `on_frame` observer but has no `surfaces/mcp/` equivalent | Surface parity: a run-record vocabulary is core/consumer-tier identity (`IDENTITY⊥ENVELOPE`), so it is reachable from every surface, promoted when a second surface needs it (rule 8; live instance below) |
+
+**Live instance of the drift this tier catches (2026-07-16 session).** The structured
+run-log (issue #72) is presently a **ComfyUI-surface-only** capability: it rides
+`surfaces/comfyui/`'s read-only `on_frame` observer (the sanctioned executable crossing)
+with a post-run `consumers/` serializer, and its promotion to the MCP surface is recorded
+as a **trigger on #72**, not yet built. This is the *first live instance* of the drift
+class rule 8 and the lifecycle/tenancy naming exist to catch: a consumer-facing capability
+settling onto one surface before the orchestration tier is named makes surface-parity
+gaps invisible. Naming the tier is what turns "the MCP surface silently lacks run-logging"
+from an unnoticed asymmetry into a tracked #72 trigger. The record identity is the
+`dgemma/types.py` dataclasses (`IDENTITY⊥ENVELOPE`, issue #72 §Placement), so parity is
+reachable — the gap is one of *which surface exposes it*, exactly the rule-8 concern.
 
 ---
 
