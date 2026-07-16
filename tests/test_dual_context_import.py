@@ -105,3 +105,26 @@ def test_consumers_tally_audit_resolves_relative_import_under_dotted_package_con
     assert module.__package__ == f"{synthetic_pack_root}.consumers"
     assert "." in module.__package__
     assert module.DiffusionFrame.__module__ == f"{synthetic_pack_root}.dgemma.types"
+
+
+def test_consumers_run_log_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `consumers/run_log.py`'s own dual-context gate
+    (issue #72), same shape as the tally_audit test above."""
+    module = importlib.import_module(f"{synthetic_pack_root}.consumers.run_log")
+
+    assert module.__package__ == f"{synthetic_pack_root}.consumers"
+    assert "." in module.__package__
+    assert module.CanvasTrace.__module__ == f"{synthetic_pack_root}.dgemma.types"
+
+
+def test_run_log_writer_node_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `surfaces/comfyui/run_log_writer.py`'s dual-context
+    gate (issue #72) — same shape as the tally_audit-node test above,
+    proving the relative climb to both `consumers.run_log` and
+    `socket_types` resolves under a genuinely dotted `__package__`."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.run_log_writer")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__
+    assert module.DGemmaRunLogWriter.FUNCTION == "write"
+    assert module.build_run_log_header.__module__ == f"{synthetic_pack_root}.consumers.run_log"
