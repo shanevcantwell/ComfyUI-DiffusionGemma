@@ -1,6 +1,6 @@
 # AR-side authorship arrives as KVs, not tokens — the field-determination hypothesis
 
-**Status:** hypothesis note, pre-discriminating-evidence. **Date:** 2026-07-16 (session note, banked verbatim at operator direction).
+**Status:** H0 falsified by the T01-09-06 sweep (same day) — see Result addendum. **Date:** 2026-07-16 (session note, banked verbatim at operator direction).
 **Anchors:** issue #40 (sweep results comment, 2026-07-16), issue #47, issue #62 / ADR-CDG-012, issue #14, issue #28, `docs/experiments/2026-07-15-dg-numeral-counts-update-in-response/`.
 
 ## The two readings of "who authors the content"
@@ -29,3 +29,13 @@ Consequences:
 ## H0 (falsifiable)
 
 *Numeral-position content is invariant under commit-schedule perturbation at fixed seed.* Falsified by basin-varying evidence rows in the 2026-07-16T01-09-06 sweep (analysis pending at time of writing; predictions for that sweep were stated pre-observation in the session record and #40).
+
+## Result addendum (2026-07-16, same session)
+
+The `T01-09-06` sweep (randomness-demanding prompt, fixed seed, entropy_bound 0.01–0.10) **falsified the H0**: all ten runs drew *distinct* evidence rows — ten singleton classes, no basins — so commit-schedule perturbation does reach content. Universal fossil prefix: every run opens `4, 0, 9, 2, 1` (shared-prefix floor 5 of 26 positions; closest pair diverges at only 3 positions).
+
+Two-sweep synthesis: **the field decides when the prior landscape has one deep basin** (sweep 1's sequential cycles — schedule-invariant, B-fingerprinted); **trajectory picks the basin when the prompt forces a multi-basin landscape** (sweep 2 — ten distinct draws). Reading A vs B is not either/or; it is prior-depth-dependent, i.e. #10's trajectory-selector acting on content.
+
+Companion finding (tally correctness): only 4/10 runs arithmetically consistent, every miss an under-count; the three zero-revision runs all finished wrong; all 15 revision events across the sweep moved toward truth. Reconciliation is real but starved — counts freeze at prior-typical values unless revised before the commit front closes. Full audit banked on issue #40.
+
+Next rung unchanged: per-position entropy at early steps (#14) now discriminates *within* runs — fossil-prefix positions should show near-zero step-1 entropy; divergent positions should not.
