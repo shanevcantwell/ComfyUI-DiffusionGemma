@@ -53,7 +53,14 @@ def test_mint_exposes_the_three_named_socket_types():
         "DGEMMA_CANVAS_TRACE",
         "DGEMMA_CONSTRAINTS",
         "DGEMMA_CONTROL_SIGNALS",
+        "DGEMMA_RUN_CONFIG",
     }
+
+
+def test_mint_exposes_the_run_config_socket_type():
+    """Issue #72, D-3: `DGEMMA_RUN_CONFIG` minted once in this module — the
+    sampler's assembled seed+knob bundle threaded to `DGemmaRunLogWriter`."""
+    assert socket_types.DGEMMA_RUN_CONFIG == "DGEMMA_RUN_CONFIG"
 
 
 def test_mint_exposes_the_constraint_and_control_signal_socket_types():

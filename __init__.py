@@ -10,7 +10,12 @@ shareable, alongside the STRING itself, rather than a separate node.
 audits a "count the numerals" task's per-step tally claims against the
 model's own restated evidence — `surfaces/comfyui/tally_audit.py` wrapping
 `consumers/tally_audit.py`'s pure functions, same composition pattern as
-`DGemmaTrace`/`consumers/analysis.py`.
+`DGemmaTrace`/`consumers/analysis.py`. `DGemmaRunLogWriter` (issue #72)
+writes a schema'd JSONL run log — a SaveImage-convention node that owns its
+own file handle (`surfaces/comfyui/run_log_writer.py` wrapping
+`consumers/run_log.py`'s pure builders), superseding the escaped-newline-
+trap-prone `.txt` step-log convention `consumers/tally_audit.py`'s
+`extract_decoded_frames_from_composite_blob` was built to reverse.
 
 ComfyUI discovers a custom node pack by importing this module and reading
 NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS (+ `WEB_DIRECTORY`, checked
@@ -35,11 +40,13 @@ empirically by the reviewer).
 """
 if __package__:
     from .surfaces.comfyui.loader import DGemmaLoader
+    from .surfaces.comfyui.run_log_writer import DGemmaRunLogWriter
     from .surfaces.comfyui.sampler import DGemmaSampler
     from .surfaces.comfyui.tally_audit import DGemmaTallyAudit
     from .surfaces.comfyui.trace import DGemmaTrace
 else:
     from surfaces.comfyui.loader import DGemmaLoader
+    from surfaces.comfyui.run_log_writer import DGemmaRunLogWriter
     from surfaces.comfyui.sampler import DGemmaSampler
     from surfaces.comfyui.tally_audit import DGemmaTallyAudit
     from surfaces.comfyui.trace import DGemmaTrace
@@ -49,12 +56,14 @@ NODE_CLASS_MAPPINGS: dict = {
     "DGemmaSampler": DGemmaSampler,
     "DGemmaTrace": DGemmaTrace,
     "DGemmaTallyAudit": DGemmaTallyAudit,
+    "DGemmaRunLogWriter": DGemmaRunLogWriter,
 }
 NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaLoader": "DiffusionGemma Loader",
     "DGemmaSampler": "DiffusionGemma Sampler",
     "DGemmaTrace": "DiffusionGemma Trace",
     "DGemmaTallyAudit": "DiffusionGemma Tally Audit",
+    "DGemmaRunLogWriter": "DiffusionGemma Run Log Writer",
 }
 
 # P3 (a): the live per-step view (`surfaces/comfyui/web/live_view.js`).

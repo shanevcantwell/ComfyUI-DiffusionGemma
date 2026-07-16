@@ -33,13 +33,19 @@ from surfaces.comfyui.sampler import DGemmaSampler
 
 
 class _StubModel:
-    """Minimal `DGEMMA_MODEL` stand-in exposing only `.processor` — the one
-    attribute `DGemmaSampler.sample()` reads (P3's `frames` output) to call
-    `decode_frames(model.processor, ...)`. A bare `object()` has no
-    `.processor` and would raise `AttributeError` the moment `sample()`
-    reaches that call."""
+    """Minimal `DGEMMA_MODEL` stand-in exposing only the attributes
+    `DGemmaSampler.sample()` reads: `.processor` (P3's `frames` output,
+    `decode_frames(model.processor, ...)`) and, since issue #72,
+    `.repo_id`/`.quant`/`.device`/`.dtype` (the sampler's `run_config`
+    output, `RunConfig(model_repo_id=model.repo_id, ...)`). A bare
+    `object()` has none of these and would raise `AttributeError` the
+    moment `sample()` reaches the relevant call."""
 
     processor = object()
+    repo_id = "stub/repo"
+    quant = "none"
+    device = "cpu"
+    dtype = "bfloat16"
 
 
 class _StubTrace:
@@ -256,6 +262,7 @@ def test_sampler_declarations():
         "DGEMMA_CANVAS_TRACE",
         "STRING",
         "IMAGE",
+        "DGEMMA_RUN_CONFIG",
     )
     assert DGemmaSampler.RETURN_NAMES == (
         "text",
@@ -263,13 +270,15 @@ def test_sampler_declarations():
         "canvas_trace",
         "frames",
         "images",
+        "run_config",
     )
     # `frames` (P3, the per-step flipbook STRING list) is the only
     # `OUTPUT_IS_LIST=True` output. `frames_image` (issue #21 rework) is a
     # single stacked (N, H, W, 3) batch tensor, NOT a list — a wrong flag
     # here would make ComfyUI fan out per-frame and break
     # PreviewImage/SaveAnimatedWEBP/VHS, which all expect one batch tensor.
-    assert DGemmaSampler.OUTPUT_IS_LIST == (False, False, False, True, False)
+    # `run_config` (issue #72) is one plain object, not a list either.
+    assert DGemmaSampler.OUTPUT_IS_LIST == (False, False, False, True, False, False)
     assert DGemmaSampler.FUNCTION == "sample"
     assert DGemmaSampler.CATEGORY == "DiffusionGemma"
 
@@ -349,13 +358,21 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         thinking=False,
     )
 
-    assert result == (
+    text, canvas_state, canvas_trace, frames, images, run_config = result
+    assert (text, canvas_state, canvas_trace, frames, images) == (
         "decoded text",
         "canvas-state-stub",
         sentinel_trace,
         ["frame 0", "frame 1"],
         sentinel_image_batch,
     )
+    # `run_config` (issue #72, Option A): assembled from the same widget
+    # args/model attributes just asserted below via `captured["kwargs"]`,
+    # not re-derived — see `RunConfig`'s own field-by-field contract in
+    # `tests/test_run_log.py`.
+    assert run_config.prompt == "hello"
+    assert run_config.seed == 7
+    assert run_config.model_repo_id == sentinel_model.repo_id
     assert captured["model"] is sentinel_model
     # `decode_frames` is called with the model's processor and the trace's
     # own frames — one helper call, no logic of its own (ADR-CDG-003).
@@ -441,8 +458,8 @@ def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkey
         thinking=False,
     )
 
-    assert len(result) == 5
-    _text, _canvas_state, _canvas_trace, frames, frames_image = result
+    assert len(result) == 6
+    _text, _canvas_state, _canvas_trace, frames, frames_image, _run_config = result
     assert frames == decoded_frames
 
     assert isinstance(frames_image, torch.Tensor)
@@ -499,7 +516,7 @@ def _assert_result_with_no_captured_frames(result, *, text: str, state: str, tra
     the honest empty `(0, 1, 1, 3)` batch — see
     `tests/test_frames_image.py::TestRenderOutputContract::test_no_frames_yields_empty_batch_not_a_crash`
     for that helper's own degenerate-input contract."""
-    got_text, got_state, got_trace, got_frames, got_image = result
+    got_text, got_state, got_trace, got_frames, got_image, _got_run_config = result
     assert got_text == text
     assert got_state == state
     assert got_trace is trace
