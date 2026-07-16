@@ -106,7 +106,7 @@ def _check_transformers_version(installed: str | None = None) -> None:
         from packaging.version import Version
 
         mismatched = Version(installed).release[:2] != required_series
-    except Exception:
+    except Exception:  # pragma: no cover — untriggerable: packaging is a transformers dep, always importable
         # Patch-tolerant string fallback: the installed version must start
         # with the `major.minor.` prefix. The trailing dot is load-bearing —
         # it stops `5.130.0` from matching a `5.13` series.
@@ -121,7 +121,7 @@ _check_transformers_version()
 
 try:
     from transformers import AutoProcessor, DiffusionGemmaForBlockDiffusion
-except ImportError as exc:
+except ImportError as exc:  # pragma: no cover — broken/partial transformers install, see issue #25
     # The version check above already raised its own actionable message for
     # a simple version mismatch — reaching here with an ImportError means
     # something else is broken about the installed transformers (partial or
