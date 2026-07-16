@@ -82,6 +82,21 @@ calls `image.save(...)` on whatever it's handed) and throws on text. Text
 goes out its own custom event via `send_sync`, never through `preview=`.
 This is a review-gate risk, not a test-enforced one — there is no clean unit
 test for "this code path never calls the wrong API" (plan.md Risks).
+
+**A sixth output, `run_config` (issue #72, Option A / D-1):** a
+`DGEMMA_RUN_CONFIG`-typed `consumers.run_log.RunConfig` bundle assembled
+from widget args and `model` attributes this method already holds (`seed`,
+every knob, `model.repo_id`/`quant`/`device`/`dtype`, `prompt`) — a pure
+unpack-and-forward, no new logic (ARCHITECTURE.md rule 2 stays intact, AC-8).
+`run_diffusion`'s returned `CanvasTrace` does not carry these values (G-1:
+`_build_result` never receives seed/confidence/gen_length/thinking/prompt),
+so the sampler is the sole position that can assemble a correct header —
+this output exists so `DGemmaRunLogWriter`
+(`surfaces/comfyui/run_log_writer.py`) can build one without re-deriving it.
+Wiring this output costs nothing when unwired (ComfyUI only computes what a
+downstream node actually consumes at the socket level; an unconnected output
+is simply not read) and stays surface-side per Option A's rejection of
+widening the core's `_build_result` signature for a downstream-only value.
 """
 from __future__ import annotations
 
@@ -99,6 +114,7 @@ import logging
 # comment: this module's own absolute package name ("surfaces.comfyui")
 # contains a dot even under bare pytest, so a naive check would misfire.
 if __package__ and __package__.count(".") >= 2:
+    from ...consumers.run_log import RunConfig
     from ...dgemma.loop import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
@@ -110,8 +126,14 @@ if __package__ and __package__.count(".") >= 2:
         run_diffusion,
     )
     from .frames_image import FrameMetadata, render_frames_to_image_batch
-    from .socket_types import DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, DGEMMA_MODEL
+    from .socket_types import (
+        DGEMMA_CANVAS_STATE,
+        DGEMMA_CANVAS_TRACE,
+        DGEMMA_MODEL,
+        DGEMMA_RUN_CONFIG,
+    )
 else:
+    from consumers.run_log import RunConfig
     from dgemma.loop import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
@@ -127,6 +149,7 @@ else:
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
         DGEMMA_MODEL,
+        DGEMMA_RUN_CONFIG,
     )
 
 # Event name for the live per-step push (plan.md Phase 3 (a)). Namespaced
@@ -288,12 +311,13 @@ class DGemmaSampler:
             },
         }
 
-    RETURN_TYPES = ("STRING", DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, "STRING", "IMAGE")
-    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "images")
+    RETURN_TYPES = ("STRING", DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, "STRING", "IMAGE", DGEMMA_RUN_CONFIG)
+    RETURN_NAMES = ("text", "canvas_state", "canvas_trace", "frames", "images", "run_config")
     # `frames_image` is a single stacked (N, H, W, 3) batch tensor, NOT a
     # list — False here, unlike `frames`' True (see this module's docstring:
     # a list would fan out per-frame and break PreviewImage/SaveAnimatedWEBP/VHS).
-    OUTPUT_IS_LIST = (False, False, False, True, False)
+    # `run_config` (issue #72) is one plain `RunConfig` object, not a list.
+    OUTPUT_IS_LIST = (False, False, False, True, False, False)
     FUNCTION = "sample"
     CATEGORY = "DiffusionGemma"
 
@@ -342,4 +366,24 @@ class DGemmaSampler:
             canvas_indices=canvas_indices,
             frame_metadata=frame_metadata,
         )
-        return (text, canvas_state, canvas_trace, frames, frames_image)
+        # `run_config` (issue #72, Option A / D-1): a plain unpack of args and
+        # `model` attributes this method already holds — no re-derivation, no
+        # new logic. This is the ONLY position holding seed+knobs+model-id
+        # simultaneously (G-2), so it is assembled here rather than pushed
+        # into `run_diffusion`'s core signature.
+        run_config = RunConfig(
+            prompt=prompt,
+            model_repo_id=model.repo_id,
+            seed=seed,
+            num_inference_steps_requested=num_inference_steps,
+            gen_length=gen_length,
+            t_min=t_min,
+            t_max=t_max,
+            entropy_bound=entropy_bound,
+            confidence=confidence,
+            thinking=thinking,
+            quant=model.quant,
+            device=model.device,
+            dtype=model.dtype,
+        )
+        return (text, canvas_state, canvas_trace, frames, frames_image, run_config)
