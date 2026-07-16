@@ -86,34 +86,24 @@ def _install_fakes(monkeypatch, *, num_steps: int = 2, scheduler_kwargs_out: dic
 
 
 class TestValidPayloadsAreIgnoredBehaviorally:
-    """Phase 1's central done-criterion: a valid payload changes NOTHING
-    about the run's output (participants aren't wired yet) — only an
-    invalid one is observable, via the reject path."""
-
-    def test_valid_constraints_payload_produces_identical_trace_to_none(self, monkeypatch):
-        _install_fakes(monkeypatch, num_steps=3)
-        text_a, state_a, trace_a = run_diffusion(
-            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=3
-        )
-
-        _install_fakes(monkeypatch, num_steps=3)
-        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
-        text_b, state_b, trace_b = run_diffusion(
-            _fake_model(),
-            "hi",
-            entropy_bound=0.1,
-            t_min=0.4,
-            t_max=0.8,
-            num_inference_steps=3,
-            constraints=constraints,
-        )
-
-        assert text_a == text_b
-        assert state_a.committed_fraction == state_b.committed_fraction
-        assert trace_a.scheduler_config == trace_b.scheduler_config
-        telemetry_a = [(f.t, f.temperature, f.committed_fraction_per_example) for f in trace_a.frames]
-        telemetry_b = [(f.t, f.temperature, f.committed_fraction_per_example) for f in trace_b.frames]
-        assert telemetry_a == telemetry_b
+    """Phase 1's original done-criterion was "a valid payload changes NOTHING
+    about the run's output" for all three payloads — true then because no
+    participant existed. Issue #64 Phase 3 gives `constraints=` a real,
+    engine-built effect (`PinParticipant` + the logit-mask hook,
+    `dgemma/loop.py`), so `constraints=` is INTENTIONALLY dropped from this
+    class: its "no observable effect" claim is now false by design, and its
+    real end-to-end effect is covered by `tests/test_constraints.py`
+    (`TestPinReassertion`/`TestBothMechanisms`), which drives the R4
+    `fake_pipeline_factory` fixture — the one fake in this test suite that
+    actually threads a participant's `{"canvas": ...}` return back into the
+    pipeline's applied canvas (`tests/test_run_diffusion_ingress.py`'s own
+    `_install_fakes` `FakePipeline` below does NOT thread that return value
+    at all, which is why a pre-Phase-3 version of this test module could not
+    have caught a wired-but-broken pin participant either way — a fake gap,
+    not a feature, now retired for `constraints=` specifically).
+    `control_signals=`/`capture=` remain genuinely validated-then-ignored
+    (Phase 4 / issue #61 own their participant bodies), so their two tests
+    below are unchanged."""
 
     def test_valid_control_signals_payload_produces_identical_trace_to_none(self, monkeypatch):
         _install_fakes(monkeypatch, num_steps=3)

@@ -70,9 +70,39 @@ class FakeProcessor:
     tokenizer = FakeTokenizer()
 
 
+class _NoOpRemovableHandle:
+    def remove(self) -> None:
+        pass
+
+
+class _HookCapableModel:
+    """Minimal `model=` stand-in exposing just enough surface for
+    `dgemma.hooks.install_logit_shaping_hook` to install/tear down a hook
+    (issue #64 Phase 3: `constraints=` now builds and installs a real logit-
+    mask hook, so every `_fake_model()` in this module needs SOMETHING at
+    `.model` that supports `register_forward_hook` — a bare `object()`,
+    sufficient pre-Phase-3 when no hook was ever built from `constraints=`,
+    now raises `AttributeError`). Deliberately NOT `HookRecordingModel`
+    (`tests/conftest.py`) — this module doesn't use the R4 fixture at all
+    (see the module docstring's two-tier structure), so pulling in a real
+    `torch.nn.Module` here would be a heavier fixture than this file's own
+    hand-rolled-fake idiom otherwise needs. This class only proves the hook
+    lifecycle doesn't crash; `tests/test_constraints_hook.py`/
+    `tests/test_hook_lifecycle.py` own the actual install/teardown/masking
+    assertions."""
+
+    def register_forward_hook(self, hook_fn):
+        return _NoOpRemovableHandle()
+
+
 def _fake_model() -> DGemmaModel:
     return DGemmaModel(
-        model=object(), processor=FakeProcessor(), device="cpu", dtype="bfloat16", repo_id="fake/repo", quant="none"
+        model=_HookCapableModel(),
+        processor=FakeProcessor(),
+        device="cpu",
+        dtype="bfloat16",
+        repo_id="fake/repo",
+        quant="none",
     )
 
 
