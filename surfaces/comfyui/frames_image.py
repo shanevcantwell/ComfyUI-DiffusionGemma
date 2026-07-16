@@ -19,10 +19,23 @@ into a ComfyUI-native `IMAGE` tensor. This module is intentionally
 ComfyUI-agnostic itself (no socket types, no `INPUT_TYPES`/`RETURN_TYPES`) —
 it is a plain rendering helper the node layer (`nodes/sampler.py`) calls,
 not a node.
-"""
+
+**Metadata banner (issue #84, DECISION S-1):** `FrameMetadata` + the
+`frame_metadata=` parameter below thread `DiffusionFrame`'s per-step
+telemetry (`t`, `temperature`, `committed_fraction`, mean Tier-0 `entropy`)
+into the rendered batch, drawn as a top-left banner line — a SEPARATE
+per-image key from `canvas_indices`, threaded the identical way
+(length-checked parallel-to-`frames` list, additive-optional per field,
+`None` renders `—`). `FrameMetadata` is a plain surface-side dataclass, not
+a `dgemma/types.py` addition: it is a rendering-time repackaging of fields
+that already live on `DiffusionFrame` (ADR-CDG-014), built by the caller
+(`surfaces/comfyui/sampler.py`) from `canvas_trace.frames` — no new core
+type, no new socket, nothing crosses the `dgemma`/`surfaces` seam that
+doesn't already (rule 3/5 unaffected)."""
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -103,19 +116,24 @@ def _line_height(font) -> int:
 
 
 def _rasterize_frame(
-    text: str, *, width: int, height: int, font, caption: str | None
+    text: str, *, width: int, height: int, font, caption: str | None, banner: str | None = None
 ) -> Image.Image:
     """Render one decoded step to a fixed `(width, height)` dark-background
-    RGB canvas: word-wrapped body text top-left, optional small step-index
-    caption bottom-right. `height` is precomputed by the caller from the
-    tallest wrapped frame in the batch, so every frame shares one canvas
+    RGB canvas: an optional metadata `banner` line top-left (issue #84,
+    DECISION S-1), then word-wrapped body text below it, optional small
+    step-index `caption` bottom-right. `height` is precomputed by the
+    caller from the tallest wrapped frame in the batch PLUS one banner line
+    when `frame_metadata` was supplied, so every frame shares one canvas
     size (`IMAGE` batching requires uniform H/W) — this function never
     resizes itself, it just draws into the size it's given."""
     image = Image.new("RGB", (width, height), _BG_COLOR)
     draw = ImageDraw.Draw(image)
-    lines = _wrap_text(text, font, max_width=width - 2 * _MARGIN)
     line_h = _line_height(font)
     y = _MARGIN
+    if banner:
+        draw.text((_MARGIN, y), banner, font=font, fill=_CAPTION_COLOR)
+        y += line_h
+    lines = _wrap_text(text, font, max_width=width - 2 * _MARGIN)
     for line in lines:
         draw.text((_MARGIN, y), line, font=font, fill=_FG_COLOR)
         y += line_h
@@ -128,6 +146,56 @@ def _rasterize_frame(
             fill=_CAPTION_COLOR,
         )
     return image
+
+
+@dataclass
+class FrameMetadata:
+    """One frame's banner-relevant telemetry (issue #84, DECISION S-1) — a
+    surface-side repackaging of `DiffusionFrame` fields (ADR-CDG-014), not a
+    new core type. Every field beyond `step_idx`/`total_steps` is
+    additive-optional (`None` renders `—`, never a fabricated value) —
+    mirrors `DiffusionFrame.entropy`'s own "`None` means not captured this
+    run, never zero" discipline (dgemma/types.py)."""
+
+    step_idx: int
+    """0-based running index of this frame within the whole captured
+    series (matches `DiffusionFrame.step_idx`'s per-block numbering — this
+    banner does not attempt N-canvas block-local renumbering, that is
+    `_block_local_captions`' own job for the bottom-right caption)."""
+
+    total_steps: int
+    """Total frame count in this series — `i/M` denominator."""
+
+    t: float | None = None
+    temperature: float | None = None
+    committed_fraction: float | None = None
+
+    mean_entropy: float | None = None
+    """Mean of `DiffusionFrame.entropy` (Tier 0, ADR-CDG-014) across canvas
+    positions — a scalar reduction of the per-position tensor, computed by
+    the caller (`surfaces/comfyui/sampler.py`) before this dataclass is
+    built; `None` when `entropy` was not captured this run (mirrors that
+    field's own `None` semantics, ADR-CDG-014 Decision 3)."""
+
+
+def _format_number(value: float | None, fmt: str) -> str:
+    """`—` for `None` (additive-optional discipline: absence renders
+    honestly, never as a fabricated `0.0000`), `fmt` otherwise."""
+    return "—" if value is None else format(value, fmt)
+
+
+def _format_banner(metadata: "FrameMetadata") -> str:
+    """`step i/M · t=... · temperature=... · committed%=... · entropy=...`
+    (issue #84 operator requirement (a)). 1-based `i` for display (matches
+    `_block_local_captions`' own 1-based convention); absent optional
+    fields render `—`."""
+    return (
+        f"step {metadata.step_idx + 1}/{metadata.total_steps} · "
+        f"t={_format_number(metadata.t, '.3f')} · "
+        f"temperature={_format_number(metadata.temperature, '.3f')} · "
+        f"committed%={_format_number(metadata.committed_fraction, '.1%')} · "
+        f"entropy={_format_number(metadata.mean_entropy, '.3f')}"
+    )
 
 
 def _block_local_captions(canvas_indices: list[int]) -> list[str]:
@@ -180,6 +248,7 @@ def render_frames_to_image_batch(
     font_size: int = 20,
     caption_step_index: bool = True,
     canvas_indices: list[int] | None = None,
+    frame_metadata: "list[FrameMetadata] | None" = None,
 ) -> torch.Tensor:
     """Rasterize `frames` (one already-decoded step each, in order — e.g.
     `DGemmaSampler`'s own `frames` `STRING` output) into a ComfyUI `IMAGE`
@@ -201,6 +270,15 @@ def render_frames_to_image_batch(
     without frame metadata, and existing behavior). `caption_step_index=False`
     suppresses captions entirely, regardless of `canvas_indices`.
 
+    `frame_metadata` (issue #84, DECISION S-1): an optional per-image
+    `FrameMetadata` key, threaded the SAME way as `canvas_indices` — parallel
+    to `frames`, length-checked, one entry each. When provided, a top-left
+    banner line (`_format_banner`: `"step i/M · t=... · temperature=... ·
+    committed%=... · entropy=..."`) is drawn on every frame, and the batch
+    height grows by one line to make room for it. `None` (the default)
+    renders no banner at all — existing callers/tests are byte-for-byte
+    unaffected (no layout regression for the banner-off default).
+
     NOTE (ADR-CDG-009 §2, held design): synthetic **divider frames** between
     canvases are deliberately NOT inserted here — that encoding (background
     color, whether a non-denoising frame belongs in the `images` batch) is an
@@ -220,12 +298,19 @@ def render_frames_to_image_batch(
             f"frames (got {len(canvas_indices)} indices for {len(frames)} frames)."
         )
 
+    if frame_metadata is not None and len(frame_metadata) != len(frames):
+        raise ValueError(
+            "render_frames_to_image_batch: frame_metadata must be parallel to "
+            f"frames (got {len(frame_metadata)} entries for {len(frames)} frames)."
+        )
+
     font = _load_font(font_size)
     total = len(frames)
     wrapped = [_wrap_text(text, font, max_width=width - 2 * _MARGIN) for text in frames]
     max_lines = max(len(lines) for lines in wrapped)
     line_h = _line_height(font)
-    height = 2 * _MARGIN + max_lines * line_h
+    banner_lines = 1 if frame_metadata is not None else 0
+    height = 2 * _MARGIN + (max_lines + banner_lines) * line_h
 
     if canvas_indices is not None:
         block_captions = _block_local_captions(canvas_indices)
@@ -240,7 +325,8 @@ def render_frames_to_image_batch(
             caption = block_captions[idx]
         else:
             caption = f"step {idx + 1}/{total}"
-        image = _rasterize_frame(text, width=width, height=height, font=font, caption=caption)
+        banner = _format_banner(frame_metadata[idx]) if frame_metadata is not None else None
+        image = _rasterize_frame(text, width=width, height=height, font=font, caption=caption, banner=banner)
         images.append(np.asarray(image, dtype=np.uint8))
 
     batch = np.stack(images, axis=0)  # (N, H, W, 3) uint8

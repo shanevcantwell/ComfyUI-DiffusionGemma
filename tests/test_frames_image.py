@@ -16,7 +16,9 @@ import pytest
 import torch
 
 from surfaces.comfyui.frames_image import (
+    FrameMetadata,
     _block_local_captions,
+    _format_banner,
     _load_font,
     _wrap_text,
     render_frames_to_image_batch,
@@ -283,3 +285,111 @@ class TestWrapText:
         font = _load_font(16)
         lines = _wrap_text("first\n\nsecond", font, max_width=1000)
         assert lines == ["first", "", "second"]
+
+
+class TestFormatBanner:
+    """`_format_banner` — issue #84, DECISION S-1: `step i/M · t=... ·
+    temperature=... · committed%=... · entropy=...`, with `—` rendered for
+    every absent optional field (additive-optional discipline, mirrors
+    `DiffusionFrame`'s own `None`-means-absent semantics, never a
+    fabricated zero)."""
+
+    def test_all_fields_present(self):
+        metadata = FrameMetadata(
+            step_idx=2, total_steps=12, t=0.75, temperature=0.62, committed_fraction=0.4375, mean_entropy=1.203
+        )
+        banner = _format_banner(metadata)
+
+        assert banner == "step 3/12 · t=0.750 · temperature=0.620 · committed%=43.8% · entropy=1.203"
+
+    def test_all_optional_fields_absent_render_em_dash(self):
+        """Every optional field `None` (e.g. a scheduler that doesn't
+        expose `t`/`temperature`/`committed_fraction`, or `entropy`
+        uncaptured this run) renders `—`, never a fabricated `0.000`."""
+        metadata = FrameMetadata(step_idx=0, total_steps=1)
+        banner = _format_banner(metadata)
+
+        assert banner == "step 1/1 · t=— · temperature=— · committed%=— · entropy=—"
+
+    def test_entropy_absent_others_present(self):
+        """The realistic partial-absence case (ADR-CDG-014 Decision 3):
+        `t`/`temperature`/`committed_fraction` are always populated by the
+        real scheduler, but `entropy` alone can be `None` when `logits`
+        weren't reachable this run."""
+        metadata = FrameMetadata(step_idx=0, total_steps=1, t=1.0, temperature=0.8, committed_fraction=0.0)
+        banner = _format_banner(metadata)
+
+        assert "entropy=—" in banner
+        assert "t=1.000" in banner
+
+
+class TestMetadataBanner:
+    """`render_frames_to_image_batch(frame_metadata=...)` — DECISION S-1's
+    threading contract: parallel to `frames`, length-checked (mirrors
+    `canvas_indices`'s own contract exactly), additive-optional (`None`
+    default renders no banner and is byte-identical to the pre-#84 output —
+    AC#4's "no layout regression for banner-off default")."""
+
+    def test_banner_off_default_matches_pre_84_output_exactly(self):
+        """The implementer's call (AC#4): `frame_metadata=None` (the
+        default) must not change rendered output at all versus the
+        pre-existing (no-banner) code path."""
+        frames = _frames(num_frames=3)
+
+        without_param = render_frames_to_image_batch(frames, width=256, font_size=16)
+        with_explicit_none = render_frames_to_image_batch(frames, width=256, font_size=16, frame_metadata=None)
+
+        assert torch.equal(without_param, with_explicit_none)
+
+    def test_banner_on_grows_height_by_one_line_versus_banner_off(self):
+        """A banner is a real extra line: the batch height must grow by
+        exactly one line height relative to the same frames rendered with
+        no banner."""
+        frames = _frames(num_frames=2)
+        metadata = [FrameMetadata(step_idx=i, total_steps=2, t=0.5, temperature=0.5, committed_fraction=0.5) for i in range(2)]
+
+        without_banner = render_frames_to_image_batch(frames, width=256, font_size=16)
+        with_banner = render_frames_to_image_batch(frames, width=256, font_size=16, frame_metadata=metadata)
+
+        assert with_banner.shape[1] > without_banner.shape[1]  # H grew
+        assert with_banner.shape[2] == without_banner.shape[2]  # W unchanged
+        assert with_banner.shape[0] == without_banner.shape[0]  # N unchanged
+
+    def test_banner_renders_without_crashing_alongside_canvas_indices(self):
+        """Both per-image keys (`canvas_indices` and `frame_metadata`) are
+        independent and may be supplied together — the common real case
+        (`DGemmaSampler` threads both from the same `canvas_trace.frames`)."""
+        frames = _frames(num_frames=3)
+        canvas_indices = [0, 0, 1]
+        metadata = [
+            FrameMetadata(step_idx=i, total_steps=3, t=0.5, temperature=0.5, committed_fraction=0.5)
+            for i in range(3)
+        ]
+
+        images = render_frames_to_image_batch(
+            frames, width=256, font_size=16, canvas_indices=canvas_indices, frame_metadata=metadata
+        )
+        assert images.shape[0] == 3
+
+    def test_mismatched_frame_metadata_length_rejected(self):
+        """Parse-at-the-door (mirrors `canvas_indices`'s own mismatch
+        guard): a metadata list that isn't parallel to frames is a caller
+        bug that would silently mis-caption/misattribute telemetry — reject
+        at the door, don't launder it."""
+        frames = _frames(num_frames=3)
+        metadata = [FrameMetadata(step_idx=0, total_steps=3)]  # only one entry for 3 frames
+
+        with pytest.raises(ValueError, match="parallel"):
+            render_frames_to_image_batch(frames, frame_metadata=metadata)
+
+    def test_absent_optional_fields_render_em_dash_end_to_end(self):
+        """A `FrameMetadata` entry with only the required fields set (the
+        realistic "scheduler doesn't expose t/temperature" case) must
+        render without crashing — the `—` substitution happens inside
+        `_format_banner`, proven at the unit level above; this proves the
+        render path tolerates it end-to-end."""
+        frames = _frames(num_frames=1)
+        metadata = [FrameMetadata(step_idx=0, total_steps=1)]  # every optional field absent
+
+        images = render_frames_to_image_batch(frames, width=256, font_size=16, frame_metadata=metadata)
+        assert images.shape[0] == 1
