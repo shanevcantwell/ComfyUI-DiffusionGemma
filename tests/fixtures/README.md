@@ -35,9 +35,48 @@ so provenance lives here instead, one section per file.
   real in-fixture revision event is `3: 1→2` at the final step (issue #84
   design-gate DECISION F-3).
 
-## Composite blob shape (both files)
+## `count_numerals_2026-07-16T00-36-18_0000.txt`
 
-Neither file is `dgemma.loop.decode_frames()` output directly — each is a
+- **Source:** `/srv/dev/ComfyUI/output/count_numerals_2026-07-16T00-36-18_0000.txt`
+- **Copied:** 2026-07-16
+- **Run settings:** `EntropyBoundScheduler`, `entropy_bound=0.01`, `t_min=0.4`,
+  `t_max=0.8`, `num_inference_steps_requested=48`,
+  `num_inference_steps_effective=48`; 10 steps captured. Prompt: "Generate 2
+  rows each of 13 individual numerals. Then sum the appearances of each
+  numeral appearing in that set."
+- **Format observed:** issue #86's **third** tally format — plain dash-bullet
+  list, `- N: v` (no `**` wrap, no pipe table), under a **bolded**
+  `**Sum of appearances:**` section header, with plain (unbolded) `Row 1:`/
+  `Row 2:` evidence labels. Sourced from the 2026-07-16 sweep
+  (`count_numerals_2026-07-16T00-36-18_*`, file index 0000) that first
+  surfaced this format and drove #86.
+
+## `count_numerals_2026-07-16T00-36-18_0009.txt`
+
+- **Source:** `/srv/dev/ComfyUI/output/count_numerals_2026-07-16T00-36-18_0009.txt`
+- **Copied:** 2026-07-16
+- **Run settings:** `EntropyBoundScheduler`, `entropy_bound=0.1`, `t_min=0.4`,
+  `t_max=0.8`, `num_inference_steps_requested=48`,
+  `num_inference_steps_effective=48`; 10 steps captured. Prompt: "Generate 2
+  rows each of 13 individual numerals. Then sum the appearances of each
+  numeral appearing in that set."
+- **Format observed:** the same third format as file 0000, but with an
+  **unbolded** `Sum of appearances:` section header (no `**` at all) — the
+  format's header-bolding is itself unstable across files in the same sweep,
+  which is exactly why the matcher below keys on the dash-bullet structure,
+  never the header text or its bolding. `Row 1:`/`Row 2:` labels are also
+  plain/unbolded, same as file 0000.
+- **Revision event (this file's reason for selection, per issue #86):** the
+  sweep's only revision — numeral `3`, claimed `4` at frame 6 (0-indexed,
+  the 7th captured step), a garbage/unparseable value cell (`玖`) at frame 7,
+  then re-parses cleanly as `3` at frame 8. Per DECISION F-2's per-numeral-
+  cell granularity, the revision watcher must skip frame 7's unparseable
+  cell-3 and bridge the comparison 6→8 (`4`→`3`), not report a spurious
+  6→7 or 7→8 event.
+
+## Composite blob shape (all four files)
+
+None of the four files is `dgemma.loop.decode_frames()` output directly — each is a
 `DGemmaTrace._format_summary`-shaped header (timestamp+prompt joined by
 literal `\n\n` escape sequences, then `scheduler=…`/`steps=…`/
 `committed_fraction per step…`/`mask-token corroboration…` lines joined by

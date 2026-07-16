@@ -31,6 +31,13 @@ from consumers.tally_audit import (
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 RUN1_PATH = FIXTURES_DIR / "count_numerals_2026-07-15T23-57-39_0000.txt"  # inline bold-markdown list
 RUN2_PATH = FIXTURES_DIR / "count_numerals_2026-07-15T23-59-14_0000.txt"  # GFM pipe table
+# Issue #86's third format: plain dash-bullet list. Two files from the same
+# 2026-07-16 sweep — 0000 has a bolded `**Sum of appearances:**` header,
+# 0009 has the same header unbolded; both have plain (unbolded) `Row N:`
+# evidence labels. 0009 is selected specifically for its one real revision
+# event (numeral 3, claimed 4->3, frames 6->8 — see tests/fixtures/README.md).
+RUN3_PATH = FIXTURES_DIR / "count_numerals_2026-07-16T00-36-18_0000.txt"
+RUN3_REVISION_PATH = FIXTURES_DIR / "count_numerals_2026-07-16T00-36-18_0009.txt"
 
 
 def _read(path: Path) -> str:
@@ -57,6 +64,18 @@ class TestExtractDecodedFramesFromCompositeBlob:
         """`steps=17` in the header; same shape, second real fixture."""
         frames = extract_decoded_frames_from_composite_blob(_read(RUN2_PATH))
         assert len(frames) == 17
+
+    def test_run3_extracts_ten_frames_matching_steps_header(self):
+        """`steps=10` in the header; third real fixture (issue #86's
+        dash-bullet format, file 0000)."""
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_PATH))
+        assert len(frames) == 10
+
+    def test_run3_revision_fixture_extracts_ten_frames_matching_steps_header(self):
+        """`steps=10` in the header; the revision-bearing sibling (file
+        0009) from the same sweep."""
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_REVISION_PATH))
+        assert len(frames) == 10
 
     def test_extracted_frames_do_not_contain_the_header(self):
         """The header's own scheduler/steps/committed_fraction lines must not
@@ -242,6 +261,118 @@ class TestParsePipeTableFormat:
         assert result.cells[3].claimed is None  # "ເພ" is garbage
 
 
+class TestParseDashBulletListFormat:
+    """Issue #86's third observed shape: plain dash-bullets, one numeral
+    per line, `- N: v` — no `**` bold wrap anywhere, no pipe table."""
+
+    def test_well_formed_dash_bullet_list_parses_ok(self):
+        text = (
+            "Sum of appearances:\n"
+            "- 0: 2\n- 1: 3\n- 2: 3\n- 3: 3\n- 4: 3\n"
+            "- 5: 3\n- 6: 3\n- 7: 2\n- 8: 2\n- 9: 2"
+        )
+        result = parse_tally_frame(text, frame_idx=0)
+
+        assert result.parse_status == "ok"
+        assert result.format_name == "dash_bullet_list"
+        assert result.claimed_counts() == {
+            0: 2, 1: 3, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3, 7: 2, 8: 2, 9: 2,
+        }
+
+    def test_bolded_header_above_the_list_does_not_prevent_dash_matching(self):
+        """File 0000's real shape: the section header IS bolded
+        (`**Sum of appearances:**`) even though the bullets themselves are
+        never `**`-wrapped — the matcher must key on the bullet structure
+        alone, not on the header's own bolding."""
+        text = (
+            "**Sum of appearances:**\n"
+            "- 0: 2\n- 1: 3\n- 2: 3\n- 3: 3\n- 4: 3\n"
+            "- 5: 3\n- 6: 3\n- 7: 2\n- 8: 2\n- 9: 2"
+        )
+        result = parse_tally_frame(text, frame_idx=0)
+        assert result.parse_status == "ok"
+        assert result.format_name == "dash_bullet_list"
+
+    def test_garbage_value_cell_demotes_only_that_cell_to_partial(self):
+        """DECISION F-2's per-numeral-cell granularity, third format:
+        mirrors the inline-list/pipe-table garbage-value tests."""
+        text = (
+            "- 0: 2\n- 1: 3\n- 2: 3\n- 3:  ratings\n- 4: 3\n"
+            "- 5: 3\n- 6: 3\n- 7: 2\n- 8: 2\n- 9: 2"
+        )
+        result = parse_tally_frame(text, frame_idx=0)
+
+        assert result.parse_status == "partial"
+        assert result.format_name == "dash_bullet_list"
+        assert result.cells[3].claimed is None
+        assert result.cells[3].raw_value == "ratings"
+        assert result.cells[0].claimed == 2
+        assert result.cells[9].claimed == 2
+
+    def test_digit_embedded_in_a_garbage_token_is_not_read_as_the_value(self):
+        """Observed live: `- 6: <unused4981>` is a special-token literal,
+        not a claimed value of 4981 — the leading-integer anchor must not
+        pick a digit out of the MIDDLE of an unrelated garbage token (this
+        is what distinguishes the dash-bullet matcher's value extraction
+        from a bare anywhere-in-string digit search)."""
+        text = (
+            "- 0: 2\n- 1: 3\n- 2:  Demons\n- 3:  ratings\n- 4:  nếu\n"
+            "- 5:  repeater\n- 6: <unused4981>\n- 7: 2\n- 8: 2\n- 9: 2"
+        )
+        result = parse_tally_frame(text, frame_idx=0)
+        assert result.cells[6].claimed is None
+        assert result.cells[6].raw_value == "<unused4981>"
+
+    def test_trailing_noise_after_a_clean_value_still_parses(self):
+        """Observed live: the final bullet in a frame frequently runs
+        straight into the next fragment's decode noise with no separator
+        (`- 9: 2 然而DONE wikip`) — `2` is the model's real claimed value;
+        the leading-integer anchor must not demote it to garbage purely
+        because of what follows on the same (delimiter-less) line."""
+        text = (
+            "- 0: 2\n- 1: 3\n- 2: 3\n- 3: 3\n- 4: 3\n"
+            "- 5: 3\n- 6: 3\n- 7: 2\n- 8: 2\n- 9: 2 然而DONE wikip"
+        )
+        result = parse_tally_frame(text, frame_idx=0)
+        assert result.cells[9].claimed == 2
+        assert result.parse_status == "ok"
+
+    def test_garbage_numeral_token_is_skipped_not_recorded(self):
+        """A `- <token>: <value>` line whose numeral token isn't a bare
+        digit (e.g. `- isHidden:  organiser`, observed live) is not a
+        numeral-tally row at all — skipped, mirroring the other two
+        matchers' garbage-numeral handling."""
+        text = "- 0: 2\n- isHidden:  organiser\n- 7: 2"
+        result = parse_tally_frame(text, frame_idx=0)
+        assert set(result.cells) == {0, 7}
+
+    def test_missing_numerals_is_partial_not_ok(self):
+        text = "- 0: 2\n- 1: 3"
+        result = parse_tally_frame(text, frame_idx=0)
+        assert result.parse_status == "partial"
+        assert set(result.cells) == {0, 1}
+
+    def test_no_claimed_total_field_for_this_format(self):
+        """No `Total`-shaped line has been observed in the dash-bullet
+        format (unlike the other two) — `claimed_total` is honestly `None`,
+        never inferred from the ten cells."""
+        text = "- 0: 2\n- 1: 3\n- 2: 3\n- 3: 3\n- 4: 3\n- 5: 3\n- 6: 3\n- 7: 2\n- 8: 2\n- 9: 2"
+        result = parse_tally_frame(text, frame_idx=0)
+        assert result.claimed_total is None
+
+    def test_dash_bullet_matcher_never_shadows_inline_list_or_pipe_table(self):
+        """Registry-ordering regression: the inline-list's `*   **N:**`
+        bold-bullet anchor and the pipe-table's `| N | v |` structure must
+        still win over the dash-bullet matcher when present, since matcher
+        order in `parse_tally_frame` tries inline-list and pipe-table
+        first."""
+        inline_text = "*   **0:** 1 time\n*   **1:** 1 time"
+        assert parse_tally_frame(inline_text, frame_idx=0).format_name == "inline_list"
+
+        table_text = "| Numeral | Frequency |\n| :--- | :--- |\n| 0 | 2 |\n| 1 | 3 |"
+        assert parse_tally_frame(table_text, frame_idx=0).format_name == "pipe_table"
+
+
 class TestUnrecognizedFormat:
     """AC#2: an artificial unknown-format frame yields `unrecognized` +
     excerpt, never a fabricated count."""
@@ -275,6 +406,31 @@ class TestUnrecognizedFormat:
         text = "* first item\n* second item\n* third item, no numerals here"
         result = parse_tally_frame(text, frame_idx=0)
         assert result.parse_status == "unrecognized"
+
+    def test_random_dash_bullets_with_no_numeral_colon_shape_are_unrecognized(self):
+        """Dash bullets alone are not enough — they must also carry the
+        `<token>: <value>` shape the dash-bullet matcher anchors on."""
+        text = "- first item, no colon shape\n- second item same\n- third, still no match"
+        result = parse_tally_frame(text, frame_idx=0)
+        assert result.parse_status == "unrecognized"
+
+    def test_an_artificial_fourth_format_is_unrecognized(self):
+        """AC#2/AC#4: a fourth structural shape this module has never seen
+        (neither bold-bullet, nor pipe-table, nor dash-bullet) must still
+        return `unrecognized` + the raw excerpt — the honest-failure path
+        is retained, not narrowed away by adding the third matcher."""
+        text = (
+            "Tally results (semicolon-separated, a shape none of the three "
+            "registered matchers recognize):\n"
+            "0=2; 1=3; 2=3; 3=3; 4=3; 5=3; 6=3; 7=2; 8=2; 9=2"
+        )
+        result = parse_tally_frame(text, frame_idx=5)
+
+        assert result.parse_status == "unrecognized"
+        assert result.format_name is None
+        assert result.cells == {}
+        assert result.claimed_counts() == {}
+        assert result.raw_excerpt == text[:500]
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +478,37 @@ class TestCountEvidenceNumerals:
         )
         counts = count_evidence_numerals(text)
         assert sum(counts.values()) == 26  # not inflated by the Total row
+
+    def test_issue_86_style_unbolded_row_labels(self):
+        """Issue #86's third format: `Row k:` labels with NO `**` wrap at
+        all (unlike run 2's `**Row k:**`) — the same label-then-plain-list
+        shape, just unbolded end to end."""
+        text = (
+            "Row 1: 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3\n"
+            "Row 2: 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6"
+        )
+        counts = count_evidence_numerals(text)
+        assert counts == {0: 2, 1: 3, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3, 7: 2, 8: 2, 9: 2}
+
+    def test_unbolded_row_label_with_dash_bullet_total_does_not_double_count(self):
+        """Mirrors the bolded-Total regression test above, for the third
+        format: a `- **Total**: N`-shaped stray bold span (not itself
+        observed, but the same class of risk) must not double-count
+        alongside unbolded `Row k:` evidence lines."""
+        text = (
+            "Row 1: 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3\n"
+            "Row 2: 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6\n\n"
+            "Sum of appearances:\n- 0: 2\n- 1: 3\n"
+        )
+        counts = count_evidence_numerals(text)
+        assert sum(counts.values()) == 26
+
+    def test_bolded_row_label_still_matches_after_making_the_wrap_optional(self):
+        """Regression: loosening `_EVIDENCE_ROW_LABEL_RE` to tolerate an
+        unbolded label must not break the original bolded run-2 shape."""
+        text = "**Row 1:** 4, 7, 2, 9, 0, 5, 4, 8, 2, 7, 1, 6, 9"
+        counts = count_evidence_numerals(text)
+        assert counts == {0: 1, 1: 1, 2: 2, 3: 0, 4: 2, 5: 1, 6: 1, 7: 2, 8: 1, 9: 2}
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +576,27 @@ class TestWatchRevisions:
         assert matching[0].to_value == 2
         assert matching[0].to_frame_idx == len(frames) - 1  # the final captured step
 
+    def test_real_run3_fixture_revision_3_4_to_3_bridges_the_garbage_frame(self):
+        """Issue #86's grounding datum: file 0009 contains the sweep's only
+        revision — numeral 3, claimed 4 (frame 6) then a garbage/
+        unparseable value cell (frame 7, `玖`) then re-parses cleanly as 3
+        (frame 8). Per DECISION F-2's per-numeral-cell granularity, the
+        watcher must skip frame 7's unparseable cell-3 and bridge the
+        comparison 6->8 directly — not report a spurious 6->7 or 7->8
+        event, and not miss the revision entirely."""
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_REVISION_PATH))
+        audit = audit_frames(frames)
+
+        matching = [e for e in audit.revisions if e.numeral == 3]
+        assert len(matching) == 1
+        assert matching[0].from_frame_idx == 6
+        assert matching[0].to_frame_idx == 8
+        assert matching[0].from_value == 4
+        assert matching[0].to_value == 3
+        # Frame 7's cell 3 genuinely failed to parse — confirms the bridge
+        # is happening BECAUSE of the per-cell skip, not by coincidence.
+        assert audit.frame_results[7].cells[3].claimed is None
+
 
 # ---------------------------------------------------------------------------
 # Top-level `audit_frames` — including the real fixtures end-to-end
@@ -396,7 +604,7 @@ class TestWatchRevisions:
 
 
 class TestAuditFramesRealFixtures:
-    """AC#1: both real-run fixtures parse `ok` at final step and are judged
+    """AC#1: all real-run fixtures parse `ok` at final step and are judged
     arithmetically consistent."""
 
     def test_run1_final_frame_parses_ok_and_is_consistent(self):
@@ -410,6 +618,27 @@ class TestAuditFramesRealFixtures:
         frames = extract_decoded_frames_from_composite_blob(_read(RUN2_PATH))
         audit = audit_frames(frames)
 
+        assert audit.frame_results[-1].parse_status == "ok"
+        assert audit.final_frame_arithmetically_consistent is True
+
+    def test_run3_final_frame_parses_ok_and_is_consistent(self):
+        """Issue #86 AC: the new dash-bullet-format fixture (bolded
+        `**Sum of appearances:**` header, file 0000) parses `ok` at its
+        final step and is arithmetically consistent."""
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_PATH))
+        audit = audit_frames(frames)
+
+        assert audit.frame_results[-1].format_name == "dash_bullet_list"
+        assert audit.frame_results[-1].parse_status == "ok"
+        assert audit.final_frame_arithmetically_consistent is True
+
+    def test_run3_revision_fixture_final_frame_parses_ok_and_is_consistent(self):
+        """Issue #86 AC: the revision-bearing fixture (file 0009, unbolded
+        `Sum of appearances:` header) also parses `ok` at its final step."""
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_REVISION_PATH))
+        audit = audit_frames(frames)
+
+        assert audit.frame_results[-1].format_name == "dash_bullet_list"
         assert audit.frame_results[-1].parse_status == "ok"
         assert audit.final_frame_arithmetically_consistent is True
 
@@ -431,6 +660,16 @@ class TestAuditFramesRealFixtures:
         frames = extract_decoded_frames_from_composite_blob(_read(RUN2_PATH))
         audit = audit_frames(frames)
         assert len(audit.frame_results) == len(frames) == 17
+
+    def test_run3_frame_results_length_matches_frame_count(self):
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_PATH))
+        audit = audit_frames(frames)
+        assert len(audit.frame_results) == len(frames) == 10
+
+    def test_run3_revision_fixture_frame_results_length_matches_frame_count(self):
+        frames = extract_decoded_frames_from_composite_blob(_read(RUN3_REVISION_PATH))
+        audit = audit_frames(frames)
+        assert len(audit.frame_results) == len(frames) == 10
 
 
 class TestAuditFramesDegenerateInput:

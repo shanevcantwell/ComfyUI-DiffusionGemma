@@ -12,9 +12,10 @@ leak-check covers `consumers/*`, this module included by name).
 not recognize. `EMIT-CANONICAL / PARSE-AT-THE-DOOR` (ARCHITECTURE.md rule 5)
 applied to model-generated markdown, not a data-plane socket: an unrecognized
 frame format is REPORTED (`parse_status="unrecognized"` + the raw excerpt),
-never fabricated as a plausible-looking zero or blank. The two observed
+never fabricated as a plausible-looking zero or blank. The three observed
 formats (issue #84's grounding — the two `count_numerals_*` runs under
-`/srv/dev/ComfyUI/output/`, format differed between consecutive runs) are:
+`/srv/dev/ComfyUI/output/`, format differed between consecutive runs; issue
+#86 added a third, first seen in a later sweep) are:
 
 1. **Inline bold-markdown list** (run 1, 2026-07-15T23-57-39): repeated
    `*   **N:** k time(s)` lines (the literal text says "time" singular at
@@ -25,13 +26,20 @@ formats (issue #84's grounding — the two `count_numerals_*` runs under
    `Frequency`, `ratings`, `Crum` all observed live — so matchers must NOT
    key on that label string), a `| :--- | :--- |` separator, ten `| N | v |`
    body rows, and an optional `| **Total** | **T** |` row.
+3. **Plain dash-bullet list** (issue #86, 2026-07-16 sweep): repeated
+   `- N: v` lines — no `**` bold wrap anywhere (unlike format 1's bullets)
+   and no pipe table. The section header above the list and the `Row k:`
+   evidence labels below it are each independently bolded or unbolded
+   across observed files, so neither is a reliable structural anchor —
+   only the dash-bullet lines themselves are.
 
 Per DECISION F-2 (design-gate ratification, issue #84): matchers key on
 *structure* (pipe-delimited rows in table form; bullet-prefixed
-bold-numeral lines in list form), not on header/label strings, and grant
-per-numeral-cell granularity — a single garbage VALUE cell (e.g.
-`| 0 |  التس |`) demotes only that cell to unparsed, not the whole frame to
-`unrecognized`, since the row/list structure around it is still legible.
+bold-numeral lines in list form; plain dash-bullet lines), not on
+header/label strings, and grant per-numeral-cell granularity — a single
+garbage VALUE cell (e.g. `| 0 |  التس |`) demotes only that cell to
+unparsed, not the whole frame to `unrecognized`, since the row/list
+structure around it is still legible.
 """
 from __future__ import annotations
 
@@ -128,6 +136,18 @@ _INLINE_ROW_RE = re.compile(
 _TABLE_ROW_RE = re.compile(r"\|\s*(?P<numeral>[^|]*?)\s*\|\s*(?P<value>[^|]*?)\s*\|")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|\s*:?-+:?\s*\|\s*:?-+:?\s*\|\s*$")
 
+# The third observed format (issue #86): a plain dash-bullet list, one
+# numeral per line, `- N: v` — no `**` bold wrap anywhere (distinguishing it
+# structurally from `_INLINE_ROW_RE`'s `*   **N:**` bullets) and no pipe
+# table. Anchored per-line (`re.MULTILINE`) on a leading `-`, a bare
+# digit-ish numeral token, `:`, then the rest of the line as the value token
+# — garbage numeral tokens (e.g. `- isHidden:  organiser`) are structurally
+# still `- <token>: <value>` lines, so this anchor alone cannot distinguish
+# "garbage numeral" from "not a tally line at all"; `_NUMERAL_CELL_RE`
+# below is what actually filters garbage numerals out (skipped, per
+# DECISION F-2, exactly like the inline-list and pipe-table matchers).
+_DASH_BULLET_ROW_RE = re.compile(r"^-\s*(?P<numeral>[^:\n]{1,20}?)\s*:\s*(?P<value>[^\n]*)$", re.MULTILINE)
+
 # A numeral cell is "recognized" iff, after stripping markdown bold markers,
 # it is exactly one ASCII digit 0-9 (garbage tokens like "章 "/" ă " never
 # match) — or the literal `**Total**` marker.
@@ -163,12 +183,13 @@ class FrameAuditResult:
     parsed AND ten distinct numerals were found), `"partial"` (the
     table/list structure was recognized but at least one numeral cell
     failed to parse, or fewer than ten distinct numerals were found),
-    `"unrecognized"` (neither the inline-list nor pipe-table structure was
-    found at all — REPORTED, never inferred, per ARCHITECTURE.md rule 5)."""
+    `"unrecognized"` (none of the inline-list, pipe-table, or dash-bullet-
+    list structures were found at all — REPORTED, never inferred, per
+    ARCHITECTURE.md rule 5)."""
 
     frame_idx: int
     parse_status: Literal["ok", "partial", "unrecognized"]
-    format_name: Literal["inline_list", "pipe_table", None]
+    format_name: Literal["inline_list", "pipe_table", "dash_bullet_list", None]
     cells: dict[int, NumeralCellResult] = field(default_factory=dict)
     """Keyed by numeral 0-9 — only numerals actually found in this frame's
     tally are present (a frame that never reaches numeral `9` in its list
@@ -255,14 +276,58 @@ def _match_pipe_table(frame_text: str) -> tuple[dict[int, NumeralCellResult], in
     return cells, claimed_total
 
 
+def _match_dash_bullet_list(frame_text: str) -> dict[int, NumeralCellResult] | None:
+    """Match issue #86's third observed shape: plain dash-bullets, one
+    numeral per line, `- N: v` — no `**` bold wrap anywhere (unlike
+    `_match_inline_list`'s `*   **N:**` bullets) and no pipe table. Returns
+    `None` (not matched at all) only when zero `- <token>: <value>` lines
+    are found; per DECISION F-2, a garbage NUMERAL token (e.g.
+    `- isHidden:  organiser`, observed live) means that line isn't a
+    numeral-tally row at all and is skipped, mirroring the other two
+    matchers' same-shape garbage-numeral handling — it does not fail the
+    match for the rest of the list.
+
+    Value extraction anchors on a LEADING integer token (``\\d+`` immediately
+    at the start of the stripped value, before any non-digit character) —
+    deliberately narrower than `_match_inline_list`'s bare `re.search`,
+    which would misread a digit embedded inside an unrelated garbage token
+    (observed live: `- 6: <unused4981>` is a special-token literal, not a
+    claimed value of `4981`; an anywhere-in-string digit search would
+    fabricate that reading). A dash-bullet line has no closing delimiter
+    (unlike a pipe-table cell), so the last bullet in a frame frequently
+    runs straight into the next fragment's decode noise with no separator
+    (observed live: `- 9: 2 然而DONE wikip` — `2` is the model's real
+    claimed value, `然而DONE wikip` is trailing noise bleeding in from
+    beyond the line's natural end). Anchoring at the START (not requiring
+    a whole-cell match) tolerates that genuine trailing-noise case while
+    still rejecting a digit that only appears buried inside a non-numeric
+    token."""
+    cells: dict[int, NumeralCellResult] = {}
+    for match in _DASH_BULLET_ROW_RE.finditer(frame_text):
+        numeral_token, value_token = match.group("numeral").strip(), match.group("value").strip()
+        numeral_match = _NUMERAL_CELL_RE.match(numeral_token)
+        if not numeral_match:
+            continue  # Not a numeral-keyed bullet at all (garbage or "Total").
+        numeral = int(numeral_match.group(1))
+        value_match = re.match(r"-?\d+", value_token)
+        claimed = int(value_match.group(0)) if value_match else None
+        cells[numeral] = NumeralCellResult(numeral=numeral, claimed=claimed, raw_value=value_token)
+    return cells or None
+
+
 def parse_tally_frame(frame_text: str, frame_idx: int) -> FrameAuditResult:
     """Parse one decoded frame's tally claim, trying each registered
-    matcher in turn (DECISION F-2's format-matcher registry). Frame-level
+    matcher in turn (DECISION F-2's format-matcher registry — inline-list,
+    then pipe-table, then dash-bullet-list; the inline-list's `*   **N:**`
+    bold-bullet anchor and the dash-bullet-list's plain `- N:` anchor are
+    structurally disjoint — a bullet cannot match both — so matcher order
+    among the three never changes which one wins). Frame-level
     `parse_status`:
 
-    - `"unrecognized"`: neither matcher found its structural anchor at all
-      (no bullet-numeral pairs, no pipe-table separator) — REPORTED with
-      the raw excerpt, never inferred as an empty/zero tally.
+    - `"unrecognized"`: no matcher found its structural anchor at all (no
+      bullet-numeral pairs of either bold or plain-dash form, no pipe-table
+      separator) — REPORTED with the raw excerpt, never inferred as an
+      empty/zero tally.
     - `"partial"`: a matcher's structure was found, but fewer than all ten
       numerals 0-9 parsed cleanly (either missing entirely — an
       in-progress frame that hasn't reached that numeral yet — or present
@@ -271,20 +336,26 @@ def parse_tally_frame(frame_text: str, frame_idx: int) -> FrameAuditResult:
     """
     inline_cells = _match_inline_list(frame_text)
     if inline_cells is not None:
-        format_name: Literal["inline_list", "pipe_table"] = "inline_list"
+        format_name: Literal["inline_list", "pipe_table", "dash_bullet_list"] = "inline_list"
         cells = inline_cells
         claimed_total = _extract_inline_total(frame_text)
     else:
         table_result = _match_pipe_table(frame_text)
-        if table_result is None:
-            return FrameAuditResult(
-                frame_idx=frame_idx,
-                parse_status="unrecognized",
-                format_name=None,
-                raw_excerpt=frame_text[:500],
-            )
-        format_name = "pipe_table"
-        cells, claimed_total = table_result
+        if table_result is not None:
+            format_name = "pipe_table"
+            cells, claimed_total = table_result
+        else:
+            dash_cells = _match_dash_bullet_list(frame_text)
+            if dash_cells is None:
+                return FrameAuditResult(
+                    frame_idx=frame_idx,
+                    parse_status="unrecognized",
+                    format_name=None,
+                    raw_excerpt=frame_text[:500],
+                )
+            format_name = "dash_bullet_list"
+            cells = dash_cells
+            claimed_total = None  # No observed `Total`-shaped line in this format.
 
     all_ten_present = all(n in cells for n in range(10))
     all_parsed = all(cell.claimed is not None for cell in cells.values())
@@ -316,18 +387,23 @@ def _extract_inline_total(frame_text: str) -> int | None:
 # Evidence counter — procedurally count the model's own restated numerals
 # ---------------------------------------------------------------------------
 
-# The evidence line(s): two observed shapes.
+# The evidence line(s): three observed shapes.
 # Run 1: a single bold-wrapped comma list, the numerals themselves INSIDE
 # the bold span — `**4, 7, 2, 4, 9, 1, 7, 4, 5, 2, 0, 7, 6**`.
 # Run 2: a bold `**Row k:**` LABEL only, with the comma list as plain text
 # after it to end-of-line — `**Row 1:** 4, 7, 2, 9, 0, 5, 4, 8, 2, 7, 1, 6, 9`
-# (the numerals are NOT inside the bold span here, unlike run 1). Two
-# distinct regexes rather than one, since the label-then-plain-list shape
-# and the all-bold shape aren't the same span structure — trying to force
-# one pattern to cover both would either miss run 2 (as an earlier version
-# of this function did) or over-match unrelated bold spans in run 1.
+# (the numerals are NOT inside the bold span here, unlike run 1).
+# Issue #86 (third format): the SAME label-then-plain-list shape as run 2,
+# but with the `Row k:` label itself unbolded too — `Row 1: 1, 2, 3, ...`
+# (no `**` anywhere on the label). `_EVIDENCE_ROW_LABEL_RE`'s `\*\*` wrap is
+# therefore optional, not dropped — run 2's bolded label must still match.
+# Two distinct regexes rather than one, since the label-then-plain-list
+# shape and the all-bold shape aren't the same span structure — trying to
+# force one pattern to cover both would either miss run 2/#86 (as an
+# earlier version of this function did) or over-match unrelated bold spans
+# in run 1.
 _EVIDENCE_BOLD_LIST_RE = re.compile(r"\*\*([0-9](?:\s*,\s*[^*\n]+)*)\*\*")
-_EVIDENCE_ROW_LABEL_RE = re.compile(r"\*\*Row\s*\d+:\*\*\s*([^\n]+)")
+_EVIDENCE_ROW_LABEL_RE = re.compile(r"\*{0,2}Row\s*\d+:\*{0,2}\s*([^\n]+)")
 
 
 def count_evidence_numerals(frame_text: str) -> dict[int, int]:
