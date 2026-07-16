@@ -6,6 +6,11 @@ canvas trace out, plus a live per-step view via the `web/` extension.
 `DGemmaSampler` (issue #21, reworked) also emits a `frames_image` `IMAGE`
 batch — the same per-step `frames` STRING series rendered watchable/
 shareable, alongside the STRING itself, rather than a separate node.
+`DGemmaTallyAudit` (issue #84) takes that same `frames` STRING list and
+audits a "count the numerals" task's per-step tally claims against the
+model's own restated evidence — `surfaces/comfyui/tally_audit.py` wrapping
+`consumers/tally_audit.py`'s pure functions, same composition pattern as
+`DGemmaTrace`/`consumers/analysis.py`.
 
 ComfyUI discovers a custom node pack by importing this module and reading
 NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS (+ `WEB_DIRECTORY`, checked
@@ -31,21 +36,25 @@ empirically by the reviewer).
 if __package__:
     from .surfaces.comfyui.loader import DGemmaLoader
     from .surfaces.comfyui.sampler import DGemmaSampler
+    from .surfaces.comfyui.tally_audit import DGemmaTallyAudit
     from .surfaces.comfyui.trace import DGemmaTrace
 else:
     from surfaces.comfyui.loader import DGemmaLoader
     from surfaces.comfyui.sampler import DGemmaSampler
+    from surfaces.comfyui.tally_audit import DGemmaTallyAudit
     from surfaces.comfyui.trace import DGemmaTrace
 
 NODE_CLASS_MAPPINGS: dict = {
     "DGemmaLoader": DGemmaLoader,
     "DGemmaSampler": DGemmaSampler,
     "DGemmaTrace": DGemmaTrace,
+    "DGemmaTallyAudit": DGemmaTallyAudit,
 }
 NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaLoader": "DiffusionGemma Loader",
     "DGemmaSampler": "DiffusionGemma Sampler",
     "DGemmaTrace": "DiffusionGemma Trace",
+    "DGemmaTallyAudit": "DiffusionGemma Tally Audit",
 }
 
 # P3 (a): the live per-step view (`surfaces/comfyui/web/live_view.js`).
