@@ -1,6 +1,6 @@
 # ADR-CDG-015 — The latent field lives at the input-embedding seam: a seventh seam, a two-arm fork, gated by H0-hold
 
-**Status**: proposed
+**Status**: accepted (ratified by independent design-gate review, 2026-07-18; operator veto standing)
 **Date**: 2026-07-18
 **Related**: ADR-CDG-001 (native payload types), ADR-CDG-002 (no-MASK confirmation — `mask_token_id=None`), ADR-CDG-010/011 (the declarative, *output-side* intervention doors this seam is deliberately not one of), ADR-CDG-012 (the mean-of-keys ≠ key-of-mean off-manifold hazard, here relocated), ADR-CDG-016 (the crystalline arm that deliberately does *not* depend on this), `docs/experiments/liquid-phase-decoding/concept.md` + `experiment.md`
 

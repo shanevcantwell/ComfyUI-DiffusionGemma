@@ -1,6 +1,6 @@
 # ADR-CDG-016 — Crystalline CA: neighbor-rule dynamics as declarative rule-table payloads (split-flap games, no field required)
 
-**Status**: proposed
+**Status**: accepted (ratified by independent design-gate review, 2026-07-18; operator veto standing)
 **Date**: 2026-07-18
 **Related**: ADR-CDG-010 (two-mechanism model + composite ordering — the machinery this rides), ADR-CDG-011 (declarative-payloads-only door — the clause this widens), ADR-CDG-015 (the liquid arm this deliberately does **not** depend on), issue #28 (S-track — the global-constraint sibling), Track B R1 (β-renoise — the re-melt mechanism)
 

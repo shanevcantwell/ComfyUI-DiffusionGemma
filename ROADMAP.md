@@ -126,7 +126,7 @@ Parallel and conditional tracks:
   operationally defined first.
 - **G-track — crystalline CA / word-games
   ([ADR-CDG-016](decisions/adr-cdg-016-crystalline-ca-rule-table-payloads.md),
-  proposed).** The *local-rule* counterpart of S-track's global constraints:
+  accepted).** The *local-rule* counterpart of S-track's global constraints:
   neighbor-rule dynamics as declarative rule-table payloads over **committed ids**
   (split-flap register — each cell flips through its `top_p` nucleus until it
   lands), phase windows declared against the anneal schedule, β-renoise local
@@ -134,7 +134,7 @@ Parallel and conditional tracks:
   ADR-CDG-010/011 Phases 3/4 (+ R1's β mechanism for re-melt).
 - **F-track — latent field (H0-hold)
   ([ADR-CDG-015](decisions/adr-cdg-015-latent-field-input-embedding-seam.md),
-  proposed), conditional.** The held superposition lives at the
+  accepted), conditional.** The held superposition lives at the
   **input-embedding seam** — a seventh seam the output-side inventory was missing.
   Existence proof landed absorbing-state only (Soft-Masked Diffusion, 2510.17206,
   ICLR 2026; Latent Refinement Decoding, 2510.11052); the USD transposition
@@ -154,8 +154,8 @@ Parallel and conditional tracks:
   `experiment.md` (the five falsifiable H0s + append-only observation table).
 - **[`decisions/`](decisions/)** — the ADRs; ADR-CDG-008 (topology), ADR-CDG-010 /
   011 (accepted, ratified 2026-07-13 — the constraint + control seams),
-  ADR-CDG-015 / 016 (proposed, in ratification — the F-track field fork and the
-  G-track crystalline CA).
+  ADR-CDG-015 / 016 (accepted, ratified 2026-07-18 — the F-track field fork and
+  the G-track crystalline CA).
 - **`plan.md`** — closed-phase evidence, P0–P3 (working-tree only, not published).
 - **Issues** — engineering: #35 (architecture review + R1–R6). Research and
   grounding: #23 (per-step control / mod-matrix), #28 (Sudoku-class flagship +
