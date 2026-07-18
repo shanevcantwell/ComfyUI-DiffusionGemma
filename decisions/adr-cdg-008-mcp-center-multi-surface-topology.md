@@ -332,12 +332,12 @@ verifiable when it lands. **Nothing here is executed by this decision record.**
    debt:
 
    - **Correction 1 — split persist-load from per-call-run state (`STATELESS-CORE`).**
-     `sk-mcp`'s own ADR-003
-     (`.../docs/ADRs/proposed/ADR-003-stateless-mcp-contract.md:17-25`) records that
+     `sk-mcp`'s own ADR-SKM-0009
+     (`.../docs/ADRs/proposed/ADR-SKM-0009-stateless-mcp-contract.md:17-25`) records that
      its `StateManager` **violates** statelessness by retaining a live `_adapter`
      and a cross-call `_embedding_cache`
      (`semantic_kinematics/mcp/state_manager.py:51-52,83-86`), with the fix
-     (per-call construction, retain nothing) still on its roadmap (`ADR-003:71`).
+     (per-call construction, retain nothing) still on its roadmap (`ADR-SKM-0009:71`).
      That cross-call-mutable-state class is the same one behind CDG's observed
      25-vs-29 heatmap frame-count mismatch (a cached scheduler carrying a prior
      run's dims forward). CDG's `surfaces/mcp/` state manager **must** persist

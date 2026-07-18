@@ -7,8 +7,8 @@ dataclass the server constructs once and hands to every command handler),
 deliberately NARROWED against that source's own documented debt: sk-mcp's
 `StateManager` retains a live `_adapter` **and** a cross-call
 `_embedding_cache` (`.../mcp/state_manager.py:51-52,83-86`), which its own
-ADR-003 names as the statelessness violation still on its roadmap to fix
-(`ADR-003:71`). This `StateManager` deliberately holds nothing else: no
+ADR-SKM-0009 names as the statelessness violation still on its roadmap to fix
+(`ADR-SKM-0009:71`). This `StateManager` deliberately holds nothing else: no
 scheduler, no canvas, no run-state, no cache keyed on prompt/knobs. The
 model load is the one object this pack's own doctrine says must persist
 (the ~53GB weights, `README.md` local-run defaults) — every `generate` call

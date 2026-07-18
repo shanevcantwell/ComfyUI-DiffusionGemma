@@ -9,7 +9,7 @@ dispatching calls, and a `state_manager.py` holding the surface's own
 lifecycle object — same shape, this repo's contract underneath.
 
 Two corrections adopted deliberately, over sk-mcp's OWN documented debt
-(its ADR-003, `.../docs/ADRs/proposed/ADR-003-stateless-mcp-contract.md`),
+(its ADR-SKM-0009, `.../docs/ADRs/proposed/ADR-SKM-0009-stateless-mcp-contract.md`),
 not its current state:
 
 1. **`STATELESS-CORE` split — persist the load, not the run.** sk-mcp's
