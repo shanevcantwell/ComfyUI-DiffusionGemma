@@ -221,7 +221,7 @@ steps (block-level inference, not raw per-token indices).
    template recall.
 2. **Pinned-evidence tally via constraints** — pin the real source sentences into the canvas
    and require the tally over *that* fixed evidence.
-   `shanevcantwell/ComfyUI-DiffusionGemma` PR #71 (ADR-010/011 P3, pin participant +
+   `shanevcantwell/ComfyUI-DiffusionGemma` PR #71 (ADR-CDG-010/011 P3, pin participant +
    logit-mask hook), CDG-010/011 P3.
 3. **Inverse probe** — pin the counts and require the text to conform; measures whether the
    process can be driven from the answer side.
