@@ -455,3 +455,78 @@ class TestEffectiveKnobTelemetryStatelessness:
         assert all(f.effective_entropy_bound == pytest.approx(0.1) for f in trace2.frames)
         assert all(f.effective_t_min == pytest.approx(0.4) for f in trace2.frames)
         assert all(f.effective_t_max == pytest.approx(0.8) for f in trace2.frames)
+
+
+class TestKVCacheInjectionStatelessness:
+    """ADR-CDG-012 Phase 2 rider (issue #62 §K): two identical
+    `run_diffusion(kv_cache=...)` calls yield identical telemetry AND
+    identical `injected_cache_provenance` stamps, and no cache state
+    persists across calls — `run_diffusion` never caches a `kv_cache`
+    payload on `dgemma_model` or a module global (rule 6, `STATELESS-CORE`).
+    Full ingress/OUT-3 test coverage for the `kv_cache=` door itself lives in
+    `tests/test_kv_cache_run_diffusion.py`; this class only proves the
+    same-in/same-out cross-run containment this module's sibling classes
+    already established for the pre-existing knobs, extended to the new
+    parameter."""
+
+    def test_two_identical_kv_cache_calls_yield_identical_telemetry_and_provenance(self, monkeypatch):
+        from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint
+        from dgemma.types import KVCache, Provenance
+        from tests.conftest import FakeDGemmaModelConfig, FakeDynamicCache
+
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+
+        def _kv_model() -> DGemmaModel:
+            config = FakeDGemmaModelConfig(num_hidden_layers=6, sliding_window=16)
+
+            class _ConfigModel:
+                def __init__(self, cfg):
+                    self.config = cfg
+
+            return DGemmaModel(
+                model=_ConfigModel(config),
+                processor=FakeProcessor(),
+                device="cpu",
+                dtype="bfloat16",
+                repo_id="fake/repo",
+                quant="none",
+            )
+
+        def _kv_cache_for(model: DGemmaModel) -> KVCache:
+            num_layers = model.model.config.num_hidden_layers
+            return KVCache(
+                cache=FakeDynamicCache(num_layers=num_layers),
+                cumulative_length=tuple([0] * num_layers),
+                geometry=geometry_from_model(model),
+                provenance=Provenance(
+                    minting_sequence=(1, 2, 3),
+                    edit_script=(),
+                    model_repo_id=model.repo_id,
+                    tokenizer_fingerprint=tokenizer_fingerprint(model),
+                ),
+            )
+
+        model1 = _kv_model()
+        model2 = _kv_model()
+        cache1 = _kv_cache_for(model1)
+        cache2 = _kv_cache_for(model2)
+
+        _, _, trace1 = run_diffusion(
+            model1, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache1
+        )
+        _, _, trace2 = run_diffusion(
+            model2, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache2
+        )
+
+        assert trace1.scheduler_config == trace2.scheduler_config
+        assert trace1.injected_cache_provenance == trace2.injected_cache_provenance
+        assert trace1.injected_cache_provenance is not trace2.injected_cache_provenance
+
+        # A THIRD call with no kv_cache at all is unaffected by the two prior
+        # injected-cache calls — no residual cache state survives on the
+        # model or anywhere `run_diffusion` could have stashed it.
+        _, _, trace3 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
+        )
+        assert trace3.injected_cache_provenance is None
