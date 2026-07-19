@@ -1,4 +1,5 @@
-"""Ingress validator tests (ADR-CDG-010/011, issue #64 §1.4/§1.5/§5).
+"""Ingress validator tests (ADR-CDG-010/011/014, issue #64 §1.4/§1.5/§5;
+issue #61 P-B for `capture.top_k`).
 
 One test class per validator. Every reject path asserts BOTH the precondition
 AND the remedy token from the locked error register (issue #64 §1.5) via
@@ -20,7 +21,7 @@ from dgemma.ingress import (
     validate_control_signals,
     validate_ingress,
 )
-from dgemma.payloads import Binding, Constraints, ControlSignals, MUTABLE_TARGETS, Pin
+from dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, MUTABLE_TARGETS, Pin
 
 
 class TestConstraintsIngress:
@@ -193,11 +194,13 @@ class TestControlSignalsIngress:
 
 
 class TestCaptureIngress:
-    """P1 (issue #64 §1.4)."""
+    """P1 `keep_frames` (issue #64 §1.4) + P-B `top_k` (ADR-CDG-014 Decision
+    3 Tier 1, issue #61)."""
 
     class _FakeCaptureSpec:
-        def __init__(self, keep_frames):
+        def __init__(self, keep_frames="all", top_k=0):
             self.keep_frames = keep_frames
+            self.top_k = top_k
 
     def test_none_is_a_no_op(self):
         validate_capture(None)  # must not raise
@@ -214,6 +217,66 @@ class TestCaptureIngress:
             validate_capture(capture)
         with pytest.raises(ValueError, match="Fix: use one of the two retention policies"):
             validate_capture(capture)
+
+    def test_real_capture_spec_default_is_a_no_op(self):
+        """The minted `CaptureSpec` dataclass itself (ADR-CDG-014 Decision
+        7) — not just a duck-typed stand-in — passes with its defaults."""
+        validate_capture(CaptureSpec())  # must not raise
+
+    def test_top_k_zero_is_a_no_op(self):
+        validate_capture(self._FakeCaptureSpec(top_k=0))  # must not raise
+
+    def test_top_k_absent_defaults_to_zero_no_op(self):
+        """Duck-typed `getattr(capture, "top_k", 0)` — an object with no
+        `top_k` attribute at all (e.g. a pre-P-B stand-in) is a no-op, not a
+        crash."""
+
+        class NoTopKAttr:
+            keep_frames = "all"
+
+        validate_capture(NoTopKAttr())  # must not raise
+
+    def test_positive_top_k_within_vocab_passes(self):
+        validate_capture(self._FakeCaptureSpec(top_k=16), vocab_size=100)  # must not raise
+
+    def test_positive_top_k_with_vocab_size_none_skips_ceiling_check(self):
+        """Named degradation (mirrors validate_constraints' C3 skip): no
+        vocab_size available means the ceiling check is skipped, not
+        defaulted to a reject."""
+        validate_capture(self._FakeCaptureSpec(top_k=999999), vocab_size=None)  # must not raise
+
+    def test_negative_top_k_rejected(self):
+        capture = self._FakeCaptureSpec(top_k=-1)
+        with pytest.raises(ValueError, match=r"top_k must be >= 0, got -1"):
+            validate_capture(capture)
+        with pytest.raises(ValueError, match="Fix: use 0 to disable Tier 1"):
+            validate_capture(capture)
+
+    def test_non_int_top_k_rejected(self):
+        capture = self._FakeCaptureSpec(top_k=2.5)
+        with pytest.raises(ValueError, match=r"top_k must be an int, got 2\.5"):
+            validate_capture(capture)
+
+    def test_bool_top_k_rejected(self):
+        """`bool` is a subclass of `int` in Python — `True`/`False` must not
+        silently pass as `1`/`0`; a caller passing a bool almost certainly
+        meant something else (e.g. confusing this knob with a toggle)."""
+        capture = self._FakeCaptureSpec(top_k=True)
+        with pytest.raises(ValueError, match="top_k must be an int"):
+            validate_capture(capture)
+
+    def test_top_k_exceeding_vocab_size_rejected(self):
+        capture = self._FakeCaptureSpec(top_k=200)
+        with pytest.raises(ValueError, match=r"top_k=200 exceeds vocab_size=100"):
+            validate_capture(capture, vocab_size=100)
+        with pytest.raises(ValueError, match=r"Fix: use top_k <= 100"):
+            validate_capture(capture, vocab_size=100)
+
+    def test_top_k_equal_to_vocab_size_passes(self):
+        """Boundary: exactly vocab_size is allowed (only strictly-greater is
+        rejected — `topk(vocab_size)` over a `vocab_size`-wide row is a
+        legitimate, if degenerate, "capture the whole vocabulary" request)."""
+        validate_capture(self._FakeCaptureSpec(top_k=100), vocab_size=100)  # must not raise
 
 
 class TestHookSourceConflict:
@@ -291,4 +354,20 @@ class TestValidateIngressComposition:
         with pytest.raises(ValueError, match="cannot both be given"):
             validate_ingress(
                 constraints, None, None, a_hook, gen_length=10, num_inference_steps=4, vocab_size=100
+            )
+
+    def test_valid_capture_top_k_passes_through_validate_ingress(self):
+        validate_ingress(
+            None, None, CaptureSpec(top_k=16), None, gen_length=10, num_inference_steps=4, vocab_size=100
+        )  # must not raise
+
+    def test_capture_top_k_reject_surfaces_through_validate_ingress(self):
+        """Proves `validate_ingress` threads its own `vocab_size=` kwarg
+        through to `validate_capture` (not just to `validate_constraints`) —
+        a top_k that exceeds THIS call's vocab_size is rejected here, not
+        silently passed."""
+        with pytest.raises(ValueError, match=r"top_k=200 exceeds vocab_size=100"):
+            validate_ingress(
+                None, None, CaptureSpec(top_k=200), None,
+                gen_length=10, num_inference_steps=4, vocab_size=100,
             )
