@@ -159,6 +159,82 @@ class TestFixedOrdering:
         assert result.sequences.shape == (1, 4)
 
 
+class TestWalkerOrdering:
+    """ADR-CDG-011, issue #64 Phase 4: the walker runs LAST — after capture,
+    the cancellation check, and every canvas-writer (`beta_rebuild`/`pin`) —
+    per the design-gate ratification on issue #64 (2026-07-13). Proven
+    structurally through the fixed composite, exercised end to end through
+    the fake pipeline, same as `TestFixedOrdering` above."""
+
+    def test_walker_runs_after_capture_beta_rebuild_and_pin(self, fake_pipeline_factory):
+        log: list = []
+        capture = _RecordingParticipant("capture", log)
+        beta = _RecordingParticipant("beta_rebuild", log)
+        pin = _RecordingParticipant("pin", log)
+        walker = _RecordingParticipant("walker", log)
+        step_end = StepEndComposite(capture=capture, beta_rebuild=(beta,), pin=(pin,), walker=walker)
+
+        _run_steps(fake_pipeline_factory, num_inference_steps=2, step_end=step_end)
+
+        names_per_step = [[entry[0] for entry in log if entry[1] == step_idx] for step_idx in range(2)]
+        assert names_per_step == [
+            ["capture", "beta_rebuild", "pin", "walker"],
+            ["capture", "beta_rebuild", "pin", "walker"],
+        ]
+
+    def test_walkers_return_value_never_overrides_the_applied_canvas(self, fake_pipeline_factory):
+        """A config-mutator's return must never be threaded as a canvas —
+        even if a (mis-)implemented walker returned a `{"canvas": ...}`, the
+        composite must not apply it (`dgemma/composite.py`'s `__call__`
+        discards `self.walker(...)`'s return entirely)."""
+
+        def rogue_walker(pipe, global_step, step_idx, callback_kwargs):
+            # A walker MUST NOT do this (ADR-CDG-011: config-mutator, never
+            # a canvas-writer) — proving the composite ignores it even if one
+            # tried, rather than relying on convention alone.
+            return {"canvas": torch.full_like(callback_kwargs["canvas"], 123)}
+
+        pin = _RecordingParticipant("pin", [], canvas_value=99)
+        step_end = StepEndComposite(capture=lambda *a: {}, pin=(pin,), walker=rogue_walker)
+
+        built = fake_pipeline_factory(num_inference_steps=1)
+        result = built.pipeline(
+            num_inference_steps=1,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+        )
+        assert torch.all(result.sequences == 99)  # pin's value, NOT the rogue walker's 123
+
+    def test_walker_sees_pins_written_canvas_via_working_kwargs(self, fake_pipeline_factory):
+        """The walker is invoked with the SAME threaded `callback_kwargs`
+        the writer loop produced — proving it runs strictly after the
+        writer loop completes, not interleaved with it."""
+        seen_by_walker: list = []
+
+        def walker(pipe, global_step, step_idx, callback_kwargs):
+            seen_by_walker.append(callback_kwargs["canvas"].clone())
+            return None
+
+        pin = _RecordingParticipant("pin", [], canvas_value=55)
+        step_end = StepEndComposite(capture=lambda *a: {}, pin=(pin,), walker=walker)
+
+        _run_steps(fake_pipeline_factory, num_inference_steps=1, step_end=step_end)
+
+        assert torch.all(seen_by_walker[0] == 55)
+
+    def test_no_walker_given_is_a_no_op(self, fake_pipeline_factory):
+        """Default (`walker=None`) must behave exactly as before this
+        phase — the common, unwired case."""
+        step_end = StepEndComposite(capture=lambda *a: {})
+        built = fake_pipeline_factory(num_inference_steps=2)
+        result = built.pipeline(
+            num_inference_steps=2,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+        )
+        assert result.sequences.shape == (1, 4)
+
+
 class TestOrderingIsStructural:
     """The fixed order is not a convention callers must remember — it is
     baked into `StepEndComposite.__call__`'s body, so a participant cannot
@@ -171,7 +247,7 @@ class TestOrderingIsStructural:
         import inspect
 
         sig = inspect.signature(StepEndComposite.__init__)
-        assert set(sig.parameters) == {"self", "capture", "should_cancel", "beta_rebuild", "pin"}
+        assert set(sig.parameters) == {"self", "capture", "should_cancel", "beta_rebuild", "pin", "walker"}
 
     def test_participant_protocol_has_no_priority_or_order_field(self):
         # StepEndParticipant is a Protocol naming only `name` + `__call__`;
@@ -244,6 +320,30 @@ class TestCancellationSeam:
             )
         assert capture_calls == [0]
         assert writer_log == []
+
+    def test_cancelled_step_never_runs_the_walker(self, fake_pipeline_factory):
+        """ADR-CDG-011, issue #64 Phase 4: the walker is skipped on a
+        cancelled step exactly like `beta_rebuild`/`pin` — the cancellation
+        check precedes it too, not just the canvas-writer loop."""
+        walker_log: list = []
+        walker = _RecordingParticipant("walker", walker_log)
+        capture_calls: list = []
+
+        def capture(pipe, global_step, step_idx, callback_kwargs):
+            capture_calls.append(step_idx)
+            return {}
+
+        step_end = StepEndComposite(capture=capture, should_cancel=lambda: True, walker=walker)
+        built = fake_pipeline_factory(num_inference_steps=3)
+
+        with pytest.raises(DiffusionCancelled):
+            built.pipeline(
+                num_inference_steps=3,
+                callback_on_step_end=step_end,
+                callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+            )
+        assert capture_calls == [0]
+        assert walker_log == []
 
     def test_should_cancel_false_never_raises_capture_runs_every_step(self, fake_pipeline_factory):
         capture_calls: list = []

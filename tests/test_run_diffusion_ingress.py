@@ -68,10 +68,24 @@ def _install_fakes(monkeypatch, *, num_steps: int = 2, scheduler_kwargs_out: dic
             if scheduler_kwargs_out is not None:
                 scheduler_kwargs_out.update(kwargs)
             self.num_inference_steps = kwargs["num_inference_steps"]
+            self._kwargs = dict(kwargs)
 
         @property
         def config(self):
             return self
+
+        def register_to_config(self, **kwargs):
+            # Minimal stand-in (not the frozen-dict-rebuild fidelity
+            # `tests/conftest.py:FakeFrozenConfig` gives — this module's
+            # fakes predate R4, see the module docstring): mutate the same
+            # object `.config` returns (itself, via the property above) so a
+            # walker write is visible to a later `getattr(config, target)`
+            # read, matching the real class's "later reads see the write"
+            # behavior even though the mutation mechanism itself isn't
+            # whole-dict-rebuild here.
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+            self._kwargs.update(kwargs)
 
     class FakePipeline:
         def __init__(self, model, scheduler, processor):
@@ -94,10 +108,10 @@ def _install_fakes(monkeypatch, *, num_steps: int = 2, scheduler_kwargs_out: dic
 class TestValidPayloadsAreIgnoredBehaviorally:
     """Phase 1's original done-criterion was "a valid payload changes NOTHING
     about the run's output" for all three payloads — true then because no
-    participant existed. Issue #64 Phase 3 gives `constraints=` a real,
+    participant existed. Issue #64 Phase 3 gave `constraints=` a real,
     engine-built effect (`PinParticipant` + the logit-mask hook,
-    `dgemma/loop.py`), so `constraints=` is INTENTIONALLY dropped from this
-    class: its "no observable effect" claim is now false by design, and its
+    `dgemma/loop.py`), so `constraints=` was INTENTIONALLY dropped from this
+    class: its "no observable effect" claim became false by design, and its
     real end-to-end effect is covered by `tests/test_constraints.py`
     (`TestPinReassertion`/`TestBothMechanisms`), which drives the R4
     `fake_pipeline_factory` fixture — the one fake in this test suite that
@@ -106,36 +120,20 @@ class TestValidPayloadsAreIgnoredBehaviorally:
     `_install_fakes` `FakePipeline` below does NOT thread that return value
     at all, which is why a pre-Phase-3 version of this test module could not
     have caught a wired-but-broken pin participant either way — a fake gap,
-    not a feature, now retired for `constraints=` specifically).
-    `control_signals=`/`capture=` remain genuinely validated-then-ignored
-    (Phase 4 / issue #61 own their participant bodies), so their two tests
-    below are unchanged."""
+    not a feature, retired for `constraints=` specifically).
 
-    def test_valid_control_signals_payload_produces_identical_trace_to_none(self, monkeypatch):
-        _install_fakes(monkeypatch, num_steps=3)
-        text_a, state_a, trace_a = run_diffusion(
-            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=3
-        )
-
-        _install_fakes(monkeypatch, num_steps=3)
-        control_signals = ControlSignals(
-            bindings=(Binding(target="entropy_bound", signal=(0.0, 0.5, 1.0), low=0.02, high=0.3),)
-        )
-        text_b, state_b, trace_b = run_diffusion(
-            _fake_model(),
-            "hi",
-            entropy_bound=0.1,
-            t_min=0.4,
-            t_max=0.8,
-            num_inference_steps=3,
-            control_signals=control_signals,
-        )
-
-        # No walker exists yet (Phase 4) — the scheduler's config is never
-        # mutated mid-run by this payload in Phase 1, so the trace is
-        # byte-identical to a run with no control_signals at all.
-        assert text_a == text_b
-        assert trace_a.scheduler_config == trace_b.scheduler_config
+    Issue #64 Phase 4 gives `control_signals=` the same treatment: a valid
+    binding now builds a real `WalkerParticipant` (`dgemma/loop.py`) that
+    mutates `scheduler.config` via `register_to_config` — no longer a no-op.
+    `control_signals=` is therefore ALSO dropped from this class; its real
+    end-to-end effect (the walker's write reaching the NEXT frame's
+    `effective_*` telemetry) is covered by
+    `tests/test_run_diffusion_statelessness.py::TestWalkerStatePerRun` and
+    `tests/test_participants.py`, both of which drive the R4
+    `fake_pipeline_factory`/`_install_stateless_fakes` fixtures that actually
+    exercise `register_to_config`. `capture=` remains genuinely
+    validated-then-ignored beyond its Tier-1 `top_k` knob (issue #61 owns
+    that participant body), so its test below is unchanged."""
 
     class _FakeCaptureSpec:
         def __init__(self, keep_frames="all"):

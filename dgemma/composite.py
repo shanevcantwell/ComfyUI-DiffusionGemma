@@ -14,7 +14,7 @@ pattern) keep working against whatever object occupies that slot.
 **Fixed ordering (ADR-CDG-010 Decision 3 + its cancellation amendment
 2026-07-13, ADR-CDG-011 clause 6), engine-owned, never caller-configurable:**
 
-    capture -> cancellation check -> beta-rebuild -> pin
+    capture -> cancellation check -> beta-rebuild -> pin -> walker
 
 - **Capture runs first — before the cancellation check and before any
   canvas-writer** (ADR-CDG-010 Decision 3 + amendment, PR #45). This
@@ -42,6 +42,20 @@ pattern) keep working against whatever object occupies that slot.
   write the canvas; pin's re-assertion is what actually reaches the next
   forward pass unclobbered.
 
+**Walker (ADR-CDG-011, issue #64 Phase 4):** the `walker` field is a
+config-mutator, not a canvas-writer — it never occupies a slot in the
+capture/beta-rebuild/pin canvas-write order above. It runs LAST, after every
+canvas-writer, per the design-gate ratification on issue #64 (2026-07-13):
+ADR-CDG-011 clause 6 fixes only a lower bound (walker must run after capture
+reads the current step's effective knobs, or capture would report the next
+step's config as the current step's) and is silent on the upper bound
+relative to pin; because the walker provably touches only
+`scheduler.config` and never the canvas, its position relative to the
+canvas-writers is behaviorally inert on canvas output, so walker-last keeps
+the fixed writer-order loop below untouched by its addition. Skipped on a
+cancelled step exactly like `beta_rebuild`/`pin` — the cancellation check
+(step 2 below) raises before the writer loop or the walker ever run.
+
 This module holds ONLY engine-built participants (ARCHITECTURE.md rule 7):
 `run_diffusion` widens by declarative payloads (`constraints=`,
 `control_signals=`, `capture=`), validated at ingress and turned into
@@ -63,13 +77,16 @@ semantics); every other participant exception is not caught anywhere in this
 module or in `run_diffusion` — it propagates to the pipeline's `__call__` and
 out to the caller, same as today's single hardcoded binding.
 
-**Why this shape survives R5/R2 without reshaping (the brief's requirement):**
-adding the walker (ADR-CDG-011), beta-renoise, and pin participants is
-appending typed entries to `_STEP_ORDER` plus a constructor branch here — the
-composite's public shape (`StepEndComposite`, fixed `_STEP_ORDER`,
-`__call__` signature) does not change. A participant that is both a
-config-mutator and a canvas-writer (ADR-CDG-011's Cross-references caveat)
-still fits: it is one more named slot in the same fixed list.
+**Why this shape survived R5/R2 without reshaping (the brief's requirement):**
+adding the walker (ADR-CDG-011, issue #64 Phase 4, landed) and the pin
+participant (ADR-CDG-010, issue #64 Phase 3, landed) was appending a typed
+field plus a constructor branch here — the composite's public shape
+(`StepEndComposite`, fixed writer order, `__call__` signature) did not
+change for either addition. The still-`NOT-YET-IMPLEMENTED` beta-rebuild
+participant (ADR-CDG-010, Phase 5) fits the same way: one more entry in the
+`beta_rebuild` tuple. A participant that is both a config-mutator and a
+canvas-writer (ADR-CDG-011's Cross-references caveat) still fits: it is one
+more named slot in the same fixed list.
 """
 from __future__ import annotations
 
@@ -158,30 +175,38 @@ class StepEndComposite:
     `StepEndParticipant`, since `_FrameCollector` is the pre-existing capture
     participant and already matches the call shape exactly) and, optionally,
     `should_cancel` (issue #38's cancellation seam). `beta_rebuild`/`pin` are
-    accepted now as optional participant lists so R5's walker and
-    ADR-CDG-010/011's beta-renoise/pin participants slot in without changing
-    this class's shape — R1 ships the scaffold and the cancellation seam;
-    no beta-rebuild/pin participant exists yet (ADR-CDG-010's own two-
-    mechanism participants are R2/R5 scope), so both default to `()`.
+    accepted now as optional participant lists so ADR-CDG-010's beta-renoise/
+    pin participants slot in without changing this class's shape — no
+    beta-rebuild participant exists yet (ADR-CDG-010's own R2/Phase 5 scope),
+    so it defaults to `()`; `pin` is filled by issue #64 Phase 3. `walker`
+    (issue #64 Phase 4, ADR-CDG-011) is a single optional participant, not a
+    tuple — the walker is a config-mutator, not a canvas-writer, and this
+    phase's scope names exactly one control-signal walker per run (no
+    ordering-among-walkers question exists to motivate a list, unlike
+    `beta_rebuild`/`pin`).
 
     `__call__` runs, in this fixed order: `capture`, the cancellation check,
     every `beta_rebuild` participant (in list order), every `pin` participant
-    (in list order). A canvas-writer's returned `{"canvas": ...}` is threaded
-    into `callback_kwargs["canvas"]` for the NEXT participant in the list, so
-    a later writer sees an earlier writer's output rather than the step's
-    original pre-callback canvas — the same threading the diffusers pipeline
-    itself does across callback calls
+    (in list order), then `walker` (if given). A canvas-writer's returned
+    `{"canvas": ...}` is threaded into `callback_kwargs["canvas"]` for the
+    NEXT participant in the list, so a later writer sees an earlier writer's
+    output rather than the step's original pre-callback canvas — the same
+    threading the diffusers pipeline itself does across callback calls
     (`callback_outputs.pop("canvas", canvas)`,
     `pipeline_diffusion_gemma.py:407`), just applied within one callback
-    instead of across callbacks. The final writer's `{"canvas": ...}` (or,
+    instead of across callbacks. `walker` runs after the canvas-writer loop
+    and its return is ignored (ADR-CDG-011: a config-mutator's return is
+    never threaded as a canvas). The final writer's `{"canvas": ...}` (or,
     if no writer fired, `{}`) is this composite's own return — exactly what
-    `callback_on_step_end`'s contract expects.
+    `callback_on_step_end`'s contract expects; `walker`'s presence never
+    changes that return value.
     """
 
     capture: Callable[[Any, int, int, dict], dict]
     should_cancel: Callable[[], bool] | None = None
     beta_rebuild: tuple[StepEndParticipant, ...] = field(default_factory=tuple)
     pin: tuple[StepEndParticipant, ...] = field(default_factory=tuple)
+    walker: StepEndParticipant | None = None
 
     def __post_init__(self) -> None:
         self._cancellation = _CancellationParticipant(should_cancel=self.should_cancel)
@@ -195,8 +220,9 @@ class StepEndComposite:
         self.capture(pipe, global_step, step_idx, callback_kwargs)
 
         # 2. Cancellation — read-only; raises after this step's committed
-        #    frame is captured but before any writer runs for a step whose
-        #    result will never be used.
+        #    frame is captured but before any writer runs (or the walker
+        #    mutates scheduler.config) for a step whose result will never
+        #    be used.
         self._cancellation(pipe, global_step, step_idx, callback_kwargs)
 
         # 3. Beta-rebuild, then 4. pin — canvas-writers, in that fixed order;
@@ -210,4 +236,13 @@ class StepEndComposite:
             if output and "canvas" in output:
                 result = output
                 working_kwargs = {**working_kwargs, "canvas": output["canvas"]}
+
+        # 5. Walker (ADR-CDG-011, issue #64 Phase 4) — LAST, after every
+        #    canvas-writer (design-gate ratification, 2026-07-13): a
+        #    config-mutator, never a canvas-writer, so its return (always
+        #    None, dgemma.participants.WalkerParticipant) is discarded, never
+        #    threaded into `result`.
+        if self.walker is not None:
+            self.walker(pipe, global_step, step_idx, working_kwargs)
+
         return result
