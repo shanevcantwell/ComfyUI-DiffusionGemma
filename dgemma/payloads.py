@@ -27,6 +27,7 @@ scope (Tier 1 top-k derivation + ingress only).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -140,7 +141,7 @@ class CaptureSpec:
     #61 design-gate comment, 2026-07-13) is k=16 — a caller's own choice
     (`CaptureSpec(top_k=16)`), not this field's default."""
 
-    keep_frames: str = "all"
+    keep_frames: Literal["last", "all"] = "all"
     """Validated (`dgemma.ingress.validate_capture`, issue #64 P1) but not
     yet wired to override `run_diffusion`'s own `keep_frames=` parameter —
     see this class's docstring."""
