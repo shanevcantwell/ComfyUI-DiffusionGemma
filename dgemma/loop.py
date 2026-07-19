@@ -491,6 +491,14 @@ class _FrameCollector:
     at construction time — see the class docstring's `pinned_mask` section.
     Not otherwise read; no participant consumes this yet (Phase 3)."""
 
+    top_k: int = 0
+    """ADR-CDG-014 Decision 3 Tier 1 (issue #61 P-B): the validated
+    `CaptureSpec.top_k` value (or `0`), read fresh in `on_step_end` to derive
+    `DiffusionFrame.top_k_ids`/`top_k_weights` from the same pre-pin `logits`
+    Tier 0's `entropy` derives from. `0` (default) leaves both fields `None`
+    (additive-optional absence, Decision 1/2) — byte-identical to every run
+    before this phase."""
+
     frames: list[DiffusionFrame] = field(default_factory=list)
     steps_used: int = 0
     _canvas_idx: int = -1
@@ -539,6 +547,18 @@ class _FrameCollector:
         reused for every subsequent frame this run — see the class
         docstring's `pinned_mask` section for the A1 scope-guard reasoning.
         `None` when no `Constraints` payload was supplied.
+
+        **Tier 1 top-k capture (ADR-CDG-014 Decision 3, issue #61 P-B):**
+        when `self.top_k > 0` and `logits` is reachable, `DiffusionFrame.
+        top_k_ids`/`top_k_weights` are derived from the SAME pre-pin
+        `logits` `entropy` reads (`logits.topk(k)` for ids/raw scores,
+        `softmax` over just those k logits for weights — a per-position
+        renormalization over the top-k slice, not the full-vocab softmax,
+        since Tier 1 never materializes the full distribution) — so Tier 1
+        inherits Tier 0's capture-pre-pin ordering guarantee for free, not a
+        second derivation that could drift from it. `top_k=0` (default)
+        leaves both fields `None` (additive-optional absence, Decision 1/2),
+        matching every run before this phase byte-for-byte.
         """
         scheduler_output = callback_kwargs["scheduler_output"]
         canvas = callback_kwargs["canvas"]
@@ -567,6 +587,8 @@ class _FrameCollector:
         committed_per_example = tuple(accepted_index.float().mean(dim=-1).tolist())
 
         entropy = None
+        top_k_ids = None
+        top_k_weights = None
         logits = callback_kwargs.get("logits")
         if logits is not None:
             entropy = torch.distributions.Categorical(logits=logits).entropy()
@@ -578,6 +600,23 @@ class _FrameCollector:
                 # P4+ design pass), so batch index 0 is what every existing
                 # single-example consumer expects.
                 entropy = entropy[0]
+
+            if self.top_k > 0:
+                # Same batch-squeeze as entropy above, applied to logits
+                # itself so top-k derives from the identical per-position
+                # row entropy just read — one normalization, not two drifting
+                # copies (ADR-CDG-014 Decision 3 Tier 1, issue #61 P-B).
+                per_position_logits = logits[0] if logits.dim() == 3 else logits
+                top_k_values, top_k_ids = per_position_logits.topk(self.top_k, dim=-1)
+                # Renormalize over just the top-k slice (a per-position
+                # softmax restricted to the k candidates already selected) —
+                # Tier 1 never materializes the full-vocab softmax (that is
+                # Tier 2's `distribution` field, P-C, budget-gated). This is
+                # the top-k conditional distribution, not an approximation of
+                # the full one; a consumer reading `top_k_weights` as
+                # anything other than "renormalized over these k ids" would
+                # be reading past what Tier 1 actually captured.
+                top_k_weights = torch.softmax(top_k_values, dim=-1)
 
         if not self._pinned_mask_built:
             self._pinned_mask = _build_pinned_mask(self.constraints, canvas)
@@ -591,6 +630,8 @@ class _FrameCollector:
             committed_fraction_per_example=committed_per_example,
             canvas=canvas,
             entropy=entropy,
+            top_k_ids=top_k_ids,
+            top_k_weights=top_k_weights,
             pinned_mask=self._pinned_mask,
             effective_entropy_bound=effective_entropy_bound,
             effective_t_min=effective_t_min,
@@ -1013,12 +1054,19 @@ def run_diffusion(
     `constraints=` and `logit_hook=` is rejected at ingress (H1, below) —
     two logit-mask sources on one door (ADR-CDG-010 D5).
 
-    `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011, issue #64):
-    declarative payloads, validated at ingress (`dgemma.ingress.
-    validate_ingress`). No participant is built from `control_signals=`/
-    `capture=` yet (`WalkerParticipant`/the capture-tier knobs land in later
-    phases) — those two remain validated-then-ignored beyond the reject
-    paths this phase. `constraints=` is now LIVE end-to-end (issue #64 Phase
+    `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011/014, issue
+    #64/#61): declarative payloads, validated at ingress (`dgemma.ingress.
+    validate_ingress`). No participant is built from `control_signals=` yet
+    (`WalkerParticipant`, Phase 4) — it remains validated-then-ignored beyond
+    the reject paths this phase. `capture=`'s Tier 1 knob (`top_k`, ADR-CDG-014
+    Decision 3, issue #61 P-B) is now LIVE: when `capture.top_k > 0`, the
+    `_FrameCollector` derives `DiffusionFrame.top_k_ids`/`top_k_weights` from
+    the same pre-pin `logits` Tier 0's `entropy` reads — see `_FrameCollector.
+    on_step_end`'s docstring. `capture=None`/`capture.top_k` absent/`0`
+    (default) leaves both fields `None`, byte-identical to every run before
+    this phase; `capture.keep_frames` remains validated-then-ignored (issue
+    #64 P1, unchanged this phase — see `dgemma/payloads.py:CaptureSpec`).
+    `constraints=` is now LIVE end-to-end (issue #64 Phase
     3, ADR-CDG-010's two-mechanism givens): when it carries at least one pin,
     `run_diffusion` (a) builds `dgemma.constraints_hook.build_logit_mask_hook`
     from the pins and installs it via the existing `logit_hook=`/
@@ -1051,7 +1099,11 @@ def run_diffusion(
     `CanvasState.canvas_ids` (post-excision) does not carry. Each captured
     `DiffusionFrame` also carries `entropy` (ADR-CDG-014 Decision 3/4, issue
     #14): per-position predictive entropy derived from that step's pre-pin
-    `logits`, always populated (Tier 0's always-on default); `pinned_mask`
+    `logits`, always populated (Tier 0's always-on default);
+    `top_k_ids`/`top_k_weights` (ADR-CDG-014 Decision 3, issue #61 P-B):
+    per-position top-k candidate ids and their top-k-renormalized weights
+    from the same pre-pin `logits`, populated only when `capture.top_k > 0`
+    (`None`/`None` otherwise — Tier 1's on-request default); `pinned_mask`
     (ADR-CDG-010 D4, issue #64 Phase 2/3): `True` at every supplied
     `Constraints` pin position — now the positions `PinParticipant` actually
     (re-)writes every step (Phase 3), consistent with the Phase 2
@@ -1154,6 +1206,16 @@ def run_diffusion(
     # object with at call entry, not the user-requested count snapshotted
     # here before that call runs (issue #20; see `_FrameCollector`'s
     # docstring for the full grounding).
+    # `capture.top_k` (ADR-CDG-014 Decision 3 Tier 1, issue #61 P-B): the
+    # validated `CaptureSpec.top_k` value, duck-typed the same way
+    # `validate_capture` reads `keep_frames` (ADR-CDG-014 Decision 7 — the
+    # `capture=` dataclass is owned by this cluster, but a caller-supplied
+    # stand-in with the same attribute shape is accepted, not required to
+    # be `isinstance CaptureSpec`). `0` (default) when `capture` is `None`
+    # or exposes no `top_k` at all — Tier 1 stays off, byte-identical to
+    # every pre-P-B run.
+    capture_top_k = getattr(capture, "top_k", 0) if capture is not None else 0
+
     collector = _FrameCollector(
         scheduler=scheduler,
         t_min=t_min,
@@ -1161,6 +1223,7 @@ def run_diffusion(
         keep_frames=keep_frames,
         on_frame=on_frame,
         constraints=constraints,
+        top_k=capture_top_k,
     )
     step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel, pin=pin_participants)
 
