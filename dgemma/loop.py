@@ -254,9 +254,10 @@ from .composite import DiffusionCancelled, StepEndComposite  # noqa: E402
 from .constraints_hook import build_logit_mask_hook  # noqa: E402
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
 from .ingress import validate_ingress  # noqa: E402
+from .kv_cache import validate_kv_cache_ingress  # noqa: E402
 from .participants import PinParticipant  # noqa: E402
 from .payloads import Constraints, ControlSignals  # noqa: E402
-from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame  # noqa: E402
+from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame, KVCache, Provenance  # noqa: E402
 
 # Grounded defaults (CLAUDE.md / plan.md — first local run, Q4_K_M).
 DEFAULT_NUM_INFERENCE_STEPS = 48
@@ -907,6 +908,7 @@ def run_diffusion(
     constraints: "Constraints | None" = None,
     control_signals: "ControlSignals | None" = None,
     capture: Any = None,
+    kv_cache: "KVCache | None" = None,
 ) -> tuple[str, CanvasState, CanvasTrace]:
     """Drive one prompt through the block-diffusion denoising loop.
 
@@ -1063,12 +1065,35 @@ def run_diffusion(
     honest-telemetry fields a future control-signal walker (Phase 4) writes
     through.
 
+    `kv_cache=` (ADR-CDG-012 IN-2, issue #62 Phase 2 — types + ingress door,
+    no live drive body yet): an optional injected `KVCache` payload (§62's
+    `dgemma/types.py` dataclass). `None` (default) is today's EXACT behavior,
+    byte-for-byte unchanged — the run mints its own cache internally via the
+    pipeline's own first encode, and rule-6 `STATELESS-CORE` is trivially
+    satisfied (no injected state crosses). When non-`None`,
+    `dgemma.kv_cache.validate_kv_cache_ingress(kv_cache, dgemma_model)` fires
+    BEFORE the scheduler/pipeline are constructed (fail-on-mismatch, rule 5
+    `EMIT-CANONICAL / PARSE-AT-THE-DOOR` — a bad cache is rejected before any
+    resource tied to this call is built) and, on pass,
+    `CanvasTrace.injected_cache_provenance` is stamped with the payload's
+    `Provenance` record (OUT-3) so a downstream analysis can always tell a
+    conditioned run from an unconditioned one. This phase does NOT yet drive
+    the decoder off the injected cache's tensors — that live drive body is
+    GATED on the ADR's real-weights de-risk smoke test (Open Question #1,
+    issue #62 Phase 4); `run_diffusion` validates and stamps provenance
+    (the skeleton), and otherwise proceeds exactly as it does when
+    `kv_cache=None`. The input `kv_cache` payload itself is never mutated by
+    this function (§3 advance-returns-new-payload discipline — this phase
+    reads it, it does not write through it).
+
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
-    `EntropyBoundScheduler` a nonsensical temperature trajectory), or if
+    `EntropyBoundScheduler` a nonsensical temperature trajectory), if
     ingress validation of `constraints`/`control_signals`/`capture`/the
     `constraints`+`logit_hook` combination fails (see
-    `dgemma.ingress.validate_ingress`'s error register).
+    `dgemma.ingress.validate_ingress`'s error register), or if `kv_cache` is
+    given and fails `validate_kv_cache_ingress`'s V1-V6 checks (see
+    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register).
     """
     if t_min >= t_max:
         raise ValueError(f"t_min must be < t_max, got t_min={t_min!r} t_max={t_max!r}.")
@@ -1087,6 +1112,15 @@ def run_diffusion(
         num_inference_steps=num_inference_steps,
         vocab_size=vocab_size,
     )
+
+    # ADR-CDG-012 IN-2 (issue #62 Phase 2): fire the KV_CACHE door's own
+    # ingress validator BEFORE any scheduler/pipeline construction below —
+    # a bad injected cache is rejected before this call ties up a scheduler
+    # or pipeline object (rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR). `None`
+    # (the default) skips this entirely — zero behavior change from before
+    # this parameter existed.
+    if kv_cache is not None:
+        validate_kv_cache_ingress(kv_cache, dgemma_model)
 
     # Constraints -> the two-mechanism givens (ADR-CDG-010 Decision 1, issue
     # #64 Phase 3). Both mechanisms are built from the SAME validated
@@ -1203,6 +1237,7 @@ def run_diffusion(
             t_min=t_min,
             t_max=t_max,
             num_inference_steps=num_inference_steps,
+            injected_cache_provenance=kv_cache.provenance if kv_cache is not None else None,
         )
 
     return _build_result(
@@ -1215,6 +1250,7 @@ def run_diffusion(
         t_min=t_min,
         t_max=t_max,
         num_inference_steps=num_inference_steps,
+        injected_cache_provenance=kv_cache.provenance if kv_cache is not None else None,
     )
 
 
@@ -1229,12 +1265,20 @@ def _build_result(
     t_min: float,
     t_max: float,
     num_inference_steps: int,
+    injected_cache_provenance: "Provenance | None" = None,
 ) -> tuple[str, CanvasState, CanvasTrace]:
     """Shared tail of `run_diffusion`'s completed and cancelled paths:
     thought-channel excision, decode, `CanvasState`/`CanvasTrace`
     construction — identical for both so a cancelled run's returned shape is
     not a special case a caller has to branch on (#38: "return what exists"
-    means the same contract, populated with less)."""
+    means the same contract, populated with less).
+
+    `injected_cache_provenance` (ADR-CDG-012 OUT-3, issue #62 Phase 2):
+    `kv_cache.provenance` when `run_diffusion` received a non-`None`
+    `kv_cache=`, `None` otherwise — passed straight onto
+    `CanvasTrace.injected_cache_provenance` below. Identity only, never the
+    cache tensors (those already have their own OUT-1/OUT-2 node-output home,
+    Phase 3)."""
     # ADR-CDG-014 Decision 6 (issue #11): capture the pre-excision `sequences`
     # onto `raw_canvas_ids` BEFORE `excise_thought_channel` runs below — this
     # is the only point the final raw (un-excised) canvas ids are ever
@@ -1293,5 +1337,6 @@ def _build_result(
             "num_inference_steps_requested": num_inference_steps,
             "num_inference_steps_effective": scheduler.num_inference_steps,
         },
+        injected_cache_provenance=injected_cache_provenance,
     )
     return text, canvas_state, canvas_trace
