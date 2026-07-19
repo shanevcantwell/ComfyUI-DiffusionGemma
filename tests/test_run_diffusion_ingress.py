@@ -12,7 +12,13 @@ unit level (`tests/test_ingress.py` covers that).
 Uses the same lightweight fake-pipeline idiom as
 `tests/test_run_diffusion_knobs.py` (not the heavier R4 fixture in
 `tests/conftest.py`, which Phase 1 doesn't need — no participant/hook body
-exists yet to drive through it).
+exists yet to drive through it). `capture.keep_frames` stays covered here
+(genuinely still validated-then-ignored, ADR-CDG-014 P-B unchanged);
+`capture.top_k`'s ingress reject + real derivation are covered in
+`tests/test_capture_top_k_e2e.py` (needs the R4 `fake_pipeline_factory`
+fixture for a real `vocab_size` + real per-step `logits` — the same gap this
+module's `TestValidPayloadsAreIgnoredBehaviorally` docstring already notes
+for `constraints=`).
 """
 from __future__ import annotations
 

@@ -1,14 +1,15 @@
 """Enforcement tests for the `DiffusionFrame`/`CanvasTrace` capture discipline
-(ADR-CDG-014, issue #61 Phase P-A) — the R6 additive-optional field
-discipline, Tier 0's always-on per-position entropy capture, and the
-capture-pre-pin ordering guarantee (ADR-CDG-010).
+(ADR-CDG-014, issue #61 Phases P-A/P-B) — the R6 additive-optional field
+discipline, Tier 0's always-on per-position entropy capture, Tier 1's
+on-request top-k capture, and the capture-pre-pin ordering guarantee
+(ADR-CDG-010).
 
-Scope (P-A only): additive-optional field discipline (Decision 1), Tier 0
-entropy (Decision 3's always-on row), and capture-pre-pin ordering
-(Decision 4). Tier 1 (`top_k`)/Tier 2 (`distribution` + budget) knobs are
-NOT implemented here (P-B/P-C) — this suite only asserts their FIELDS exist
-and default to `None` under the same additive-optional discipline, not their
-derivation.
+Scope: additive-optional field discipline (Decision 1), Tier 0 entropy
+(Decision 3's always-on row, P-A), Tier 1 top-k (Decision 3's on-request row,
+P-B), and capture-pre-pin ordering (Decision 4). Tier 2 (`distribution` +
+budget) is NOT implemented here (P-C) — this suite only asserts its FIELD
+exists and defaults to `None` under the same additive-optional discipline,
+not its derivation.
 
 **Issue #64 Phase 2 addition:** `pinned_mask` (ADR-CDG-010 Decision 4) and
 `effective_entropy_bound`/`effective_t_min`/`effective_t_max` (ADR-CDG-011
@@ -17,6 +18,12 @@ enforces — `TestAdditiveOptionalFieldDiscipline` is extended to cover all
 four new fields, and two new classes (`TestPinnedMask`,
 `TestEffectiveKnobTelemetry`) pin their derivation per the plan's §5 test
 design (issue #64, gate-ratified 2026-07-13).
+
+**Issue #61 P-B addition:** `TestTier1TopKCapture` pins the plan's test (c)
+— `top_k=0` yields `top_k_ids is None`, `top_k=8` yields shape
+`[canvas_len, 8]` — plus the capture-pre-pin ordering guarantee extended to
+Tier 1 (top-k derives from the same pre-pin `logits` entropy does, never a
+post-pin artifact).
 """
 from __future__ import annotations
 
@@ -223,6 +230,93 @@ class TestTier0AlwaysOnEntropyCapture:
         assert collector.frames[0].entropy.shape == (canvas_len,)
 
 
+class TestTier1TopKCapture:
+    """ADR-CDG-014 Decision 3's Tier 1 row (issue #61 P-B): per-position
+    top-k candidate ids + weights, on request only (`top_k` knob, default
+    0/off). Plan's test (c): `top_k=0` -> `None`, `top_k=8` ->
+    `[canvas_len, 8]`."""
+
+    def test_top_k_zero_leaves_fields_none(self):
+        """Default off — byte-identical to every pre-P-B run: no `top_k=`
+        threaded through means Tier 1 stays absent even though `logits` is
+        present (Tier 0 still fires)."""
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8)
+        vocab, canvas_len = 6, 4
+        logits = torch.randn(1, canvas_len, vocab)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        frame = collector.frames[0]
+        assert frame.top_k_ids is None
+        assert frame.top_k_weights is None
+        assert frame.entropy is not None  # Tier 0 unaffected by Tier 1 being off
+
+    def test_top_k_requested_yields_correct_shape(self):
+        vocab, canvas_len, k = 10, 4, 8
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, top_k=k)
+        logits = torch.randn(1, canvas_len, vocab)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        frame = collector.frames[0]
+        assert frame.top_k_ids is not None
+        assert frame.top_k_weights is not None
+        assert frame.top_k_ids.shape == (canvas_len, k)
+        assert frame.top_k_weights.shape == (canvas_len, k)
+
+    def test_top_k_absent_when_logits_not_reachable(self):
+        """Additive-optional/absence discipline: requesting top_k without
+        `logits` in callback_kwargs (e.g. a pre-R6-shaped call site) must not
+        crash and must not fabricate a zero/empty top-k — both fields stay
+        `None`, same absence semantics `entropy` already gets."""
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, top_k=8)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        assert collector.frames[0].top_k_ids is None
+        assert collector.frames[0].top_k_weights is None
+
+    def test_top_k_ids_match_manual_topk_over_same_logits(self):
+        """Independently hand-verify the top-k ids against `torch.topk`
+        directly over the exact logits handed in — not just a shape check."""
+        vocab, canvas_len, k = 12, 3, 5
+        logits = torch.randn(1, canvas_len, vocab)
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, top_k=k)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        expected_values, expected_ids = logits[0].topk(k, dim=-1)
+        assert torch.equal(collector.frames[0].top_k_ids, expected_ids)
+        expected_weights = torch.softmax(expected_values, dim=-1)
+        assert torch.allclose(collector.frames[0].top_k_weights, expected_weights, atol=1e-6)
+
+    def test_top_k_weights_sum_to_one_per_position(self):
+        """The Tier-1 weights are a renormalization over just the k selected
+        candidates (a per-position softmax restricted to that slice, not an
+        approximation of the full-vocab distribution) — each position's row
+        must sum to 1."""
+        vocab, canvas_len, k = 20, 5, 6
+        logits = torch.randn(1, canvas_len, vocab)
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, top_k=k)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        sums = collector.frames[0].top_k_weights.sum(dim=-1)
+        assert torch.allclose(sums, torch.ones(canvas_len), atol=1e-5)
+
+    def test_2d_logits_without_batch_dim_supported_for_top_k(self):
+        """Mirrors entropy's own no-batch-dim support test — top_k must not
+        assume a leading batch dim is always present either."""
+        vocab, canvas_len, k = 7, 3, 4
+        logits = torch.randn(canvas_len, vocab)  # no leading batch dim
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8, top_k=k)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        assert collector.frames[0].top_k_ids.shape == (canvas_len, k)
+        assert collector.frames[0].top_k_weights.shape == (canvas_len, k)
+
+
 class TestCapturePrePinOrdering:
     """ADR-CDG-014 Decision 4 (ADR-CDG-010 ordering): capture is the
     composite's FIRST participant, so entropy derives from the step's
@@ -281,6 +375,47 @@ class TestCapturePrePinOrdering:
         # of the pin rewrite.
         expected_entropy = torch.distributions.Categorical(logits=logits[0]).entropy()
         assert torch.allclose(collector.frames[0].entropy, expected_entropy, atol=1e-5)
+
+    def test_top_k_reflects_model_logits_not_pin_rewrite(self, fake_pipeline_factory):
+        """Same ordering proof as entropy above, extended to Tier 1 (issue
+        #61 P-B): top-k derives from the pre-pin `logits`, never from a
+        canvas a later pin participant rewrote."""
+        vocab = 6
+        canvas_shape = (1, 4)
+        logits = torch.tensor(
+            [[[0.0, 1.0, 2.0, -1.0, 0.5, 3.0]] * canvas_shape[1]], dtype=torch.float32
+        )
+        k = 3
+
+        built = fake_pipeline_factory(
+            num_inference_steps=1, vocab_size=vocab, canvas_shape=canvas_shape,
+        )
+        built.model.forward = lambda decoder_input_ids, **_ignored: type(
+            "Out", (), {"logits": logits}
+        )()
+
+        collector = _FrameCollector(
+            scheduler=built.scheduler, t_min=0.4, t_max=0.8, keep_frames="all", top_k=k
+        )
+
+        def pin(pipe, global_step, step_idx, callback_kwargs):
+            return {"canvas": torch.full_like(callback_kwargs["canvas"], 999)}
+
+        step_end = StepEndComposite(capture=collector.on_step_end, pin=(pin,))
+
+        result = built.pipeline(
+            num_inference_steps=1,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "logits", "scheduler_output"],
+        )
+
+        assert torch.all(result.sequences == 999)
+        assert not torch.all(collector.frames[0].canvas == 999)
+
+        expected_values, expected_ids = logits[0].topk(k, dim=-1)
+        assert torch.equal(collector.frames[0].top_k_ids, expected_ids)
+        expected_weights = torch.softmax(expected_values, dim=-1)
+        assert torch.allclose(collector.frames[0].top_k_weights, expected_weights, atol=1e-5)
 
 
 def _fake_scheduler_with_config(

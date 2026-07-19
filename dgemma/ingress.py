@@ -131,16 +131,23 @@ def validate_control_signals(control_signals: "ControlSignals | None", *, num_in
                 )
 
 
-def validate_capture(capture: Any) -> None:
-    """Validate a `capture=` payload's `keep_frames` field (P1 per issue #64
-    §1.4).
+def validate_capture(capture: Any, *, vocab_size: int | None = None) -> None:
+    """Validate a `capture=` payload (ADR-CDG-014 Decision 7, issue #61 P-B;
+    `keep_frames` field originally issue #64 §1.4).
 
     Deliberately duck-typed (`getattr`, not `isinstance` against a dataclass
     minted here): per ADR-CDG-014 Decision 7, the `capture=` payload's
-    dataclass is owned by the capture cluster (issue #61), not this module
-    (see `dgemma/payloads.py`'s module docstring). This validator only checks
-    the one field issue #64 contributes (`keep_frames`); it does not assume
-    or import a `CaptureSpec` type. `None` is always a no-op.
+    dataclass (`CaptureSpec`) is owned by the capture cluster (issue #61),
+    not this module (see `dgemma/payloads.py`'s module docstring). This
+    validator does not assume or import `CaptureSpec` — any object exposing
+    the checked attributes passes the same way a real `CaptureSpec` does
+    (the same duck-typed contract issue #64's `keep_frames`-only check
+    already established). `None` is always a no-op.
+
+    `top_k` (P-B, Tier 1): must be a non-negative `int`. `vocab_size=None`
+    skips the in-vocab ceiling check with a named degradation — mirrors
+    `validate_constraints`'s C3 skip for the same reason (a bare test double
+    / a processor with no usable tokenizer, issue #64 §3.4).
     """
     if capture is None:
         return
@@ -149,6 +156,25 @@ def validate_capture(capture: Any) -> None:
         raise ValueError(
             f"CaptureSpec.keep_frames must be 'last' or 'all', got {keep_frames!r}. "
             "Fix: use one of the two retention policies."
+        )
+
+    top_k = getattr(capture, "top_k", 0)
+    if not isinstance(top_k, int) or isinstance(top_k, bool):
+        raise ValueError(
+            f"CaptureSpec.top_k must be an int, got {top_k!r} ({type(top_k)}). "
+            "Fix: pass a non-negative integer (0 = Tier 1 off)."
+        )
+    if top_k < 0:
+        raise ValueError(
+            f"CaptureSpec.top_k must be >= 0, got {top_k}. Fix: use 0 to disable Tier 1, or a "
+            "positive k to request that many top candidates per position."
+        )
+    if top_k > 0 and vocab_size is not None and top_k > vocab_size:
+        raise ValueError(
+            f"CaptureSpec.top_k={top_k} exceeds vocab_size={vocab_size}. Requesting more candidates "
+            "than the vocabulary holds would silently clamp to vocab_size rather than honor the "
+            "caller's request (ADR-CDG-014 rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR). Fix: use "
+            f"top_k <= {vocab_size}."
         )
 
 
@@ -183,5 +209,5 @@ def validate_ingress(
     """
     validate_constraints(constraints, gen_length=gen_length, vocab_size=vocab_size)
     validate_control_signals(control_signals, num_inference_steps=num_inference_steps)
-    validate_capture(capture)
+    validate_capture(capture, vocab_size=vocab_size)
     reject_conflicting_hook_sources(constraints, logit_hook)

@@ -8,21 +8,26 @@ ARE the socket payloads consumed at the door" docstring honest and gives
 ingress a single import home. Imports zero ComfyUI (ADR-CDG-003 rule 1),
 exactly like `types.py`.
 
-**Phase 1 scope (issue #64 §6):** this module lands the dataclasses and the
-`MUTABLE_TARGETS` registry only. No participant reads these yet — Phases 3/4
-wire `Constraints`/`ControlSignals` into `PinParticipant`/`WalkerParticipant`.
-`run_diffusion` validates-then-ignores a payload this phase (dgemma/loop.py).
+**Phase 1 scope (issue #64 §6):** this module lands the `Constraints`/
+`ControlSignals` dataclasses and the `MUTABLE_TARGETS` registry. No
+participant reads a `control_signals=` payload yet (Phase 4 walker);
+`constraints=` is LIVE end-to-end since issue #64 Phase 3 (`dgemma/loop.py`).
 
-`CaptureSpec` is deliberately NOT defined here (issue #64 §7 O5 field-shape
-ruling): ADR-CDG-014 Decision 7 rules the `capture=` payload's dataclass is
-owned by the capture cluster (issue #61) — `pinned_mask`/`keep_frames` are
-contributed into that shared dataclass as additive-optional fields, not
-minted as a competing type in this module. Only `Constraints`/`ControlSignals`
-are #64-owned and defined here.
+`CaptureSpec` (below) is minted HERE, not in this module's Phase-1-era
+placeholder location: ADR-CDG-014 Decision 7 rules the `capture=` payload's
+dataclass is owned by the capture cluster (issue #61), not issue #64 — this
+is that mint. `pinned_mask` rides `DiffusionFrame` instead (a per-frame trace
+field, not a `capture=` knob — issue #64 Phase 2/3, `dgemma/types.py`); it is
+not a `CaptureSpec` field. `keep_frames` stays the existing `run_diffusion`
+keyword-only parameter (`dgemma/loop.py`) — `CaptureSpec.keep_frames` is
+validated (`dgemma.ingress.validate_capture`, duck-typed since issue #64 P1)
+but not yet wired to override it; that wiring is out of ADR-CDG-014 P-B's
+scope (Tier 1 top-k derivation + ingress only).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -95,3 +100,48 @@ class ControlSignals:
 # concept). ADR-CDG-011 Open Question 1 left the placement undecided; the
 # gate ratification comment (2026-07-13) confirms (a) engine-side.
 MUTABLE_TARGETS = frozenset({"entropy_bound", "t_min", "t_max"})
+
+
+@dataclass(frozen=True)
+class CaptureSpec:
+    """The `capture=` payload (ADR-CDG-014 Decision 7, issue #61 P-B).
+
+    Owned by the capture cluster (issue #61 / ADR-CDG-014), not issue #64 —
+    the ruling in ADR-CDG-014 Decision 7 that the `capture=` param's shape is
+    this cluster's to define. Canonical fields are the retention-tier
+    controls; `keep_frames` is validated here (duck-typed since issue #64
+    P1, `dgemma.ingress.validate_capture`) but the `run_diffusion`
+    `keep_frames=` keyword-only parameter remains the one that actually
+    governs `_FrameCollector` retention this phase — wiring `CaptureSpec.
+    keep_frames` through to override it is not part of P-B's scope (Tier 1
+    top-k derivation + ingress only).
+
+    Tier 2 fields (`capture_full_distribution`/`max_full_distribution_steps`,
+    ADR-CDG-014 Decision 3's Tier-2 row) are deliberately NOT added yet —
+    P-C's scope, landing once the budget-reject ingress design for the full
+    per-position distribution is implemented. Adding an inert Tier-2 knob now
+    would let a caller believe an opt-in they set has any effect, which is
+    the same lying-payload shape ADR-CDG-001 forbids applied to an unbuilt
+    feature instead of a captured value.
+    """
+
+    top_k: int = 0
+    """Tier 1 knob (ADR-CDG-014 Decision 3's Tier-1 row): number of top
+    candidate token ids/weights to derive per position from each step's
+    pre-pin `logits`, alongside Tier 0's `entropy`. `0` (this field's
+    default) is OFF — `DiffusionFrame.top_k_ids`/`top_k_weights` stay `None`
+    (additive-optional absence, ADR-CDG-014 Decision 1/2), matching today's
+    byte-identical behavior for every run that doesn't ask for Tier 1.
+    Validated at ingress (`dgemma.ingress.validate_capture`): must be a
+    non-negative int, and when `> 0` must not exceed the model's vocabulary
+    size (an out-of-vocab k would silently clamp to `topk`'s own vocab-sized
+    ceiling rather than raising the caller's actual mistake — rejected
+    instead, per rule 5 `EMIT-CANONICAL / PARSE-AT-THE-DOOR`). The
+    gate-ratified recommendation when a caller opts Tier 1 on at all (issue
+    #61 design-gate comment, 2026-07-13) is k=16 — a caller's own choice
+    (`CaptureSpec(top_k=16)`), not this field's default."""
+
+    keep_frames: Literal["last", "all"] = "all"
+    """Validated (`dgemma.ingress.validate_capture`, issue #64 P1) but not
+    yet wired to override `run_diffusion`'s own `keep_frames=` parameter —
+    see this class's docstring."""
