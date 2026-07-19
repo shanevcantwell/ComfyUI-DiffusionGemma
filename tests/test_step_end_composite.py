@@ -171,7 +171,7 @@ class TestOrderingIsStructural:
         import inspect
 
         sig = inspect.signature(StepEndComposite.__init__)
-        assert set(sig.parameters) == {"self", "capture", "should_cancel", "beta_rebuild", "pin"}
+        assert set(sig.parameters) == {"self", "capture", "should_cancel", "beta_rebuild", "pin", "walker"}
 
     def test_participant_protocol_has_no_priority_or_order_field(self):
         # StepEndParticipant is a Protocol naming only `name` + `__call__`;

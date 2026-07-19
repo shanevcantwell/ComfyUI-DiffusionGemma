@@ -255,7 +255,7 @@ from .constraints_hook import build_logit_mask_hook  # noqa: E402
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
 from .ingress import validate_ingress  # noqa: E402
 from .kv_cache import validate_kv_cache_ingress  # noqa: E402
-from .participants import PinParticipant  # noqa: E402
+from .participants import PinParticipant, WalkerParticipant  # noqa: E402
 from .payloads import Constraints, ControlSignals  # noqa: E402
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame, KVCache, Provenance  # noqa: E402
 
@@ -1027,16 +1027,18 @@ def run_diffusion(
     The single `callback_on_step_end` slot passed to the pipeline is a
     `dgemma.composite.StepEndComposite` (ADR-CDG-010 Decision 3 + its
     cancellation amendment), not the collector directly — the composite's
-    fixed order is `capture -> cancellation check -> beta-rebuild -> pin`.
-    `capture` and the cancellation seam are always wired; `pin` is wired
-    (issue #64 Phase 3) with a fresh `PinParticipant` whenever `constraints=`
-    carries at least one pin, `()` otherwise — so a run with no constraints
-    still builds an empty `pin=` tuple and the composite's behavior is
-    identical to invoking the collector alone, exactly as before this phase.
-    The beta-rebuild participant (ADR-CDG-010) and the control-signal walker
-    (ADR-CDG-011) remain `NOT-YET-IMPLEMENTED` — Phases 4/5 land those
-    bodies; this phase only fills the `pin` slot the R1 scaffold already
-    exposed.
+    fixed order is `capture -> cancellation check -> beta-rebuild -> pin ->
+    walker`. `capture` and the cancellation seam are always wired; `pin` is
+    wired (issue #64 Phase 3) with a fresh `PinParticipant` whenever
+    `constraints=` carries at least one pin, `()` otherwise; `walker` is
+    wired (issue #64 Phase 4) with a fresh `WalkerParticipant` whenever
+    `control_signals=` carries at least one binding, `None` otherwise — so a
+    run with no constraints/control_signals still builds an empty `pin=`
+    tuple and a `None` `walker=`, and the composite's behavior is identical
+    to invoking the collector alone, exactly as before either phase. The
+    beta-rebuild participant (ADR-CDG-010) remains `NOT-YET-IMPLEMENTED` —
+    Phase 5 lands that body; this phase only fills the `walker` slot the
+    scaffold already exposed.
 
     `logit_hook` (#35 R5, F4; ADR-CDG-010 Decision 5): an optional forward
     hook installed on `dgemma_model.model` for exactly the duration of the
@@ -1056,17 +1058,15 @@ def run_diffusion(
 
     `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011/014, issue
     #64/#61): declarative payloads, validated at ingress (`dgemma.ingress.
-    validate_ingress`). No participant is built from `control_signals=` yet
-    (`WalkerParticipant`, Phase 4) — it remains validated-then-ignored beyond
-    the reject paths this phase. `capture=`'s Tier 1 knob (`top_k`, ADR-CDG-014
-    Decision 3, issue #61 P-B) is now LIVE: when `capture.top_k > 0`, the
+    validate_ingress`). `capture=`'s Tier 1 knob (`top_k`, ADR-CDG-014
+    Decision 3, issue #61 P-B) is LIVE: when `capture.top_k > 0`, the
     `_FrameCollector` derives `DiffusionFrame.top_k_ids`/`top_k_weights` from
     the same pre-pin `logits` Tier 0's `entropy` reads — see `_FrameCollector.
     on_step_end`'s docstring. `capture=None`/`capture.top_k` absent/`0`
     (default) leaves both fields `None`, byte-identical to every run before
-    this phase; `capture.keep_frames` remains validated-then-ignored (issue
-    #64 P1, unchanged this phase — see `dgemma/payloads.py:CaptureSpec`).
-    `constraints=` is now LIVE end-to-end (issue #64 Phase
+    that phase; `capture.keep_frames` remains validated-then-ignored (issue
+    #64 P1, unchanged — see `dgemma/payloads.py:CaptureSpec`).
+    `constraints=` is LIVE end-to-end (issue #64 Phase
     3, ADR-CDG-010's two-mechanism givens): when it carries at least one pin,
     `run_diffusion` (a) builds `dgemma.constraints_hook.build_logit_mask_hook`
     from the pins and installs it via the existing `logit_hook=`/
@@ -1083,10 +1083,23 @@ def run_diffusion(
     first time its cell isn't accepted. `Constraints(pins=())`/`None`
     installs neither the hook nor the participant (empty == no-op,
     `dgemma/payloads.py`) — byte-identical to today's no-`constraints=`
-    behavior. An invalid payload of any of the three still raises at
-    ingress regardless of phase; `constraints=` + `logit_hook=` together
-    still raise at ingress (H1) even now that `constraints=` builds its own
-    hook internally — the two-source-on-one-door reject is unconditional.
+    behavior. `control_signals=` is now LIVE (issue #64 Phase 4, ADR-CDG-011):
+    when it carries at least one binding, `run_diffusion` constructs a
+    `dgemma.participants.WalkerParticipant` bound to THIS call's `scheduler`
+    and wires it into the composite's `walker=` slot (LAST, after every
+    canvas-writer) — at the callback for `step_idx = k` the walker maps
+    `signal[k + 1]` into the binding's declared `[low, high]` range and
+    writes it via `scheduler.register_to_config(...)`, preparing step
+    `k + 1`'s config (clause 6); `signal[0]` is never applied (the gate
+    ruling on issue #64, O1) and the final step is a no-op (no step `k + 1`
+    left to prepare) — see `dgemma.participants.WalkerParticipant`'s
+    docstring for the full mechanism. `ControlSignals(bindings=())`/`None`
+    builds no walker (empty == no-op) — byte-identical to today's
+    no-`control_signals=` behavior. An invalid payload of any of the three
+    still raises at ingress regardless of phase; `constraints=` +
+    `logit_hook=` together still raise at ingress (H1) even now that
+    `constraints=` builds its own hook internally — the two-source-on-one-door
+    reject is unconditional.
 
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
@@ -1114,8 +1127,10 @@ def run_diffusion(
     `effective_entropy_bound`/`effective_t_min`/`effective_t_max`
     (ADR-CDG-011 clause 7, issue #64 Phase 2): the `entropy_bound`/`t_min`/
     `t_max` values `scheduler.config` actually held at that callback — the
-    honest-telemetry fields a future control-signal walker (Phase 4) writes
-    through.
+    honest-telemetry fields the control-signal walker (issue #64 Phase 4)
+    writes through via `register_to_config`, visible in the NEXT captured
+    frame after the walker's write (clause 6: walker prepares the next step,
+    capture records the finished step).
 
     `kv_cache=` (ADR-CDG-012 IN-2, issue #62 Phase 2 — types + ingress door,
     no live drive body yet): an optional injected `KVCache` payload (§62's
@@ -1196,6 +1211,17 @@ def run_diffusion(
     )
     pipeline = DGemmaPipeline(model=dgemma_model.model, scheduler=scheduler, processor=dgemma_model.processor)
 
+    # Control signals -> the walker (ADR-CDG-011, issue #64 Phase 4). Built
+    # from THIS call's validated `control_signals` and THIS call's freshly
+    # constructed `scheduler` — no cross-call state, no shared scheduler
+    # reference (rule 6 STATELESS-CORE; ADR-CDG-011 clause 8/F5). Empty/`None`
+    # `control_signals=` builds no walker at all — "empty == no-op"
+    # (`dgemma/payloads.py`), byte-identical to today's no-`control_signals=`
+    # behavior.
+    walker_participant: WalkerParticipant | None = None
+    if control_signals is not None and control_signals.bindings:
+        walker_participant = WalkerParticipant(control_signals=control_signals, scheduler=scheduler)
+
     generator = None
     if seed is not None:
         generator = torch.Generator(device=dgemma_model.device).manual_seed(seed)
@@ -1225,7 +1251,12 @@ def run_diffusion(
         constraints=constraints,
         top_k=capture_top_k,
     )
-    step_end = StepEndComposite(capture=collector.on_step_end, should_cancel=should_cancel, pin=pin_participants)
+    step_end = StepEndComposite(
+        capture=collector.on_step_end,
+        should_cancel=should_cancel,
+        pin=pin_participants,
+        walker=walker_participant,
+    )
 
     if thinking:
         prompt_kwargs: dict = {
