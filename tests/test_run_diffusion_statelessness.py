@@ -40,7 +40,7 @@ import pytest
 import torch
 
 from dgemma.loop import run_diffusion
-from dgemma.payloads import Constraints, Pin
+from dgemma.payloads import Binding, Constraints, ControlSignals, Pin
 from dgemma.types import DGemmaModel
 
 
@@ -363,6 +363,101 @@ class TestPinStatePerRun:
 
         assert all(f.pinned_mask is not None for f in trace1.frames)
         assert all(f.pinned_mask is None for f in trace2.frames)
+
+
+class TestWalkerStatePerRun:
+    """ADR-CDG-011 clause 8 (issue #64 Phase 4, plan §5 `TestWalkerStatePerRun`):
+    two identical `run_diffusion(control_signals=...)` calls on one loaded
+    (fake) model yield identical walker-written effective-knob telemetry —
+    no walker state observable before the payload that created it, and
+    nothing carried over from a previous call's `ControlSignals`/scheduler.
+    Drives `_install_stateless_fakes`'s REAL `register_to_config` mutation
+    path (not just a static kwargs dict), the same fixture
+    `TestSameInSameOutTelemetry`'s mid-call-mutation test above uses — this
+    class proves the same containment holds when the mutation comes from a
+    REAL `WalkerParticipant`, not a hand-scripted mutation standing in for
+    one."""
+
+    def test_two_identical_calls_with_same_control_signals_yield_identical_telemetry(self, monkeypatch):
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=3)
+        control_signals = ControlSignals(
+            bindings=(Binding(target="entropy_bound", signal=(0.0, 0.5, 1.0), low=0.0, high=1.0),)
+        )
+
+        _, _, trace1 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=3, control_signals=control_signals,
+        )
+        _, _, trace2 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=3, control_signals=control_signals,
+        )
+
+        telemetry1 = [f.effective_entropy_bound for f in trace1.frames]
+        telemetry2 = [f.effective_entropy_bound for f in trace2.frames]
+        assert telemetry1 == telemetry2
+        # Sanity: the walker really did write through (not a no-op fixture) —
+        # step 0 is ctor config (0.1); steps 1/2 reflect the walker's writes.
+        assert telemetry1[0] == pytest.approx(0.1)
+        assert telemetry1[1] == pytest.approx(0.5)
+        assert telemetry1[2] == pytest.approx(1.0)
+
+    def test_walker_written_config_does_not_survive_into_a_call_with_no_control_signals(self, monkeypatch):
+        """The exact cross-call-leak shape the statelessness surface exists
+        to catch: a run WITH `control_signals=` (whose walker mutates
+        `scheduler.config` mid-run) followed by a run with NO
+        `control_signals=` must not somehow carry the first run's mutated
+        config forward — `run_diffusion` builds a fresh scheduler AND a
+        fresh `WalkerParticipant` every call, so there is no shared object
+        for the mutation to ride on."""
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+        control_signals = ControlSignals(
+            bindings=(Binding(target="entropy_bound", signal=(0.0, 0.999), low=0.0, high=1.0),)
+        )
+
+        _, _, trace1 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, control_signals=control_signals,
+        )
+        _, _, trace2 = run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+        )
+
+        # Call 1's walker really wrote through (0.999 at step 1).
+        assert trace1.frames[1].effective_entropy_bound == pytest.approx(0.999)
+        # Call 2 (no control_signals=) reads the ORIGINAL requested config at
+        # every step — never the previous call's walker-mutated 0.999.
+        assert all(f.effective_entropy_bound == pytest.approx(0.1) for f in trace2.frames)
+
+    def test_fresh_walker_participant_built_per_call_no_shared_scheduler_reference(self, monkeypatch):
+        """Structural precondition (mirrors `TestSchedulerFreshPerCall`
+        above): the walker holds a reference to THIS call's scheduler
+        object, never a previous call's — proven by asserting the two calls'
+        registered scheduler instances are distinct AND that each call's
+        walker-mutated config lives only on its own instance."""
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+        control_signals = ControlSignals(
+            bindings=(Binding(target="entropy_bound", signal=(0.0, 0.777), low=0.0, high=1.0),)
+        )
+
+        run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, control_signals=control_signals,
+        )
+        run_diffusion(
+            _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, control_signals=control_signals,
+        )
+
+        assert len(registry) == 2
+        assert registry[0] is not registry[1]
+        # Both scheduler instances independently reflect their OWN call's
+        # walker write — neither is the other's leftover state.
+        assert registry[0].config.entropy_bound == pytest.approx(0.777)
+        assert registry[1].config.entropy_bound == pytest.approx(0.777)
 
 
 class TestEffectiveKnobTelemetryStatelessness:
