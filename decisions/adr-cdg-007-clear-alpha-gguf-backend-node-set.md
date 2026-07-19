@@ -154,7 +154,7 @@ diffusers/native-stepping path to milestone-2.
 - **Steering-vs-illumination is the right axis.** Bespoke where narrow-steering pays (model/heat/
   resume), stock where broad composition pays (frames) — captures the actual UX value of ComfyUI's
   link-illumination without paying the bespoke-type cost where it buys nothing.
-- **Milestone-2 is preserved, not burned.** The diffusers path (native stepping, the ADR-006 sampler)
+- **Milestone-2 is preserved, not burned.** The diffusers path (native stepping, the ADR-CDG-006 sampler)
   remains the prize; this ADR reclassifies it, it does not reject it.
 
 ### Negative Consequences
@@ -172,8 +172,8 @@ diffusers/native-stepping path to milestone-2.
 
 ## Alternatives Considered
 
-### Option A — diffusers/transformers backend with an AWQ/MXFP4 quant (the ADR-002/004 path) for the alpha
-The originally-decided path: native per-step commit mask, mid-loop constraint injection, the ADR-006
+### Option A — diffusers/transformers backend with an AWQ/MXFP4 quant (the ADR-CDG-002/004 path) for the alpha
+The originally-decided path: native per-step commit mask, mid-loop constraint injection, the ADR-CDG-006
 step-window sampler — all first-class.
 
 **Why rejected for the alpha (deciding factor):** it is **quant-blocked on the current modeling
@@ -211,7 +211,7 @@ steering pays, stock (`IMAGE`/`STRING`) where broad composition pays.
   prerequisite, not a follow-up.
 - [ ] **(2) Do MXFP4 checkpoints load against the *current* modeling revision?** The `decoder.layers`
   vs `encoder.language_model.layers` mismatch that killed AWQ transfers to any same-era third-party
-  quant. **Resolution trigger — decides whether milestone-2 (diffusers/native-stepping, ADR-006) is
+  quant. **Resolution trigger — decides whether milestone-2 (diffusers/native-stepping, ADR-CDG-006) is
   revivable:** verify a candidate MXFP4 checkpoint loads against the installed modeling revision before
   betting milestone-2 on it.
 - [ ] **(3) Does the fork accept a per-step heat array?** The `SIGMAS→heat` node delivers curves only
