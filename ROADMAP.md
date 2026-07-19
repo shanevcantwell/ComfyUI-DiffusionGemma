@@ -45,13 +45,12 @@ enables:
 | **R5** — forward-hook lifecycle context manager; invariant "no hook survives a `run_diffusion` call" | Closes hook-leakage across executions (F4, **STATELESS-CORE**) — the per-position heat field installs and tears down cleanly | **done** — [PR #49](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/49); `dgemma/hooks.py:install_logit_shaping_hook`, `tests/test_hook_lifecycle.py` |
 | **R3** — diffusers version guard + structural probe (scheduler kwargs, `accepted_index`, `_callback_tensor_inputs`) | Fails loud on a diffusers bump instead of silently reporting a wrong re-derived temperature (F6, **EMIT-CANONICAL**) | **done** — [PR #48](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/48) gate finding F-1; `dgemma/loop.py:_check_diffusers_version`/`_check_diffusers_structure`, `tests/test_diffusers_version_guard.py` |
 | **R2** — socket-type mint module + grep-gate test (no inline `DGEMMA_*` literal outside it) | One mint home for socket strings (F2, **ONE-MINT**); lands with/before CDG-008 Phase 1, in `surfaces/comfyui/socket_types.py` | **done** — landed with CDG-008 Phase 1, [PR #53](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/53); `tests/test_socket_mint.py` |
-| **R6** — `DiffusionFrame` extension discipline (optional-with-defaults; heavy-field retention policy) | Lets rung-4's heavy `DISTRIBUTION` field ride the frame additively without breaking ADR-CDG-005's small-per-step economy (F3, **EMIT-CANONICAL**); rides research rung R4-observe, analysis functions go to the CDG-008 Phase-3 home | not-started |
+| **R6** — `DiffusionFrame` extension discipline (optional-with-defaults; heavy-field retention policy) | Lets rung-4's heavy `DISTRIBUTION` field ride the frame additively without breaking ADR-CDG-005's small-per-step economy (F3, **EMIT-CANONICAL**); rides research rung R4-observe, analysis functions go to the CDG-008 Phase-3 home | **done** — [PR #66](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/66) (merge `7508113`), issue #61 Phase P-A, ADR-CDG-014; `dgemma/types.py:DiffusionFrame`, `tests/test_frame_capture_discipline.py` |
 
 Sequencing (issue #35, delta-corrected): **R4 → R1 → R5 cluster + R3** before any
 research rung lands; **R2** with/before CDG-008 Phase 1; rung-4 analysis behind
-CDG-008 Phase 3. R1/R2/R3/R4/R5 above are now landed (verified against
-ARCHITECTURE.md's enforcement-surface table and the cited tests); only R6
-remains not-started.
+CDG-008 Phase 3. R1–R6 above are now landed (verified against
+ARCHITECTURE.md's enforcement-surface table and the cited tests).
 
 ### The topology move — ADR-CDG-008's five phases
 
