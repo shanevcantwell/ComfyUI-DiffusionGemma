@@ -1,13 +1,13 @@
-"""dgemma/kv_cache.py — `KV_CACHE` ingress validation + mint helpers
-(ADR-CDG-012, issue #62 Phase 1).
+"""dgemma/kv_cache.py — `KV_CACHE` ingress validation + mint/advance helpers
+(ADR-CDG-012, issue #62 Phases 1 + 3).
 
 Engine-side, ComfyUI-agnostic (ADR-CDG-003) — the twin of `dgemma/hooks.py`:
 one engine concern, one file, at `dgemma/` depth 1 (no new package, so the
 existing depth-1/no-dual-context-gate story is unchanged; #57 blast-radius
 unaffected on the core side — issue #62 implementation plan §M).
 
-**Phase 1 scope only** (issue #62 ratification, Q-1: tier-2 OUT of first
-implementation). This module lands:
+**Phase 1** (issue #62 ratification, Q-1: tier-2 OUT of first implementation)
+landed:
 
 - `geometry_from_model` / `tokenizer_fingerprint` — the fingerprint
   derivations `validate_kv_cache_ingress`'s V2/V4 checks compare a `KVCache`
@@ -16,20 +16,36 @@ implementation). This module lands:
   fired at every `KV_CACHE` ingress (IN-2/IN-3/IN-4). Fail-on-mismatch, never
   trust-and-degrade (`EMIT-CANONICAL / PARSE-AT-THE-DOOR`).
 
+**Phase 3** (issue #62 §A/§N, this module's new addition):
+
+- `encode_sequence` — the mint/advance body IN-1 (fresh mint, `into=None`) /
+  IN-3 (advance an existing cache, `into=<KVCache>`) feeds. A near-wrapper
+  over the separately-callable encoder (ADR-CDG-012 Context: `model.model.
+  encoder(input_ids=..., past_key_values=cache, position_ids=...)` is
+  directly callable today — grounded against the installed transformers
+  5.13.0 `DiffusionGemmaForBlockDiffusion.model.encoder` call path, verified
+  this pass at `modeling_diffusion_gemma.py:1010-1160` (`DiffusionGemmaEncoderModel.
+  forward`) and `:1495-1504` (`self.encoder = DiffusionGemmaEncoderModel(...)`)).
+  This is the encoder-mint half of the seam — unlike `DGemmaDenoise`'s
+  decoder-drive body, `encode_sequence` is NOT gated on the ADR's real-weights
+  de-risk smoke test (issue #62 Q-2): that Open Question is scoped to "the
+  **decoder** driven with a caller-built cache," and the encoder call this
+  function wraps is already the pipeline's own unmodified first-encode path
+  (`pipeline_diffusion_gemma.py`'s own per-block encode), not a novel drive
+  shape.
+
 **Explicitly NOT in this module yet** (later phases, not silently folded in):
-`encode_sequence` (the mint/advance body, IN-1/IN-3 — Phase 2's
-`run_diffusion` widening lands the call site this exists to feed), `save_kv_cache`/
-`load_kv_cache` (IN-4's disk crossing — Phase 3), and any tier-2 surgery op
-(`dgemma/kv_surgery.py` — Phase 5, conditional on operator scope per issue
-#62 Q-1). This module's Phase 1 surface is validation + fingerprinting only,
-because Phase 1 is "types + ingress, pure data" (issue #62 title) — no drive
-path exists yet for a mint/advance function to feed.
+`save_kv_cache`/`load_kv_cache` (IN-4's disk crossing) and any tier-2 surgery
+op (`dgemma/kv_surgery.py`) are both Phase 5, conditional on operator scope
+per issue #62 Q-1.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from .types import KVCache
+import torch
+
+from .types import KVCache, Provenance
 
 
 def geometry_from_model(dgemma_model: Any) -> dict:
@@ -201,3 +217,104 @@ def validate_kv_cache_ingress(payload: KVCache, dgemma_model: Any) -> None:
             "Remedy: supply the minting sequence (tier 1) or the edit-script "
             "(tier 2) that produced this cache."
         )
+
+
+def encode_sequence(
+    dgemma_model: Any,
+    token_ids: "list[int] | tuple[int, ...]",
+    *,
+    into: "KVCache | None" = None,
+) -> KVCache:
+    """Mint (`into=None`, IN-1) or advance (`into=<KVCache>`, IN-3) a
+    `KVCache` by running `token_ids` through the loaded model's encoder —
+    the sole cache writer (ADR-CDG-012 Context: `modeling_diffusion_gemma.py`
+    `DiffusionGemmaEncoderModel.forward`, `:1082-1160`, the only
+    `past_key_values.update()` call path in the architecture).
+
+    A near-wrapper (ADR-CDG-003's node/engine seam — no denoising-loop logic
+    lives here, just the encoder call + provenance bookkeeping): calls
+    `dgemma_model.model.model.encoder(input_ids=..., past_key_values=...,
+    position_ids=...)` and returns a **new** `KVCache` (§3 advance-returns-
+    new-payload — `into`'s own `cache`/`provenance` objects are never mutated
+    in place; the encoder's `past_key_values.update()` mutates the
+    `DynamicCache` object itself in transformers' own implementation, but
+    this function still treats `into` as logically read-only from the
+    caller's perspective by re-deriving every `KVCache` field fresh on the
+    object the encoder call actually advanced, and by never handing back the
+    SAME `Provenance`/`geometry` dict identity `into` held).
+
+    `position_ids` continue from `into`'s `cumulative_length` (one shared
+    running position, matching the encoder's own `past_seen_tokens` derivation
+    at `:1131`) when advancing; start at 0 for a fresh mint.
+
+    Provenance (§1, IN-1/IN-3):
+    - fresh mint (`into=None`): `provenance.minting_sequence = tuple(token_ids)`,
+      `edit_script = ()`, `model_repo_id`/`tokenizer_fingerprint` stamped from
+      `dgemma_model` (IN-1).
+    - advance (`into=<KVCache>`): `into`'s ingress is NOT re-validated here —
+      the caller (`DGemmaEncode`'s IN-3 optional input) is responsible for
+      having a valid `KVCache` already; `encode_sequence` extends
+      `minting_sequence` by `token_ids` when `into.provenance.minting_sequence`
+      is non-`None` (tier 1 stays tier 1, IN-3), and leaves a tier-2 cache's
+      `None` minting_sequence untouched (advancing a tier-2 cache does not
+      retroactively invent a tier-1 history) while still deep-copying
+      `edit_script`/other provenance fields forward unchanged.
+
+    `cumulative_length` (D.0 ranked-#1 blocker): derived fresh from the
+    encoder-advanced cache via `cache.get_seq_length(layer_idx=i)` per layer
+    — never hand-tracked, never copied from `into` (the encoder call itself
+    is what advances it).
+
+    Not gated on the ADR's real-weights de-risk smoke test (issue #62 Q-2):
+    that Open Question is scoped to the **decoder** driven with a
+    caller-built cache (`DGemmaDenoise`'s live drive body, Phase 4); this
+    function wraps the encoder's own unmodified first-encode call path,
+    already exercised by every existing `run_diffusion` call today.
+    """
+    num_layers = geometry_from_model(dgemma_model)["num_hidden_layers"]
+
+    if into is None:
+        cache = None
+        start_position = 0
+    else:
+        cache = into.cache
+        start_position = into.cumulative_length[0] if into.cumulative_length else 0
+
+    ids_tensor = torch.as_tensor(list(token_ids), dtype=torch.long)
+    if ids_tensor.dim() == 1:
+        ids_tensor = ids_tensor.unsqueeze(0)
+    position_ids = torch.arange(ids_tensor.shape[-1]) + start_position
+    position_ids = position_ids.unsqueeze(0)
+
+    encoder = dgemma_model.model.model.encoder
+    outputs = encoder(input_ids=ids_tensor, past_key_values=cache, position_ids=position_ids)
+    advanced_cache = outputs.past_key_values
+
+    cumulative_length = tuple(advanced_cache.get_seq_length(layer_idx=i) for i in range(num_layers))
+    geometry = geometry_from_model(dgemma_model)
+
+    if into is None:
+        provenance = Provenance(
+            minting_sequence=tuple(token_ids),
+            edit_script=(),
+            model_repo_id=dgemma_model.repo_id,
+            tokenizer_fingerprint=tokenizer_fingerprint(dgemma_model),
+        )
+    else:
+        prior_minting_sequence = into.provenance.minting_sequence
+        new_minting_sequence = (
+            None if prior_minting_sequence is None else tuple(prior_minting_sequence) + tuple(token_ids)
+        )
+        provenance = Provenance(
+            minting_sequence=new_minting_sequence,
+            edit_script=tuple(into.provenance.edit_script),
+            model_repo_id=into.provenance.model_repo_id,
+            tokenizer_fingerprint=into.provenance.tokenizer_fingerprint,
+        )
+
+    return KVCache(
+        cache=advanced_cache,
+        cumulative_length=cumulative_length,
+        geometry=geometry,
+        provenance=provenance,
+    )
