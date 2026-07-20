@@ -9,9 +9,10 @@ ingress a single import home. Imports zero ComfyUI (ADR-CDG-003 rule 1),
 exactly like `types.py`.
 
 **Phase 1 scope (issue #64 §6):** this module lands the `Constraints`/
-`ControlSignals` dataclasses and the `MUTABLE_TARGETS` registry. No
-participant reads a `control_signals=` payload yet (Phase 4 walker);
-`constraints=` is LIVE end-to-end since issue #64 Phase 3 (`dgemma/loop.py`).
+`ControlSignals` dataclasses and the `MUTABLE_TARGETS` registry.
+`constraints=` is LIVE end-to-end since issue #64 Phase 3 (`dgemma/loop.py`);
+`control_signals=` is LIVE end-to-end since issue #64 Phase 4 (the
+`WalkerParticipant`, `dgemma/participants.py`, wired in `dgemma/loop.py`).
 
 `CaptureSpec` (below) is minted HERE, not in this module's Phase-1-era
 placeholder location: ADR-CDG-014 Decision 7 rules the `capture=` payload's
