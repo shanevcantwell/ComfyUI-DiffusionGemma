@@ -11,11 +11,32 @@ suite's job).
 from __future__ import annotations
 
 import inspect
+import sys
 
 from dgemma.types import KVCache
 from surfaces.comfyui.denoise import DGemmaDenoise
 from surfaces.comfyui.encode import DGemmaEncode
 from surfaces.comfyui.socket_types import DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, DGEMMA_KV_CACHE, DGEMMA_MODEL
+
+
+class _StubModel:
+    processor = object()
+
+
+class _StubTrace:
+    frames = ()
+
+
+class _FakeFrame:
+    """Minimal stand-in for `dgemma.types.DiffusionFrame` — only the fields
+    `_build_on_frame`'s closure actually reads (same shape as
+    `tests/test_loader_contract.py`'s own `_FakeFrame`)."""
+
+    canvas_idx = 0
+    step_idx = 3
+    t = 0.2
+    temperature = 0.5
+    committed_fraction = 1.0
 
 
 class TestDGemmaEncodeContract:
@@ -91,3 +112,206 @@ class TestDGemmaDenoiseContract:
         source = inspect.getsource(DGemmaDenoise.denoise)
         assert "for " not in source
         assert "while " not in source
+
+
+class TestDGemmaDenoiseThreadsKVCacheThrough:
+    """`DGemmaDenoise.denoise` forwards `kv_cache=` to `run_diffusion`
+    unchanged — the thin-adapter contract for IN-2, verified by
+    monkeypatching the exact `dgemma.*` call this node makes (same pattern
+    `tests/test_loader_contract.py` uses for `DGemmaSampler`)."""
+
+    def test_forwards_kv_cache_to_run_diffusion(self, monkeypatch):
+        captured = {}
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            captured["kv_cache"] = kwargs.get("kv_cache")
+            return ("text", "state", _StubTrace())
+
+        monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaDenoise()
+        sentinel_cache = object()
+        node.denoise(
+            _StubModel(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            kv_cache=sentinel_cache,
+            unique_id="42",
+        )
+
+        assert captured["kv_cache"] is sentinel_cache
+
+    def test_kv_cache_omitted_forwards_none(self, monkeypatch):
+        captured = {}
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            captured["kv_cache"] = kwargs.get("kv_cache")
+            return ("text", "state", _StubTrace())
+
+        monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaDenoise()
+        node.denoise(
+            _StubModel(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+        )
+
+        assert captured["kv_cache"] is None
+
+
+class TestDGemmaDenoiseLiveFramePush:
+    """Coverage closer for `_build_on_frame`'s live-push closure (identical
+    shape to `DGemmaSampler`'s own — see `tests/test_loader_contract.py`'s
+    `TestLiveFramePush` for the precedent this mirrors), scoped to
+    `denoise.py`'s own module path/event name."""
+
+    def test_denoise_succeeds_unchanged_when_promptserver_unavailable(self, monkeypatch):
+        monkeypatch.delitem(sys.modules, "server", raising=False)
+        trace_stub = _StubTrace()
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())
+            return ("text", "state", trace_stub)
+
+        monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaDenoise()
+        text, state, trace = node.denoise(
+            _StubModel(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            unique_id="42",
+        )
+
+        assert (text, state, trace) == ("text", "state", trace_stub)
+
+    def test_on_frame_pushes_via_send_sync_when_promptserver_available(self, monkeypatch):
+        captured_calls = []
+
+        class FakeInstance:
+            def send_sync(self, event, data, sid=None):
+                captured_calls.append((event, data, sid))
+
+        class FakePromptServer:
+            instance = FakeInstance()
+
+        fake_server_module = type(sys)("server")
+        fake_server_module.PromptServer = FakePromptServer
+        monkeypatch.setitem(sys.modules, "server", fake_server_module)
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())
+            return ("text", "state", _StubTrace())
+
+        monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaDenoise()
+        node.denoise(
+            _StubModel(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            unique_id="42",
+        )
+
+        assert len(captured_calls) == 1
+        event, data, sid = captured_calls[0]
+        assert event == "dgemma.denoise.step"
+        assert data["node"] == "42"
+        assert data["canvas_idx"] == 0
+        assert data["step_idx"] == 3
+        assert data["committed_fraction"] == 1.0
+
+    def test_on_frame_is_a_no_op_when_promptserver_instance_is_none(self, monkeypatch):
+        class FakePromptServer:
+            instance = None
+
+        fake_server_module = type(sys)("server")
+        fake_server_module.PromptServer = FakePromptServer
+        monkeypatch.setitem(sys.modules, "server", fake_server_module)
+
+        trace_stub = _StubTrace()
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())  # must not raise
+            return ("text", "state", trace_stub)
+
+        monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaDenoise()
+        result = node.denoise(
+            _StubModel(),
+            prompt="hi",
+            seed=1,
+            num_inference_steps=1,
+            t_min=0.1,
+            t_max=0.5,
+            entropy_bound=0.1,
+            confidence=0.1,
+            gen_length=8,
+            unique_id="42",
+        )
+
+        assert result == ("text", "state", trace_stub)
+
+    def test_send_sync_failure_does_not_kill_the_run(self, monkeypatch, caplog):
+        class ExplodingInstance:
+            def send_sync(self, event, data, sid=None):
+                raise RuntimeError("websocket dropped mid-run")
+
+        class FakePromptServer:
+            instance = ExplodingInstance()
+
+        fake_server_module = type(sys)("server")
+        fake_server_module.PromptServer = FakePromptServer
+        monkeypatch.setitem(sys.modules, "server", fake_server_module)
+
+        trace_stub = _StubTrace()
+
+        def fake_run_diffusion(model, prompt, on_frame=None, **kwargs):
+            on_frame(_FakeFrame())
+            return ("text", "state", trace_stub)
+
+        monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
+
+        node = DGemmaDenoise()
+        with caplog.at_level("WARNING"):
+            result = node.denoise(
+                _StubModel(),
+                prompt="hi",
+                seed=1,
+                num_inference_steps=1,
+                t_min=0.1,
+                t_max=0.5,
+                entropy_bound=0.1,
+                confidence=0.1,
+                gen_length=8,
+                unique_id="42",
+            )
+
+        assert result == ("text", "state", trace_stub)
+        assert any("live push failed" in record.message for record in caplog.records)

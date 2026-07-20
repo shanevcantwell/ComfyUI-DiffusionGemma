@@ -128,3 +128,29 @@ def test_run_log_writer_node_resolves_relative_import_under_dotted_package_conte
     assert "." in module.__package__
     assert module.DGemmaRunLogWriter.FUNCTION == "write"
     assert module.build_run_log_header.__module__ == f"{synthetic_pack_root}.consumers.run_log"
+
+
+def test_encode_node_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `surfaces/comfyui/encode.py`'s dual-context gate
+    (ADR-CDG-012, issue #62 Phase 3) — same shape as loader.py's test above,
+    proving the relative climb to `dgemma.kv_cache` resolves under a
+    genuinely dotted `__package__`."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.encode")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__
+    assert module.DGemmaEncode.FUNCTION == "encode"
+    assert module.encode_sequence.__module__ == f"{synthetic_pack_root}.dgemma.kv_cache"
+
+
+def test_denoise_node_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `surfaces/comfyui/denoise.py`'s dual-context gate
+    (ADR-CDG-012, issue #62 Phase 3) — same shape as sampler.py's test above,
+    proving the relative climb to `dgemma.loop` resolves under a genuinely
+    dotted `__package__`."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.denoise")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__
+    assert module.DGemmaDenoise.FUNCTION == "denoise"
+    assert module.run_diffusion.__module__ == f"{synthetic_pack_root}.dgemma.loop"
