@@ -160,3 +160,80 @@ class TestSameInSameOutAtMCPLevel:
         assert manager._repo_id == repo_id_before
         assert manager._quant == quant_before
         assert set(dataclasses.fields(type(manager))) == set(dataclasses.fields(StateManager))
+
+
+class TestWidenedDoorsAddNoPersistedField:
+    """issue #103 Scope A: `constraints=`/`control_signals=`/`capture=`
+    reaching `generate`'s JSON schema must not smuggle in a NEW persisted
+    field — `StateManager`'s allowlist stays exactly the model-load triple
+    (`TestStateManagerShape` above already mutation-checks this structurally;
+    this class adds the BEHAVIORAL half specific to the widened doors: two
+    calls that differ ONLY in their constraints/control_signals/capture
+    payload must leave the manager's own state untouched, and two IDENTICAL
+    calls that both carry a widened-door payload must still yield identical
+    results — the same same-in/same-out contract `TestSameInSameOutAtMCPLevel`
+    proves for the pre-existing knobs, extended to the new ones)."""
+
+    def _make_manager_with_fake_model(self) -> StateManager:
+        manager = StateManager()
+        manager._model = _fake_model()
+        manager._repo_id = "fake/repo"
+        manager._quant = "none"
+        return manager
+
+    def test_state_manager_fields_unchanged_after_a_call_carrying_widened_doors(self, monkeypatch):
+        from surfaces.mcp.commands import generate as generate_module
+
+        _install_stateless_fakes(monkeypatch, scheduler_registry=[], num_steps=2)
+        manager = self._make_manager_with_fake_model()
+
+        asyncio.run(
+            generate_module.generate(
+                manager,
+                {
+                    "prompt": "hi",
+                    "num_inference_steps": 2,
+                    "constraints": {"pins": [{"position": 0, "token_id": 1}]},
+                    "control_signals": {
+                        "bindings": [
+                            {"target": "t_min", "signal": [0.0, 1.0], "low": 0.1, "high": 0.9}
+                        ]
+                    },
+                    "capture": {"top_k": 4},
+                },
+            )
+        )
+
+        # Still exactly the model-load allowlist — no new attribute, no
+        # accreted payload cache.
+        assert set(dataclasses.fields(type(manager))) == set(dataclasses.fields(StateManager))
+        assert manager._repo_id == "fake/repo"
+        assert manager._quant == "none"
+
+    def test_two_identical_calls_with_widened_doors_yield_identical_trace_summary(self, monkeypatch):
+        from surfaces.mcp.commands import generate as generate_module
+
+        scheduler_registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=scheduler_registry, num_steps=3)
+        manager = self._make_manager_with_fake_model()
+
+        args = {
+            "prompt": "hello widened doors",
+            "num_inference_steps": 3,
+            "gen_length": 8,
+            "constraints": {"pins": [{"position": 0, "token_id": 1}]},
+            "control_signals": {
+                "bindings": [{"target": "entropy_bound", "signal": [0.0, 0.5, 1.0], "low": 0.05, "high": 0.2}]
+            },
+            "capture": {"top_k": 2},
+            "include_frames": True,
+        }
+
+        result_1 = asyncio.run(generate_module.generate(manager, dict(args)))
+        result_2 = asyncio.run(generate_module.generate(manager, dict(args)))
+
+        assert result_1 == result_2
+        # Two calls -> two distinct scheduler objects, same proof
+        # `TestSameInSameOutAtMCPLevel` makes for the pre-existing knobs.
+        assert len(scheduler_registry) == 2
+        assert scheduler_registry[0] is not scheduler_registry[1]
