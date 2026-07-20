@@ -132,8 +132,8 @@ def validate_control_signals(control_signals: "ControlSignals | None", *, num_in
 
 
 def validate_capture(capture: Any, *, vocab_size: int | None = None) -> None:
-    """Validate a `capture=` payload (ADR-CDG-014 Decision 7, issue #61 P-B;
-    `keep_frames` field originally issue #64 §1.4).
+    """Validate a `capture=` payload (ADR-CDG-014 Decision 7, issue #61
+    P-B/P-C; `keep_frames` field originally issue #64 §1.4).
 
     Deliberately duck-typed (`getattr`, not `isinstance` against a dataclass
     minted here): per ADR-CDG-014 Decision 7, the `capture=` payload's
@@ -148,6 +148,20 @@ def validate_capture(capture: Any, *, vocab_size: int | None = None) -> None:
     skips the in-vocab ceiling check with a named degradation — mirrors
     `validate_constraints`'s C3 skip for the same reason (a bare test double
     / a processor with no usable tokenizer, issue #64 §3.4).
+
+    `capture_full_distribution`/`max_full_distribution_steps` (P-C, Tier 2,
+    ADR-CDG-014 Decision 3's Tier-2 row — the load-bearing clause): Tier 2 is
+    explicit opt-in WITH A BUDGET. `capture_full_distribution=True` with no
+    budget (`max_full_distribution_steps` absent/`None`) is rejected — an
+    unbounded full-distribution request is never silently honored (rule 5,
+    `EMIT-CANONICAL / PARSE-AT-THE-DOOR`; the failure this prevents is a
+    ~134 MB/step field retained for an entire run with no cap, ~6.4 GB for
+    one 48-step canvas). When a budget IS given, it must be a positive int —
+    zero or negative can never retain anything, so it is rejected rather
+    than silently behaving like `capture_full_distribution=False`. A budget
+    given WITHOUT `capture_full_distribution=True` is inert (no reject): the
+    knob that actually turns Tier 2 on is the boolean, matching the ADR's
+    "explicit opt-in" framing — a budget alone never enables capture.
     """
     if capture is None:
         return
@@ -176,6 +190,37 @@ def validate_capture(capture: Any, *, vocab_size: int | None = None) -> None:
             "caller's request (ADR-CDG-014 rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR). Fix: use "
             f"top_k <= {vocab_size}."
         )
+
+    capture_full_distribution = getattr(capture, "capture_full_distribution", False)
+    if not isinstance(capture_full_distribution, bool):
+        raise ValueError(
+            f"CaptureSpec.capture_full_distribution must be a bool, got {capture_full_distribution!r} "
+            f"({type(capture_full_distribution)}). Fix: pass True/False."
+        )
+
+    max_full_distribution_steps = getattr(capture, "max_full_distribution_steps", None)
+    if capture_full_distribution and max_full_distribution_steps is None:
+        raise ValueError(
+            "CaptureSpec.capture_full_distribution=True requires max_full_distribution_steps to be "
+            "set (ADR-CDG-014 Decision 3, Tier 2's load-bearing clause): an unbounded full-distribution "
+            "request is rejected at ingress, never silently honored — the full per-position "
+            "distribution is ~134 MB/step (~6.4 GB for a single 48-step canvas), enough to OOM a "
+            "48 GB box if retained without a cap. Fix: pass max_full_distribution_steps=<positive int>, "
+            "the number of steps to retain the full distribution for."
+        )
+    if max_full_distribution_steps is not None:
+        if not isinstance(max_full_distribution_steps, int) or isinstance(max_full_distribution_steps, bool):
+            raise ValueError(
+                f"CaptureSpec.max_full_distribution_steps must be an int, got "
+                f"{max_full_distribution_steps!r} ({type(max_full_distribution_steps)}). "
+                "Fix: pass a positive integer step budget."
+            )
+        if max_full_distribution_steps <= 0:
+            raise ValueError(
+                f"CaptureSpec.max_full_distribution_steps must be > 0, got {max_full_distribution_steps}. "
+                "A zero-or-negative budget can never retain a distribution frame. Fix: pass a positive "
+                "step count, or set capture_full_distribution=False to disable Tier 2 entirely."
+            )
 
 
 def reject_conflicting_hook_sources(constraints: "Constraints | None", logit_hook: Any) -> None:

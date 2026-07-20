@@ -119,14 +119,22 @@ class DiffusionFrame:
 
     distribution: Any | None = None
     """Tier 2 capture (ADR-CDG-014 Decision 3, `capture_full_distribution`
-    knob + `max_full_distribution_steps` budget, issue #14): the full
+    knob + `max_full_distribution_steps` budget, issue #61 P-C): the full
     per-position distribution, `float32[canvas_len, vocab]`
-    (`softmax(logits)`) — ~134 MB/step, budget-gated at ingress (an
-    unbounded request is rejected, never silently honored). `None` when
-    Tier 2 was not requested, or when this step fell outside the retained
-    budget under `keep_frames="all"` (ADR-CDG-014 Decision 5). P-A does not
-    populate this field (P-C scope); it exists now under the
-    additive-optional discipline so the frame shape is decided once."""
+    (`softmax(logits)`) derived from this step's **pre-pin** `logits` in the
+    capture participant (the same ordering guarantee `entropy`/`top_k_ids`
+    already have, ADR-CDG-014 Decision 4) — ~134 MB/step, budget-gated at
+    ingress (`capture_full_distribution=True` with no
+    `max_full_distribution_steps` is rejected; an unbounded request is
+    never silently honored, rule 5 `EMIT-CANONICAL / PARSE-AT-THE-DOOR`).
+    `None` when Tier 2 was not requested (`capture_full_distribution=False`,
+    the default), or when this step fell outside the retained budget — the
+    budget caps *retained* frames regardless of `keep_frames`
+    (ADR-CDG-014 Decision 5), so a run with `keep_frames="all"` and a
+    budget of N still shows `distribution=None` on every frame past the
+    Nth captured step. This completes the DISTRIBUTION socket (issue #61
+    P-C) — the full-per-position capture surface H0-observe/H0-project
+    (`docs/experiments/liquid-phase-decoding/concept.md`) read from."""
 
     pinned_mask: Any | None = None
     """ADR-CDG-010 Decision 4: boolean `[gen_length]` tensor/sequence, `True`

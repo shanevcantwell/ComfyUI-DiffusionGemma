@@ -499,6 +499,38 @@ class _FrameCollector:
     (additive-optional absence, Decision 1/2) — byte-identical to every run
     before this phase."""
 
+    capture_full_distribution: bool = False
+    """ADR-CDG-014 Decision 3 Tier 2 (issue #61 P-C): the validated
+    `CaptureSpec.capture_full_distribution` value (or `False`). `False`
+    (default) leaves `DiffusionFrame.distribution` `None` on every frame
+    (additive-optional absence, Decision 1/2) — byte-identical to every run
+    before this phase. `True` derives `distribution = softmax(logits)` from
+    the same pre-pin `logits` Tier 0/1 already read, subject to
+    `max_full_distribution_steps`'s retention budget (Decision 5) below."""
+
+    max_full_distribution_steps: int | None = None
+    """ADR-CDG-014 Decision 3/5 Tier 2's budget (issue #61 P-C): the
+    validated `CaptureSpec.max_full_distribution_steps` value. Caps the
+    number of CAPTURED steps (in step order, counted by `self.steps_used`
+    at the moment each callback fires — i.e. the first
+    `max_full_distribution_steps` calls to `on_step_end`) whose frame
+    retains a populated `distribution`; every step beyond the budget gets
+    `distribution=None` on the RETAINED frame, regardless of `keep_frames`
+    (Decision 5 — the budget caps retention, not the live stream).
+    `on_frame`, when given, still receives every frame's `distribution` live
+    while Tier 2 is on and the step is within budget — Decision 5's "a
+    streaming consumer that does not retain gets the full stream" clause
+    applies to whichever steps actually computed a distribution; a
+    consumer's `on_frame` never sees a *different* value than what the
+    matching retained frame holds for that same step. `None` (default)
+    means "no budget declared"; ingress (`dgemma.ingress.validate_capture`)
+    already rejects `capture_full_distribution=True` with no budget, so a
+    live `_FrameCollector` never actually reaches `capture_full_distribution
+    =True, max_full_distribution_steps=None` through `run_diffusion` — this
+    field still defaults to `None` for callers driving the collector
+    directly in tests, where `capture_full_distribution=False` makes the
+    budget irrelevant."""
+
     frames: list[DiffusionFrame] = field(default_factory=list)
     steps_used: int = 0
     _canvas_idx: int = -1
@@ -559,6 +591,22 @@ class _FrameCollector:
         second derivation that could drift from it. `top_k=0` (default)
         leaves both fields `None` (additive-optional absence, Decision 1/2),
         matching every run before this phase byte-for-byte.
+
+        **Tier 2 full-distribution capture (ADR-CDG-014 Decision 3/5, issue
+        #61 P-C):** when `self.capture_full_distribution` is `True`,
+        `logits` is reachable, AND this callback's step is still within
+        `self.max_full_distribution_steps`'s budget (`self.steps_used`,
+        read BEFORE incrementing — i.e. this is the Nth call, budget counts
+        calls 0..budget-1), `DiffusionFrame.distribution` is
+        `softmax(logits, dim=-1)` over the SAME pre-pin per-position logits
+        entropy/top-k already read — one derivation, not a third drifting
+        copy. Once the budget is exhausted, `distribution` stays `None` on
+        every subsequent frame for the rest of the run (Decision 5: the
+        budget caps *retained* frames regardless of `keep_frames`) — Tier 0/
+        Tier 1 fields are completely unaffected by the Tier-2 budget running
+        out (they have their own independent policies). `capture_full_
+        distribution=False` (default) leaves `distribution` `None`
+        unconditionally, byte-identical to every run before this phase.
         """
         scheduler_output = callback_kwargs["scheduler_output"]
         canvas = callback_kwargs["canvas"]
@@ -589,6 +637,7 @@ class _FrameCollector:
         entropy = None
         top_k_ids = None
         top_k_weights = None
+        distribution = None
         logits = callback_kwargs.get("logits")
         if logits is not None:
             entropy = torch.distributions.Categorical(logits=logits).entropy()
@@ -601,22 +650,41 @@ class _FrameCollector:
                 # single-example consumer expects.
                 entropy = entropy[0]
 
+            # Same batch-squeeze as entropy above, applied to logits itself
+            # once — shared by Tier 1 (top-k) and Tier 2 (full distribution)
+            # so both derive from the identical per-position row entropy
+            # just read (one normalization, not drifting copies, ADR-CDG-014
+            # Decision 4).
+            per_position_logits = logits[0] if logits.dim() == 3 else logits
+
             if self.top_k > 0:
-                # Same batch-squeeze as entropy above, applied to logits
-                # itself so top-k derives from the identical per-position
-                # row entropy just read — one normalization, not two drifting
-                # copies (ADR-CDG-014 Decision 3 Tier 1, issue #61 P-B).
-                per_position_logits = logits[0] if logits.dim() == 3 else logits
                 top_k_values, top_k_ids = per_position_logits.topk(self.top_k, dim=-1)
                 # Renormalize over just the top-k slice (a per-position
                 # softmax restricted to the k candidates already selected) —
                 # Tier 1 never materializes the full-vocab softmax (that is
-                # Tier 2's `distribution` field, P-C, budget-gated). This is
+                # Tier 2's `distribution` field below, budget-gated). This is
                 # the top-k conditional distribution, not an approximation of
                 # the full one; a consumer reading `top_k_weights` as
                 # anything other than "renormalized over these k ids" would
                 # be reading past what Tier 1 actually captured.
                 top_k_weights = torch.softmax(top_k_values, dim=-1)
+
+            if self.capture_full_distribution:
+                # Budget check (ADR-CDG-014 Decision 3/5, issue #61 P-C):
+                # `self.steps_used` is this callback's 0-indexed ordinal
+                # (read BEFORE the increment below), so the budget retains
+                # the FIRST `max_full_distribution_steps` captured steps —
+                # `max_full_distribution_steps=None` (no budget declared,
+                # only reachable when a caller drives the collector
+                # directly rather than through `run_diffusion`'s ingress
+                # gate) is treated as "no cap", matching
+                # `capture_full_distribution`'s own unconditional meaning in
+                # that direct-use case.
+                budget = self.max_full_distribution_steps
+                if budget is None or self.steps_used < budget:
+                    # Full per-position softmax — Tier 2's ~134 MB/step
+                    # payload (ADR-CDG-014 Decision 3's Tier-2 row).
+                    distribution = torch.softmax(per_position_logits, dim=-1)
 
         if not self._pinned_mask_built:
             self._pinned_mask = _build_pinned_mask(self.constraints, canvas)
@@ -632,6 +700,7 @@ class _FrameCollector:
             entropy=entropy,
             top_k_ids=top_k_ids,
             top_k_weights=top_k_weights,
+            distribution=distribution,
             pinned_mask=self._pinned_mask,
             effective_entropy_bound=effective_entropy_bound,
             effective_t_min=effective_t_min,
@@ -1064,7 +1133,17 @@ def run_diffusion(
     the same pre-pin `logits` Tier 0's `entropy` reads — see `_FrameCollector.
     on_step_end`'s docstring. `capture=None`/`capture.top_k` absent/`0`
     (default) leaves both fields `None`, byte-identical to every run before
-    that phase; `capture.keep_frames` remains validated-then-ignored (issue
+    that phase. `capture=`'s Tier 2 knobs (`capture_full_distribution`/
+    `max_full_distribution_steps`, ADR-CDG-014 Decision 3/5, issue #61 P-C)
+    are also LIVE: when `capture.capture_full_distribution=True`, the
+    `_FrameCollector` derives `DiffusionFrame.distribution` (the full
+    per-position `softmax(logits)`) from the same pre-pin `logits`, retained
+    only for the first `capture.max_full_distribution_steps` captured steps
+    — ingress rejects `capture_full_distribution=True` with no budget, so
+    this call site never sees an unbounded request. `capture=None`/
+    `capture.capture_full_distribution` absent/`False` (default) leaves
+    `distribution` `None` on every frame, byte-identical to every run before
+    P-C. `capture.keep_frames` remains validated-then-ignored (issue
     #64 P1, unchanged — see `dgemma/payloads.py:CaptureSpec`).
     `constraints=` is LIVE end-to-end (issue #64 Phase
     3, ADR-CDG-010's two-mechanism givens): when it carries at least one pin,
@@ -1116,7 +1195,14 @@ def run_diffusion(
     `top_k_ids`/`top_k_weights` (ADR-CDG-014 Decision 3, issue #61 P-B):
     per-position top-k candidate ids and their top-k-renormalized weights
     from the same pre-pin `logits`, populated only when `capture.top_k > 0`
-    (`None`/`None` otherwise — Tier 1's on-request default); `pinned_mask`
+    (`None`/`None` otherwise — Tier 1's on-request default);
+    `distribution` (ADR-CDG-014 Decision 3/5, issue #61 P-C): the full
+    per-position distribution (`softmax(logits)`) from the same pre-pin
+    `logits`, populated only when `capture.capture_full_distribution=True`
+    AND the step is still within `capture.max_full_distribution_steps`'s
+    retention budget — `None` otherwise (Tier 2's explicit-opt-in-with-budget
+    default; `None` also once the budget is exhausted mid-run, Decision 5);
+    `pinned_mask`
     (ADR-CDG-010 D4, issue #64 Phase 2/3): `True` at every supplied
     `Constraints` pin position — now the positions `PinParticipant` actually
     (re-)writes every step (Phase 3), consistent with the Phase 2
@@ -1241,6 +1327,17 @@ def run_diffusion(
     # or exposes no `top_k` at all — Tier 1 stays off, byte-identical to
     # every pre-P-B run.
     capture_top_k = getattr(capture, "top_k", 0) if capture is not None else 0
+    # `capture.capture_full_distribution`/`capture.max_full_distribution_steps`
+    # (ADR-CDG-014 Decision 3 Tier 2, issue #61 P-C): same duck-typed read as
+    # Tier 1's `top_k` above. `False`/`None` (defaults) when `capture` is
+    # `None` or exposes neither attribute — Tier 2 stays off, byte-identical
+    # to every pre-P-C run. `validate_ingress` above already rejected
+    # `capture_full_distribution=True` with no budget, so by the time this
+    # line runs a `True` value is always paired with a positive budget.
+    capture_full_distribution = getattr(capture, "capture_full_distribution", False) if capture is not None else False
+    capture_max_full_distribution_steps = (
+        getattr(capture, "max_full_distribution_steps", None) if capture is not None else None
+    )
 
     collector = _FrameCollector(
         scheduler=scheduler,
@@ -1250,6 +1347,8 @@ def run_diffusion(
         on_frame=on_frame,
         constraints=constraints,
         top_k=capture_top_k,
+        capture_full_distribution=capture_full_distribution,
+        max_full_distribution_steps=capture_max_full_distribution_steps,
     )
     step_end = StepEndComposite(
         capture=collector.on_step_end,
