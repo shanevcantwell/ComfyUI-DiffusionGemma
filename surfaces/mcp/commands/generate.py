@@ -29,6 +29,29 @@ plain `cancel_run` tool call works with any client able to make a second
 tool call. `run_id` is caller-chosen (any hashable string); omitting it means
 no cancellation wiring for that call (`should_cancel=None`, `run_diffusion`'s
 own default — identical to today's uncancellable behavior).
+
+**Widened doors (issue #103 Scope A).** `constraints=`/`control_signals=`/
+`capture=` are now reachable through this tool's JSON schema —
+`_unpack_constraints`/`_unpack_control_signals`/`_unpack_capture` below
+unpack the JSON shape into the exact `dgemma.payloads` dataclasses
+(`Constraints`/`Pin`, `ControlSignals`/`Binding`, `CaptureSpec`) and hand
+them straight to `run_diffusion`, which validates them at ingress
+(`dgemma.ingress.validate_ingress` — never re-implemented here, per
+ARCHITECTURE.md rule 5, `EMIT-CANONICAL / PARSE-AT-THE-DOOR`). Omitting any
+of the three is `None`, byte-identical to before this widening.
+
+**`kv_cache=` deliberately NOT exposed here (issue #103 scope note).**
+`KVCache.cache` (`dgemma/types.py`) is a live `transformers.DynamicCache`
+tensor object — there is no JSON/disk encoding for it today
+(`dgemma/kv_cache.py`'s module docstring names `save_kv_cache`/
+`load_kv_cache`, the disk-crossing serialization a JSON payload would need,
+as explicit Phase-3 `NOT-YET-IMPLEMENTED`; the live decoder-drive body is
+also unbuilt, Phase 4). Exposing `kv_cache=` as a declarative JSON payload
+here would require inventing that serialization scheme — a real design
+decision `run_diffusion`'s ratified ADR-CDG-012 has not made yet, not a
+transcription of already-landed design. Per the autonomy contract, this is
+bounced alongside Scope B rather than absorbed; see the issue #103 tracking
+comment.
 """
 from __future__ import annotations
 
@@ -56,6 +79,7 @@ if __package__ and __package__.count(".") >= 3:
         DEFAULT_T_MIN,
         run_diffusion,
     )
+    from ....dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
 else:
     from surfaces.mcp._mcp_sdk_guard import require_mcp_sdk
     from surfaces.mcp.state_manager import StateManager
@@ -68,6 +92,7 @@ else:
         DEFAULT_T_MIN,
         run_diffusion,
     )
+    from dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
 
 require_mcp_sdk()
 from mcp.types import Tool  # noqa: E402
@@ -107,7 +132,10 @@ def get_tools() -> list[Tool]:
                 "Returns the decoded text, a validity readout (converged, "
                 "committed_fraction, turn_closed, ...), and a summary of the "
                 "captured per-step trace. Requires a model already loaded via "
-                "the load_model tool."
+                "the load_model tool. Optional constraints/control_signals/capture "
+                "payloads expose the same declarative step-end intervention doors "
+                "run_diffusion validates at ingress (ADR-CDG-010/011/014) — see "
+                "each property's own description."
             ),
             inputSchema={
                 "type": "object",
@@ -159,6 +187,78 @@ def get_tools() -> list[Tool]:
                         "description": "Include per-step frame telemetry in trace_summary (default: false — summary-only)",
                         "default": False,
                     },
+                    "constraints": {
+                        "type": "object",
+                        "description": (
+                            "ADR-CDG-010 declarative id-level givens. Thin-adapter mapped onto "
+                            "dgemma.payloads.Constraints/Pin; validated core-side "
+                            "(dgemma.ingress.validate_constraints) — this schema only shapes the "
+                            "JSON, it re-implements no check. {\"pins\": [{\"position\": int, "
+                            "\"token_id\": int}, ...]}. Omit for no constraints (today's behavior)."
+                        ),
+                        "properties": {
+                            "pins": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "position": {"type": "integer"},
+                                        "token_id": {"type": "integer"},
+                                    },
+                                    "required": ["position", "token_id"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["pins"],
+                        "additionalProperties": False,
+                    },
+                    "control_signals": {
+                        "type": "object",
+                        "description": (
+                            "ADR-CDG-011 CV/LFO bindings. Thin-adapter mapped onto "
+                            "dgemma.payloads.ControlSignals/Binding; validated core-side "
+                            "(dgemma.ingress.validate_control_signals). {\"bindings\": "
+                            "[{\"target\": str, \"signal\": [float, ...] (length == "
+                            "num_inference_steps), \"low\": float, \"high\": float}, ...]}. "
+                            "Omit for no control signals (today's behavior)."
+                        ),
+                        "properties": {
+                            "bindings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "target": {"type": "string"},
+                                        "signal": {"type": "array", "items": {"type": "number"}},
+                                        "low": {"type": "number"},
+                                        "high": {"type": "number"},
+                                    },
+                                    "required": ["target", "signal", "low", "high"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["bindings"],
+                        "additionalProperties": False,
+                    },
+                    "capture": {
+                        "type": "object",
+                        "description": (
+                            "ADR-CDG-014 capture= payload. Thin-adapter mapped onto "
+                            "dgemma.payloads.CaptureSpec; validated core-side "
+                            "(dgemma.ingress.validate_capture). \"top_k\" (Tier 1, default 0 = "
+                            "off): non-negative int, in-vocab ceiling enforced at ingress. "
+                            "\"keep_frames\": \"last\" or \"all\" (validated; not yet wired to "
+                            "override retention — see dgemma/payloads.py:CaptureSpec). Omit for "
+                            "no capture widening (today's behavior)."
+                        ),
+                        "properties": {
+                            "top_k": {"type": "integer", "default": 0},
+                            "keep_frames": {"type": "string", "enum": ["last", "all"], "default": "all"},
+                        },
+                        "additionalProperties": False,
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -178,6 +278,60 @@ def get_tools() -> list[Tool]:
             },
         ),
     ]
+
+
+def _unpack_constraints(raw: Any) -> "Constraints | None":
+    """JSON `{"pins": [{"position": ..., "token_id": ...}, ...]}` ->
+    `dgemma.payloads.Constraints`. Thin unpack only — never re-implements
+    ADR-CDG-010's validation (`dgemma.ingress.validate_constraints`, fired
+    inside `run_diffusion` itself). Fail-on-unknown is structural: `Pin`/
+    `Constraints` are frozen dataclasses, so an unrecognized field in a pin
+    dict raises `TypeError` from the constructor call below, not a silent
+    drop — the same enforcement surface `dgemma/ingress.py`'s module
+    docstring names for the core's own ingress. A malformed shape (missing
+    key, wrong type) surfaces as the same `TypeError`/`KeyError` the
+    dataclass constructor raises, caught by `server.py`'s outer handler and
+    returned as a structured `{"error": ...}` — never crashes the process.
+    """
+    if raw is None:
+        return None
+    pins = tuple(Pin(**pin) for pin in raw.get("pins", ()))
+    return Constraints(pins=pins)
+
+
+def _unpack_control_signals(raw: Any) -> "ControlSignals | None":
+    """JSON `{"bindings": [{"target": ..., "signal": [...], "low": ...,
+    "high": ...}, ...]}` -> `dgemma.payloads.ControlSignals`. Thin unpack
+    only — `signal` arrives as a JSON array and is tupled here (`Binding.
+    signal` is typed `tuple[float, ...]`); every value/range/length check
+    stays core-side (`dgemma.ingress.validate_control_signals`)."""
+    if raw is None:
+        return None
+    bindings = tuple(
+        Binding(
+            target=b["target"],
+            signal=tuple(b["signal"]),
+            low=b["low"],
+            high=b["high"],
+        )
+        for b in raw.get("bindings", ())
+    )
+    return ControlSignals(bindings=bindings)
+
+
+def _unpack_capture(raw: Any) -> "CaptureSpec | None":
+    """JSON `{"top_k": ..., "keep_frames": ...}` ->
+    `dgemma.payloads.CaptureSpec`. Thin unpack only — `top_k`/`keep_frames`
+    validation (non-negative int, in-vocab ceiling, retention-policy
+    membership) stays core-side (`dgemma.ingress.validate_capture`)."""
+    if raw is None:
+        return None
+    kwargs: dict[str, Any] = {}
+    if "top_k" in raw:
+        kwargs["top_k"] = raw["top_k"]
+    if "keep_frames" in raw:
+        kwargs["keep_frames"] = raw["keep_frames"]
+    return CaptureSpec(**kwargs)
 
 
 def _summarize_trace(canvas_trace, include_frames: bool) -> dict[str, Any]:
@@ -230,6 +384,14 @@ async def generate(manager: StateManager, args: dict[str, Any]) -> dict[str, Any
         event = _register_run(run_id)
         should_cancel = event.is_set
 
+    # Thin-adapter unpack: JSON -> dgemma.payloads dataclasses. No
+    # validation happens here — `run_diffusion` calls `dgemma.ingress.
+    # validate_ingress` on these before constructing a scheduler/pipeline
+    # (ARCHITECTURE.md rule 5, core-side validation only). A malformed
+    # shape (unknown key, wrong type) raises here or inside `run_diffusion`
+    # itself; either way `server.py:call_tool`'s outer try/except turns it
+    # into a structured `{"error": ...}` response, never a transport-level
+    # crash.
     kwargs: dict[str, Any] = {
         "seed": args.get("seed"),
         "gen_length": args.get("gen_length", DEFAULT_GEN_LENGTH),
@@ -240,6 +402,9 @@ async def generate(manager: StateManager, args: dict[str, Any]) -> dict[str, Any
         "confidence": args.get("confidence", DEFAULT_CONFIDENCE),
         "thinking": bool(args.get("thinking", False)),
         "should_cancel": should_cancel,
+        "constraints": _unpack_constraints(args.get("constraints")),
+        "control_signals": _unpack_control_signals(args.get("control_signals")),
+        "capture": _unpack_capture(args.get("capture")),
     }
 
     try:

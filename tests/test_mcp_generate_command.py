@@ -7,7 +7,7 @@ installer (`_install_stateless_fakes`, `_fake_model`) — the same fake
 statelessness suite already validates against, so this module doesn't
 reinvent a second fixture for the same contract.
 
-Three concerns:
+Concerns:
 
 - Thin-adapter correctness: `generate` unpacks args, calls `run_diffusion`
   exactly once, wraps the 3-tuple into a JSON-safe dict — no logic beyond
@@ -24,6 +24,12 @@ Three concerns:
   `StateManager`, the same discipline applies — see `generate.py`'s module
   docstring on why it's kept out of `StateManager` rather than merely
   "somewhere else").
+- **issue #103 Scope A**: `constraints=`/`control_signals=`/`capture=` JSON
+  schema round-trip (`TestWidenedDoorsSchema`), the thin unpack functions
+  building the exact `dgemma.payloads` dataclasses `TestUnpackHelpers`), and
+  an invalid payload surfacing the CORE ingress error legibly through the
+  MCP `{"error": ...}` path (`TestInvalidPayloadSurfacesCoreIngressError`) —
+  never a re-implemented check at this layer, never a bare traceback.
 """
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ import time
 
 import pytest
 
+from dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
 from surfaces.mcp.commands import generate as generate_module
 from surfaces.mcp.state_manager import StateManager
 from tests.test_run_diffusion_statelessness import _fake_model, _install_stateless_fakes
@@ -236,3 +243,238 @@ class TestCancelRunWiring:
         # run rather than completing it).
         assert result["trace_summary"]["num_frames"] < 5
         assert "run-C" not in generate_module._active_runs
+
+
+class TestWidenedDoorsSchema:
+    """issue #103 Scope A: `constraints`/`control_signals`/`capture` are
+    reachable from the `generate` tool's JSON schema, each shaped to mirror
+    (never re-implement) its `dgemma.payloads` dataclass twin."""
+
+    def _schema(self):
+        tools = {t.name: t for t in generate_module.get_tools()}
+        return tools["generate"].inputSchema
+
+    def test_constraints_schema_shapes_pins_as_position_token_id(self):
+        prop = self._schema()["properties"]["constraints"]
+        pin_schema = prop["properties"]["pins"]["items"]["properties"]
+        assert set(pin_schema) == {"position", "token_id"}
+        assert prop["properties"]["pins"]["items"]["additionalProperties"] is False
+
+    def test_control_signals_schema_shapes_bindings_as_target_signal_low_high(self):
+        prop = self._schema()["properties"]["control_signals"]
+        binding_schema = prop["properties"]["bindings"]["items"]["properties"]
+        assert set(binding_schema) == {"target", "signal", "low", "high"}
+        assert prop["properties"]["bindings"]["items"]["additionalProperties"] is False
+
+    def test_capture_schema_shapes_top_k_and_keep_frames(self):
+        prop = self._schema()["properties"]["capture"]
+        assert set(prop["properties"]) == {"top_k", "keep_frames"}
+        assert prop["properties"]["keep_frames"]["enum"] == ["last", "all"]
+
+    def test_prompt_remains_the_only_required_top_level_field(self):
+        # Widening the schema must not narrow what's optional at the top
+        # level — constraints/control_signals/capture are all omittable.
+        assert self._schema()["required"] == ["prompt"]
+
+
+class TestUnpackHelpers:
+    """Thin-unpack correctness: JSON dict -> the exact `dgemma.payloads`
+    dataclass, no validation performed here (that's `run_diffusion`'s job
+    via `dgemma.ingress.validate_ingress` — ARCHITECTURE.md rule 5)."""
+
+    def test_unpack_constraints_none_is_none(self):
+        assert generate_module._unpack_constraints(None) is None
+
+    def test_unpack_constraints_builds_pins(self):
+        result = generate_module._unpack_constraints(
+            {"pins": [{"position": 0, "token_id": 5}, {"position": 2, "token_id": 9}]}
+        )
+        assert result == Constraints(pins=(Pin(position=0, token_id=5), Pin(position=2, token_id=9)))
+
+    def test_unpack_constraints_empty_pins_is_noop_constraints(self):
+        assert generate_module._unpack_constraints({"pins": []}) == Constraints(pins=())
+
+    def test_unpack_control_signals_none_is_none(self):
+        assert generate_module._unpack_control_signals(None) is None
+
+    def test_unpack_control_signals_builds_bindings(self):
+        result = generate_module._unpack_control_signals(
+            {
+                "bindings": [
+                    {"target": "entropy_bound", "signal": [0.0, 0.5, 1.0], "low": 0.05, "high": 0.2},
+                ]
+            }
+        )
+        assert result == ControlSignals(
+            bindings=(Binding(target="entropy_bound", signal=(0.0, 0.5, 1.0), low=0.05, high=0.2),)
+        )
+
+    def test_unpack_capture_none_is_none(self):
+        assert generate_module._unpack_capture(None) is None
+
+    def test_unpack_capture_builds_capture_spec(self):
+        result = generate_module._unpack_capture({"top_k": 16, "keep_frames": "last"})
+        assert result == CaptureSpec(top_k=16, keep_frames="last")
+
+    def test_unpack_capture_defaults_when_fields_omitted(self):
+        assert generate_module._unpack_capture({}) == CaptureSpec()
+
+
+class TestWidenedDoorsEndToEnd:
+    """The unpacked payloads actually reach `run_diffusion` — proven by
+    passing each door through `generate()` against the fake pipeline (which
+    accepts any `constraints=`/`control_signals=`/`capture=` payload without
+    needing real weights, per `dgemma/loop.py`'s own ingress-then-participant
+    wiring) and checking the JSON response still comes back clean."""
+
+    def test_generate_with_all_three_widened_doors_returns_clean_result(self, monkeypatch):
+        _install_stateless_fakes(monkeypatch, scheduler_registry=[], num_steps=3)
+        manager = _manager_with_fake_model()
+
+        result = asyncio.run(
+            generate_module.generate(
+                manager,
+                {
+                    "prompt": "hi",
+                    "num_inference_steps": 3,
+                    "constraints": {"pins": [{"position": 0, "token_id": 1}]},
+                    "control_signals": {
+                        "bindings": [
+                            {"target": "t_min", "signal": [0.0, 0.5, 1.0], "low": 0.1, "high": 0.9}
+                        ]
+                    },
+                    "capture": {"top_k": 4},
+                },
+            )
+        )
+
+        assert "text" in result
+        assert "error" not in result
+
+    def test_generate_with_no_widened_doors_is_byte_identical_to_before(self, monkeypatch):
+        """Omitting constraints/control_signals/capture must produce the
+        exact same result as before this widening — proving the new
+        kwargs default to `None` all the way through."""
+        registry_a: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry_a, num_steps=2)
+        manager_a = _manager_with_fake_model()
+        result_omitted = asyncio.run(
+            generate_module.generate(manager_a, {"prompt": "hi", "num_inference_steps": 2})
+        )
+
+        registry_b: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry_b, num_steps=2)
+        manager_b = _manager_with_fake_model()
+        result_explicit_none = asyncio.run(
+            generate_module.generate(
+                manager_b,
+                {
+                    "prompt": "hi",
+                    "num_inference_steps": 2,
+                    "constraints": None,
+                    "control_signals": None,
+                    "capture": None,
+                },
+            )
+        )
+
+        assert result_omitted == result_explicit_none
+
+
+class TestInvalidPayloadSurfacesCoreIngressError:
+    """An invalid `constraints=`/`control_signals=`/`capture=` payload must
+    surface the CORE ingress error (`dgemma.ingress.validate_*`) legibly
+    through the MCP path — the tool-schema layer never re-implements the
+    check, it only shapes the JSON (ARCHITECTURE.md rule 5). Exercised at
+    two altitudes: `generate()` raising directly (the ValueError itself),
+    and through `surfaces/mcp/server.py`'s `call_tool` dispatch, which wraps
+    ANY handler exception into a structured `{"error": ...}` response
+    (`server.py:call_tool`'s outer try/except) rather than letting it
+    propagate as a transport-level fault."""
+
+    def test_out_of_range_pin_position_raises_the_core_ingress_valueerror(self, monkeypatch):
+        _install_stateless_fakes(monkeypatch, scheduler_registry=[], num_steps=2)
+        manager = _manager_with_fake_model()
+
+        with pytest.raises(ValueError, match="out of range for gen_length"):
+            asyncio.run(
+                generate_module.generate(
+                    manager,
+                    {
+                        "prompt": "hi",
+                        "num_inference_steps": 2,
+                        "gen_length": 4,
+                        "constraints": {"pins": [{"position": 99, "token_id": 1}]},
+                    },
+                )
+            )
+
+    def test_mismatched_control_signal_length_raises_the_core_ingress_valueerror(self, monkeypatch):
+        _install_stateless_fakes(monkeypatch, scheduler_registry=[], num_steps=3)
+        manager = _manager_with_fake_model()
+
+        with pytest.raises(ValueError, match="signal length"):
+            asyncio.run(
+                generate_module.generate(
+                    manager,
+                    {
+                        "prompt": "hi",
+                        "num_inference_steps": 3,
+                        "control_signals": {
+                            "bindings": [
+                                {"target": "t_min", "signal": [0.0, 1.0], "low": 0.1, "high": 0.9}
+                            ]
+                        },
+                    },
+                )
+            )
+
+    def test_negative_top_k_raises_the_core_ingress_valueerror(self, monkeypatch):
+        _install_stateless_fakes(monkeypatch, scheduler_registry=[], num_steps=2)
+        manager = _manager_with_fake_model()
+
+        with pytest.raises(ValueError, match="top_k must be >= 0"):
+            asyncio.run(
+                generate_module.generate(
+                    manager,
+                    {"prompt": "hi", "num_inference_steps": 2, "capture": {"top_k": -1}},
+                )
+            )
+
+    def test_invalid_constraints_surfaces_through_server_call_tool_as_structured_error(self, monkeypatch):
+        """The full MCP dispatch path: `surfaces.mcp.server.call_tool`'s
+        outer try/except turns the same core ValueError into a JSON
+        `TextContent` `{"error": ...}` payload — never an unhandled
+        exception at the transport layer."""
+        import json
+
+        _install_stateless_fakes(monkeypatch, scheduler_registry=[], num_steps=2)
+
+        from surfaces.mcp import server as server_module
+
+        monkeypatch.setattr(server_module, "state_manager", _manager_with_fake_model())
+
+        result = asyncio.run(
+            server_module.call_tool(
+                "generate",
+                {
+                    "prompt": "hi",
+                    "num_inference_steps": 2,
+                    "gen_length": 4,
+                    "constraints": {"pins": [{"position": 99, "token_id": 1}]},
+                },
+            )
+        )
+
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+        assert "out of range for gen_length" in payload["error"]
+
+    def test_unknown_pin_field_raises_typeerror_from_the_frozen_dataclass(self):
+        """Fail-on-unknown for payload KEYS is structural (frozen dataclass
+        constructor), not a check this module re-implements — mirrors
+        `dgemma/ingress.py`'s own module docstring on why unknown-key
+        rejection needs no validator function."""
+        with pytest.raises(TypeError):
+            generate_module._unpack_constraints({"pins": [{"position": 0, "token_id": 1, "bogus": True}]})
