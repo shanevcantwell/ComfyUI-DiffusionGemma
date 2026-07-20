@@ -12,7 +12,7 @@ shape rather than guessing one — see `dgemma/participants.py`'s module
 docstring). Composite-level ordering (beta-rebuild before pin, using this
 REAL participant rather than the generic `_RecordingParticipant` test double)
 is covered separately in `tests/test_step_end_composite.py::
-TestBetaRebuildBeforePin`.
+TestBetaRebuildBeforePinRealParticipants`.
 """
 from __future__ import annotations
 
