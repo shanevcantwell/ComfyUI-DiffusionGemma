@@ -27,6 +27,8 @@ import pytest
 import torch
 
 from dgemma.composite import DiffusionCancelled, StepEndComposite, StepEndParticipant
+from dgemma.participants import BetaRebuildParticipant, PinParticipant, RebuildWrite
+from dgemma.payloads import Constraints, Pin
 
 
 def _run_steps(fake_pipeline_factory, *, num_inference_steps: int, step_end) -> None:
@@ -157,6 +159,54 @@ class TestFixedOrdering:
         # prev_sample (== the fed-in canvas, per FakeEntropyBoundScheduler.step)
         # survives untouched.
         assert result.sequences.shape == (1, 4)
+
+
+class TestBetaRebuildBeforePinRealParticipants:
+    """ADR-CDG-010 Decision 3 / issue #64 Phase 5: the SAME ordering
+    `TestFixedOrdering` already proves generically (via the test-only
+    `_RecordingParticipant`) re-proven with the REAL, shipped participant
+    classes — `dgemma.participants.BetaRebuildParticipant` and
+    `dgemma.participants.PinParticipant` — so the invariant is anchored to
+    the actual production classes, not only a test double standing in for
+    them. This is the Phase 5 done-criterion: "beta-rebuild-before-pin
+    ordering test green (pin overwrites beta on a shared position)"."""
+
+    def test_pin_overwrites_beta_rebuild_on_a_shared_position(self, fake_pipeline_factory):
+        beta = BetaRebuildParticipant(writes=(RebuildWrite(position=1, token_id=7),))
+        pin = PinParticipant(constraints=Constraints(pins=(Pin(position=1, token_id=99),)))
+        step_end = StepEndComposite(capture=lambda *a: {}, beta_rebuild=(beta,), pin=(pin,))
+
+        built = fake_pipeline_factory(num_inference_steps=1)
+        result = built.pipeline(
+            num_inference_steps=1,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+        )
+
+        # Pin is the last writer (ADR-CDG-010 Decision 3): its token_id=99
+        # wins at the shared position, NOT beta-rebuild's token_id=7 — the
+        # exact failure the fixed ordering prevents (a renoise pass that
+        # doesn't know the cell was just pinned would otherwise clobber it).
+        assert torch.all(result.sequences[..., 1] == 99)
+
+    def test_beta_rebuild_write_survives_at_a_position_pin_does_not_touch(self, fake_pipeline_factory):
+        """Sanity check on the same run: beta-rebuild's write at a position
+        pin has no opinion about is NOT clobbered — proving pin's last-writer
+        status is positional (only overwrites what it actually pins), not a
+        wholesale reset of beta's output."""
+        beta = BetaRebuildParticipant(writes=(RebuildWrite(position=0, token_id=7),))
+        pin = PinParticipant(constraints=Constraints(pins=(Pin(position=1, token_id=99),)))
+        step_end = StepEndComposite(capture=lambda *a: {}, beta_rebuild=(beta,), pin=(pin,))
+
+        built = fake_pipeline_factory(num_inference_steps=1)
+        result = built.pipeline(
+            num_inference_steps=1,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "scheduler_output"],
+        )
+
+        assert torch.all(result.sequences[..., 0] == 7)
+        assert torch.all(result.sequences[..., 1] == 99)
 
 
 class TestWalkerOrdering:
