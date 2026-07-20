@@ -1,5 +1,5 @@
 """dgemma/participants.py — engine-built `StepEndComposite` participants
-(ADR-CDG-010/011, issue #64 Phases 3/4).
+(ADR-CDG-010/011, issue #64 Phases 3/4/5).
 
 Phase 3 landed `PinParticipant`, the canvas re-assertion mechanism (ADR-CDG-010
 Decision 1(b)): given a validated `Constraints` payload, re-write each pin's
@@ -25,11 +25,29 @@ ADR-CDG-011 clause 6's lower bound (must run after capture reads the
 current step's effective knobs) and is behaviorally inert relative to the
 canvas-writers since it never touches the canvas, only `scheduler.config`.
 
-`BetaRebuildParticipant` remains OUT of this phase (issue #64 §0: Phase 5) —
-its ordered slot is `dgemma/composite.py`'s `beta_rebuild=`, still `()` by
-default; later phases append it here rather than opening a second
-participants module (ARCHITECTURE.md rule 7: engine-built participants have
-one home).
+Phase 5 (issue #64, this module's `BetaRebuildParticipant`) lands ADR-CDG-010's
+**ordered, stateless, pin-preceding slot** for the beta-rebuild canvas-writer —
+NOT the liquid-phase-decoding bench's beta-viscosity/top-k mixture math, which
+issue #64 §0 names explicitly OUT (ADR-CDG-010 Open Question 2: "does
+beta-renoise ever need to run more than once per step" is still unresolved,
+and the 2026-07-13 gate ruling O3 confirms deferring that math and its own
+ingress payload rather than guessing a wire shape against an admittedly open
+ADR question). What THIS phase lands is real: a genuine `StepEndParticipant`
+that (a) exists in the composite's `beta_rebuild` slot, (b) writes the canvas
+before `pin` runs (ADR-CDG-010 Decision 3 — "beta-rebuild before pin ... a
+pin's re-assertion could be immediately overwritten by a renoise pass that
+doesn't know the cell was just pinned"), and (c) is per-run stateless, exactly
+the same shape `PinParticipant` already proves for its own slot. Its spec is a
+deterministic, declarative `Rebuild` payload (position/token_id rewrites) —
+the same shape as `Constraints.pins`, deliberately NOT threaded through
+`run_diffusion`'s ingress in this phase (no `renoise=` parameter exists;
+`dgemma/loop.py` never builds one, so `beta_rebuild=()` stays the default at
+every call site — see O3 above). This keeps the door to the real
+beta-viscosity body open and named, not silently decided here.
+
+Only `dgemma/loop.py`, if and when a future phase resolves Open Question 2,
+would wire this participant (or its eventual research-rung replacement) from
+a real ingress payload; that wiring is explicitly not part of this phase.
 """
 from __future__ import annotations
 
@@ -75,6 +93,72 @@ class PinParticipant:
         canvas = callback_kwargs["canvas"].clone()
         for pin in self.constraints.pins:
             canvas[..., pin.position] = pin.token_id
+        return {"canvas": canvas}
+
+
+@dataclass(frozen=True)
+class RebuildWrite:
+    """One deterministic canvas rewrite for `BetaRebuildParticipant` (issue
+    #64 Phase 5).
+
+    NOT an ingress-validated payload — unlike `Pin`/`Constraints`
+    (`dgemma/payloads.py`), no `run_diffusion` parameter builds this from
+    caller input this phase (ADR-CDG-010 Open Question 2 is unresolved; the
+    2026-07-13 gate ruling O3 defers the beta-viscosity math and its wire
+    shape rather than guessing one). This dataclass exists only so
+    `BetaRebuildParticipant` has a typed, immutable, per-run spec to hold —
+    the same shape discipline `Pin` uses, minus the ingress door.
+
+    `position`: canvas index to rewrite (0 <= position < gen_length).
+    `token_id`: the vocab id to write at that position.
+    """
+
+    position: int
+    token_id: int
+
+
+@dataclass
+class BetaRebuildParticipant:
+    """The beta-rebuild canvas-writer slot (ADR-CDG-010 Decision 3's
+    `beta_rebuild` position — BEFORE `pin`, issue #64 Phase 5).
+
+    This is the ordered, stateless, **slot** ADR-CDG-010 names — not the
+    liquid-phase-decoding bench's beta-viscosity/top-k mixture math
+    (`docs/experiments/liquid-phase-decoding/concept.md` §5), which stays
+    `NOT-YET-IMPLEMENTED` pending ADR-CDG-010 Open Question 2's resolution
+    (whether beta-renoise needs multiple ordered sub-phases per step). What
+    this participant proves, deterministically and testably: (a) a real
+    `StepEndParticipant` occupies the composite's `beta_rebuild` tuple, (b)
+    its canvas write reaches `pin`'s turn (and is overwritten there on a
+    shared position — ADR-CDG-010 Decision 3's exact ordering rationale:
+    "a pin's re-assertion could be immediately overwritten by a renoise pass
+    that doesn't know the cell was just pinned" reads the same both
+    directions — the pin must NOT be overwritten by a later beta pass, which
+    this ordering guarantees since beta always runs first), and (c) it is
+    per-run stateless.
+
+    Construct with `writes` (a tuple of `RebuildWrite` — this call's own
+    spec; empty tuple is a legal, inert no-op). Each step, writes every
+    `token_id` at its `position` into `callback_kwargs["canvas"]` and
+    returns `{"canvas": <rewritten>}`, exactly the same canvas-writer
+    contract `PinParticipant` implements for its own (later) slot.
+
+    **State contract (ADR-CDG-010 Decision 7, shared with `PinParticipant`):**
+    holds only the immutable `writes` tuple from THIS construction — no
+    cross-call state, no accumulation. `run_diffusion` builds no
+    `BetaRebuildParticipant` this phase (no ingress payload names one, see
+    the module docstring's O3 note) — `beta_rebuild=()` stays the default at
+    every `run_diffusion` call site; this class is exercised directly against
+    `StepEndComposite` and unit-level, not yet through `run_diffusion`.
+    """
+
+    writes: tuple["RebuildWrite", ...] = ()
+    name: str = "beta_rebuild"
+
+    def __call__(self, pipe: Any, global_step: int, step_idx: int, callback_kwargs: dict) -> dict | None:
+        canvas = callback_kwargs["canvas"].clone()
+        for write in self.writes:
+            canvas[..., write.position] = write.token_id
         return {"canvas": canvas}
 
 
