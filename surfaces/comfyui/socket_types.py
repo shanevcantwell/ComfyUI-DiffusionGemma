@@ -26,6 +26,13 @@ dataclass, `RunConfig`, deliberately lives in `consumers/run_log.py`, NOT
 `dgemma/types.py` — it is caller-supplied request-echo the surface already
 holds, not core-measured state (see that module's docstring for the full
 Option A vs. B rejection).
+
+`DGEMMA_KV_CACHE` (ADR-CDG-012, issue #62 Phase 3, DV.3a / ratification Q-4):
+the `KV_CACHE` seam's socket string — envelope, minted here per rule 4
+(`IDENTITY⊥ENVELOPE`); the payload identity (`KVCache`/`Provenance`/`EditOp`
+dataclasses) lives in `dgemma/types.py`. Rides `DGemmaEncode`'s output and
+`DGemmaDenoise`'s optional cache input/output (`surfaces/comfyui/encode.py`,
+`denoise.py`).
 """
 
 DGEMMA_MODEL = "DGEMMA_MODEL"
@@ -34,6 +41,7 @@ DGEMMA_CANVAS_TRACE = "DGEMMA_CANVAS_TRACE"
 DGEMMA_CONSTRAINTS = "DGEMMA_CONSTRAINTS"
 DGEMMA_CONTROL_SIGNALS = "DGEMMA_CONTROL_SIGNALS"
 DGEMMA_RUN_CONFIG = "DGEMMA_RUN_CONFIG"
+DGEMMA_KV_CACHE = "DGEMMA_KV_CACHE"
 
 ALL_SOCKET_TYPES = (
     DGEMMA_MODEL,
@@ -42,4 +50,5 @@ ALL_SOCKET_TYPES = (
     DGEMMA_CONSTRAINTS,
     DGEMMA_CONTROL_SIGNALS,
     DGEMMA_RUN_CONFIG,
+    DGEMMA_KV_CACHE,
 )

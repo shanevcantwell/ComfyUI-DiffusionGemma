@@ -23,6 +23,8 @@ import re
 from pathlib import Path
 
 from surfaces.comfyui import socket_types
+from surfaces.comfyui.denoise import DGemmaDenoise
+from surfaces.comfyui.encode import DGemmaEncode
 from surfaces.comfyui.loader import DGemmaLoader
 from surfaces.comfyui.sampler import DGemmaSampler
 from surfaces.comfyui.trace import DGemmaTrace
@@ -54,6 +56,7 @@ def test_mint_exposes_the_three_named_socket_types():
         "DGEMMA_CONSTRAINTS",
         "DGEMMA_CONTROL_SIGNALS",
         "DGEMMA_RUN_CONFIG",
+        "DGEMMA_KV_CACHE",
     }
 
 
@@ -71,6 +74,13 @@ def test_mint_exposes_the_constraint_and_control_signal_socket_types():
     is out of scope, gated behind this one)."""
     assert socket_types.DGEMMA_CONSTRAINTS == "DGEMMA_CONSTRAINTS"
     assert socket_types.DGEMMA_CONTROL_SIGNALS == "DGEMMA_CONTROL_SIGNALS"
+
+
+def test_mint_exposes_the_kv_cache_socket_type():
+    """ADR-CDG-012 (issue #62 Phase 3, DV.3a / ratification Q-4): the
+    `KV_CACHE` seam's socket string, minted here per rule 4
+    (`IDENTITY⊥ENVELOPE`) — the payload dataclasses live in `dgemma/types.py`."""
+    assert socket_types.DGEMMA_KV_CACHE == "DGEMMA_KV_CACHE"
 
 
 def test_step_event_name_is_not_in_the_mint():
@@ -101,7 +111,7 @@ def test_no_inline_dgemma_socket_literal_outside_the_mint_module():
 
 def test_live_node_sockets_are_drawn_from_the_mint():
     """Round-trip: every DGEMMA_*-shaped socket value actually used by the
-    three nodes must be a member of the minted set — asserted against the
+    live nodes must be a member of the minted set — asserted against the
     module object, so this stays valid even if the mint's own constant names
     change (only their values matter here)."""
 
@@ -118,8 +128,35 @@ def test_live_node_sockets_are_drawn_from_the_mint():
     trace_canvas_socket = trace_input["required"]["canvas_trace"][0]
     trace_values = _dgemma_values(trace_canvas_socket)
 
-    all_live_values = loader_values | sampler_values | trace_values
-    assert all_live_values, "expected at least one DGEMMA_* socket among the three nodes"
+    encode_input = DGemmaEncode.INPUT_TYPES()
+    encode_model_socket = encode_input["required"]["model"][0]
+    encode_kv_cache_socket = encode_input["optional"]["kv_cache"][0]
+    encode_values = _dgemma_values(encode_model_socket, encode_kv_cache_socket, *DGemmaEncode.RETURN_TYPES)
+
+    denoise_input = DGemmaDenoise.INPUT_TYPES()
+    denoise_model_socket = denoise_input["required"]["model"][0]
+    denoise_kv_cache_socket = denoise_input["optional"]["kv_cache"][0]
+    denoise_values = _dgemma_values(
+        denoise_model_socket, denoise_kv_cache_socket, *DGemmaDenoise.RETURN_TYPES
+    )
+
+    all_live_values = (
+        loader_values | sampler_values | trace_values | encode_values | denoise_values
+    )
+    assert all_live_values, "expected at least one DGEMMA_* socket among the live nodes"
     assert all_live_values <= _MINTED, (
         f"live node socket value(s) not present in the mint: {all_live_values - _MINTED}"
     )
+
+
+def test_kv_cache_socket_present_on_encode_and_denoise():
+    """DV.3a's specific round-trip for the new seam: `DGEMMA_KV_CACHE`
+    actually appears on both `DGemmaEncode`'s output and `DGemmaDenoise`'s
+    optional input/output — a wire between the two is legal at the graph
+    level, and a mis-wire to any other socket type is not."""
+    encode_input = DGemmaEncode.INPUT_TYPES()
+    denoise_input = DGemmaDenoise.INPUT_TYPES()
+
+    assert socket_types.DGEMMA_KV_CACHE in DGemmaEncode.RETURN_TYPES
+    assert encode_input["optional"]["kv_cache"][0] == socket_types.DGEMMA_KV_CACHE
+    assert denoise_input["optional"]["kv_cache"][0] == socket_types.DGEMMA_KV_CACHE

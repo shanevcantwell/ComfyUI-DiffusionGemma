@@ -69,3 +69,18 @@ the operator's to run.
 **Recommended starting point** for a first-time user reading the pack: open this file
 in the ComfyUI canvas (Workflow → Open) before `p2-knobs-smoke`/`p3-trace-smoke` — it's
 annotated to teach the graph, not just to smoke-test it.
+
+## kv-cache-tier1.api.json (ADR-CDG-012, issue #62 Phase 3)
+
+The `KV_CACHE` seam's DV.2 minimum: the tier-1 honest-cache path —
+`DGemmaLoader → DGemmaEncode` (mints a `DGEMMA_KV_CACHE` from a prompt) `→
+DGemmaDenoise` (consumes the injected cache) `→ DGemmaTrace` (reads back
+`injected_cache_provenance`, OUT-3), with `PreviewAny` on the decoded text
+and `CanvasState`. Statically validated by `tests/test_kv_cache_workflows.py`
+(class_type resolution, required-input completeness, wired-socket-type
+round-trip against the live node definitions) — not yet run against a live
+ComfyUI instance with real weights; that confirmation is the operator's
+real-weights de-risk pass (issue #62 Phase 4, gated per the ADR's Open
+Question #1). Tier-2 (`kv-cache-tier2.api.json`, per-layer cache surgery) is
+deferred (issue #62 Q-1: out of first-implementation scope), not shipped
+here.

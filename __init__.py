@@ -16,6 +16,11 @@ own file handle (`surfaces/comfyui/run_log_writer.py` wrapping
 `consumers/run_log.py`'s pure builders), superseding the escaped-newline-
 trap-prone `.txt` step-log convention `consumers/tally_audit.py`'s
 `extract_decoded_frames_from_composite_blob` was built to reverse.
+`DGemmaEncode`/`DGemmaDenoise` (ADR-CDG-012, issue #62 Phase 3) are the
+`KV_CACHE` seam's node pair — mint/advance a `DGEMMA_KV_CACHE` payload from
+text, and optionally consume one to condition a run (the decoder is not yet
+driven off the injected cache's tensors — Phase 4, gated on the ADR's
+real-weights de-risk smoke test).
 
 ComfyUI discovers a custom node pack by importing this module and reading
 NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS (+ `WEB_DIRECTORY`, checked
@@ -39,12 +44,16 @@ relative import, masking the actual dependency error behind a baffling
 empirically by the reviewer).
 """
 if __package__:
+    from .surfaces.comfyui.denoise import DGemmaDenoise
+    from .surfaces.comfyui.encode import DGemmaEncode
     from .surfaces.comfyui.loader import DGemmaLoader
     from .surfaces.comfyui.run_log_writer import DGemmaRunLogWriter
     from .surfaces.comfyui.sampler import DGemmaSampler
     from .surfaces.comfyui.tally_audit import DGemmaTallyAudit
     from .surfaces.comfyui.trace import DGemmaTrace
 else:
+    from surfaces.comfyui.denoise import DGemmaDenoise
+    from surfaces.comfyui.encode import DGemmaEncode
     from surfaces.comfyui.loader import DGemmaLoader
     from surfaces.comfyui.run_log_writer import DGemmaRunLogWriter
     from surfaces.comfyui.sampler import DGemmaSampler
@@ -57,6 +66,8 @@ NODE_CLASS_MAPPINGS: dict = {
     "DGemmaTrace": DGemmaTrace,
     "DGemmaTallyAudit": DGemmaTallyAudit,
     "DGemmaRunLogWriter": DGemmaRunLogWriter,
+    "DGemmaEncode": DGemmaEncode,
+    "DGemmaDenoise": DGemmaDenoise,
 }
 NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaLoader": "DiffusionGemma Loader",
@@ -64,6 +75,8 @@ NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaTrace": "DiffusionGemma Trace",
     "DGemmaTallyAudit": "DiffusionGemma Tally Audit",
     "DGemmaRunLogWriter": "DiffusionGemma Run Log Writer",
+    "DGemmaEncode": "DiffusionGemma Encode (KV Cache)",
+    "DGemmaDenoise": "DiffusionGemma Denoise (KV Cache)",
 }
 
 # P3 (a): the live per-step view (`surfaces/comfyui/web/live_view.js`).

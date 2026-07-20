@@ -1,0 +1,55 @@
+{
+  "80": {
+    "inputs": {
+      "repo_id": "google/diffusiongemma-26B-A4B-it",
+      "quant": "none",
+      "local_files_only": false
+    },
+    "class_type": "DGemmaLoader",
+    "_meta": { "title": "DiffusionGemma Loader" }
+  },
+  "81": {
+    "inputs": {
+      "text": "Why do birds suddenly appear?",
+      "model": ["80", 0]
+    },
+    "class_type": "DGemmaEncode",
+    "_meta": { "title": "DiffusionGemma Encode (KV Cache) — mint" }
+  },
+  "82": {
+    "inputs": {
+      "prompt": "whenever they are near",
+      "seed": 7,
+      "num_inference_steps": 48,
+      "t_min": 0.4,
+      "t_max": 0.8,
+      "entropy_bound": 0.1,
+      "confidence": 0.005,
+      "gen_length": 256,
+      "model": ["80", 0],
+      "kv_cache": ["81", 0]
+    },
+    "class_type": "DGemmaDenoise",
+    "_meta": { "title": "DiffusionGemma Denoise (KV Cache) — consume" }
+  },
+  "83": {
+    "inputs": { "source": ["82", 0] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "Preview Text" }
+  },
+  "84": {
+    "inputs": { "source": ["82", 1] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "Preview CanvasState" }
+  },
+  "85": {
+    "inputs": { "canvas_trace": ["82", 2] },
+    "class_type": "DGemmaTrace",
+    "_meta": { "title": "DiffusionGemma Trace (reads injected_cache_provenance)" }
+  },
+  "86": {
+    "inputs": { "source": ["85", 1] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "Preview Trace Summary" }
+  }
+}
