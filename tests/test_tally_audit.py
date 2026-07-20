@@ -260,6 +260,32 @@ class TestParsePipeTableFormat:
         assert result.cells[0].claimed is None  # "RequestBody" is garbage
         assert result.cells[3].claimed is None  # "ເພ" is garbage
 
+    def test_garbage_total_value_cell_leaves_claimed_total_none(self):
+        """A `| Total | ... |` row whose value cell doesn't match
+        `_VALUE_CELL_RE` (garbage decode noise instead of a bare int) is
+        recognized as a Total row (`_TOTAL_CELL_RE` matches the numeral
+        cell) but its value is simply never captured — `claimed_total`
+        stays `None` rather than raising or fabricating a number. This
+        closes `_match_pipe_table`'s `if value_match:` branch's false side
+        (the Total row is found but its value doesn't parse), which no
+        other fixture in this class exercises: every other Total row here
+        (`test_well_formed_pipe_table_parses_ok`,
+        `test_junk_before_first_pipe_does_not_break_row_matching`) has a
+        clean `**26**` value."""
+        text = (
+            "| Numeral | Frequency |\n| :--- | :--- |\n"
+            "| 0 | 2 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 2 |\n| 4 | 3 |\n"
+            "| 5 | 3 |\n| 6 | 2 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 3 |\n"
+            "| **Total** |  gibberish |"
+        )
+        result = parse_tally_frame(text, frame_idx=0)
+
+        assert result.format_name == "pipe_table"
+        assert result.claimed_total is None
+        assert result.claimed_counts() == {
+            0: 2, 1: 3, 2: 3, 3: 2, 4: 3, 5: 3, 6: 2, 7: 3, 8: 2, 9: 3,
+        }
+
 
 class TestParseDashBulletListFormat:
     """Issue #86's third observed shape: plain dash-bullets, one numeral

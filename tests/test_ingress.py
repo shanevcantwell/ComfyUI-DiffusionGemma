@@ -8,7 +8,13 @@ drops the fix (or vice versa) is a partial register entry, so both halves are
 independently checked line-by-line, not just "it raised."
 
 Pure unit tests: no fake pipeline, no `run_diffusion` call — these exercise
-`dgemma.ingress`'s functions directly against `dgemma.payloads` dataclasses.
+`dgemma.ingress`'s functions directly against `dgemma.payloads` dataclasses,
+with ONE deliberate exception: `TestExactTemperatureRunLevelIngress` below
+(issue #110's pre-registration) imports `dgemma.loop.run_diffusion` because
+that is where the `t_min`/`t_max` run-level guard this issue names actually
+lives today, not in `dgemma.ingress` itself — no fixture/fake-pipeline setup
+is needed since the guard fires before any pipeline construction (see that
+test's own docstring).
 """
 from __future__ import annotations
 
@@ -457,6 +463,7 @@ class TestValidateIngressComposition:
                 gen_length=10, num_inference_steps=4, vocab_size=100,
             )
 
+
     def test_valid_capture_tier2_budget_passes_through_validate_ingress(self):
         validate_ingress(
             None, None, CaptureSpec(capture_full_distribution=True, max_full_distribution_steps=4), None,
@@ -469,3 +476,52 @@ class TestValidateIngressComposition:
                 None, None, CaptureSpec(capture_full_distribution=True), None,
                 gen_length=10, num_inference_steps=4, vocab_size=100,
             )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "issue #110: ADR-CDG-011 clause 5 names t_min=t_max=v as THE "
+        "exact-per-step-temperature mechanism, but dgemma.loop.run_diffusion's "
+        "own t_min/t_max ingress guard currently rejects flat equality "
+        "(`if t_min >= t_max: raise ValueError(...)`) — found live "
+        "2026-07-19, functionality demo had to fudge t_max=0.550001 to work "
+        "around it. Pre-registered per the battery S3/#9 convention (issue "
+        "#59 phase E3): expected RED until #110 resolves one of two ways — "
+        "(a) the guard relaxes to `t_min > t_max` (strict-greater-than "
+        "only), and this test flips to PASS, forcing this marker's removal "
+        "as part of that fix's own PR; or (b) ADR-CDG-011 clause 5 is "
+        "amended to retire the equality mechanism, and this test is removed "
+        "with the amendment rather than left green-by-accident."
+    ),
+)
+class TestExactTemperatureRunLevelIngress:
+    """Issue #110 pre-registration — deliberately NOT a `dgemma.ingress`-only
+    test (see module docstring): the guard this issue names lives in
+    `dgemma.loop.run_diffusion` itself, fired as the FIRST statement in the
+    function body, before any pipeline/scheduler construction — so this call
+    needs no fake-pipeline monkeypatching to reach the assertion; a real
+    `DGemmaModel`-shaped stub (never touched beyond attribute presence) is
+    sufficient.
+    """
+
+    def test_t_min_equals_t_max_is_accepted(self):
+        from dgemma.loop import run_diffusion
+        from dgemma.types import DGemmaModel
+
+        class _StubProcessor:
+            pass
+
+        model = DGemmaModel(
+            model=object(),
+            processor=_StubProcessor(),
+            device="cpu",
+            dtype="bfloat16",
+            repo_id="fake/repo",
+            quant="none",
+        )
+
+        # Today this raises ValueError before ever reaching the pipeline —
+        # the whole point of the pre-registration is that this call must NOT
+        # raise once #110 is resolved via the validator-relaxed path.
+        run_diffusion(model, "hi", t_min=0.5, t_max=0.5)

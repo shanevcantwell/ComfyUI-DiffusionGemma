@@ -174,3 +174,44 @@ class TestCancellationPartialReturn:
 
         assert [f.step_idx for f in canvas_trace.frames] == [0, 1, 2]
         assert text == "TEXT:3"
+
+    def test_cancel_with_already_1d_canvas_skips_the_normalization_slice(self, monkeypatch):
+        """The cancelled-canvas normalization guard (`dgemma/loop.py`,
+        `if hasattr(sequences, "dim") and sequences.dim() == 2:`) has two
+        sides: 2-D canvases (every other cancel test here, via
+        `_install_multistep_fakes`'s `torch.tensor([canvases[step_idx]])`)
+        take the `sequences[0]` slice; a canvas that is ALREADY 1-D must
+        skip the slice rather than incorrectly indexing into it. No real
+        pipeline caller today hands the collector a 1-D `canvas` (the real
+        `EntropyBoundScheduler`/pipeline always operate batched), so this
+        drives the callback with a 1-D tensor directly to close the guard's
+        false-side branch — an honest defensive-guard test (repo
+        coverage-residual convention, issue #75), not a real call shape.
+        """
+
+        class FakeScheduler:
+            def __init__(self, **kwargs):
+                self.num_inference_steps = kwargs["num_inference_steps"]
+
+        class FakePipeline:
+            def __init__(self, model, scheduler, processor):
+                self.eos_token_id = getattr(getattr(processor, "tokenizer", processor), "eos_token_id", None)
+
+            def __call__(self, **kwargs):
+                callback = kwargs["callback_on_step_end"]
+                callback_kwargs = {
+                    "scheduler_output": FakeSchedulerOutput([[True]]),
+                    # 1-D canvas — no batch dimension, unlike every other
+                    # fixture in this file.
+                    "canvas": torch.tensor([7]),
+                }
+                callback(self, 0, 0, callback_kwargs)
+                raise AssertionError("should have cancelled before completion")
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", FakeScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", FakePipeline)
+
+        text, canvas_state, canvas_trace = run_diffusion(_fake_model(), "hi", should_cancel=lambda: True)
+
+        assert [f.step_idx for f in canvas_trace.frames] == [0]
+        assert text == "TEXT:7"
