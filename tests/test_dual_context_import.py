@@ -1,8 +1,8 @@
 """Coverage closer for the dotted-package import branch of
-`surfaces/comfyui/loader.py`, `surfaces/comfyui/sampler.py`, and
-`surfaces/comfyui/trace.py` (same dual-context gate; relocated from `nodes/`
-per ADR-CDG-008 Phase 1, issue #52) — test-coverage-plan.md Phase 2's
-precedent.
+`surfaces/comfyui/loader.py`, `surfaces/comfyui/sampler.py`,
+`surfaces/comfyui/trace.py`, and `surfaces/comfyui/token_trace.py` (same
+dual-context gate; relocated from `nodes/` per ADR-CDG-008 Phase 1, issue
+#52) — test-coverage-plan.md Phase 2's precedent.
 
 `tests/test_comfyui_loader_context.py` already proves this branch executes
 correctly under ComfyUI's real loader mechanics — but it does so in a
@@ -79,6 +79,20 @@ def test_trace_resolves_relative_import_under_dotted_package_context(synthetic_p
     # issue #55 §2) — the relative-import depth from surfaces/comfyui/ is
     # unchanged, only the middle segment moved.
     assert module.build_commit_heatmap.__module__ == f"{synthetic_pack_root}.consumers.analysis"
+
+
+def test_token_trace_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `surfaces/comfyui/token_trace.py`'s dual-context
+    gate (ADR-CDG-014 issue #61 P-D / issue #11) — same shape as trace.py's
+    test above, proving the relative climb to
+    `consumers.analysis.build_token_identity_grid` resolves under a
+    genuinely dotted `__package__`."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.token_trace")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__
+    assert module.DGemmaTokenTrace.FUNCTION == "render"
+    assert module.build_token_identity_grid.__module__ == f"{synthetic_pack_root}.consumers.analysis"
 
 
 def test_tally_audit_node_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):

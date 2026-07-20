@@ -9,6 +9,7 @@ surfaces/comfyui/trace.py's own docstring) wrapping logic in this file.
 """
 from __future__ import annotations
 
+import pytest
 import torch
 
 from consumers.analysis import MaskTokenCorroboration
@@ -17,12 +18,15 @@ from surfaces.comfyui.trace import DGemmaTrace
 
 def test_declarations():
     spec = DGemmaTrace.INPUT_TYPES()
-    assert set(spec["required"]) == {"canvas_trace", "cell_px"}
+    assert set(spec["required"]) == {"canvas_trace", "cell_px", "mode"}
     assert spec["required"]["canvas_trace"] == ("DGEMMA_CANVAS_TRACE",)
     # cell_px (operator finding, 2026-07-05): nearest-neighbor upscale
     # widget — a raw steps×positions heatmap (256×11 observed live) is
     # unreadably small as pixels.
     assert spec["required"]["cell_px"] == ("INT", {"default": 6, "min": 1, "max": 32})
+    # mode (ADR-CDG-014 issue #61 P-D): default "commit" is byte-identical
+    # to every pre-P-D graph.
+    assert spec["required"]["mode"] == (["commit", "entropy"], {"default": "commit"})
     assert DGemmaTrace.RETURN_TYPES == ("IMAGE", "STRING")
     assert DGemmaTrace.RETURN_NAMES == ("heatmap", "summary")
     assert DGemmaTrace.FUNCTION == "render"
@@ -192,3 +196,143 @@ def test_heatmap_to_image_degenerate_empty_heatmap_does_not_raise(monkeypatch):
 
     assert image.shape == (1, 1, 1, 3)
     assert "steps=0" in summary
+
+
+# ---------------------------------------------------------------------------
+# ADR-CDG-014 issue #61 P-D: mode widget ("commit" default | "entropy")
+# ---------------------------------------------------------------------------
+
+
+def test_render_defaults_mode_to_commit_and_does_not_call_entropy_heatmap(monkeypatch):
+    """The widget default and the Python-signature default must agree
+    (mirrors `cell_px`'s own default-parity test) — and, since default
+    mode is "commit", `build_entropy_heatmap` must never be called."""
+    captured = {}
+
+    def fake_build_commit_heatmap(trace, scale=1):
+        captured["called_commit"] = True
+        return [[1]]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("build_entropy_heatmap must not be called when mode='commit'")
+
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", fake_build_commit_heatmap)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_entropy_heatmap", fail_if_called)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr(
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
+        lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
+    )
+
+    node = DGemmaTrace()
+    node.render(canvas_trace=_FakeTrace())
+
+    assert captured["called_commit"] is True
+    assert DGemmaTrace.INPUT_TYPES()["required"]["mode"][1]["default"] == "commit"
+
+
+def test_render_mode_entropy_calls_entropy_heatmap_not_commit_heatmap(monkeypatch):
+    captured = {}
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("build_commit_heatmap must not be called when mode='entropy'")
+
+    def fake_build_entropy_heatmap(trace, scale=1):
+        captured["entropy_trace"] = trace
+        captured["scale"] = scale
+        return [[0.1, 0.9], [0.5, 0.5]]
+
+    monkeypatch.setattr("surfaces.comfyui.trace.build_commit_heatmap", fail_if_called)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_entropy_heatmap", fake_build_entropy_heatmap)
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr(
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
+        lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
+    )
+
+    sentinel_trace = _FakeTrace()
+    node = DGemmaTrace()
+    image, _ = node.render(canvas_trace=sentinel_trace, cell_px=3, mode="entropy")
+
+    assert captured["entropy_trace"] is sentinel_trace
+    assert captured["scale"] == 3
+    assert isinstance(image, torch.Tensor)
+    assert image.shape == (1, 2, 2, 3)
+
+
+def test_render_unknown_mode_raises(monkeypatch):
+    monkeypatch.setattr("surfaces.comfyui.trace.build_avalanche_curve", lambda trace: [1.0])
+    monkeypatch.setattr(
+        "surfaces.comfyui.trace.corroborate_no_mask_token",
+        lambda trace: MaskTokenCorroboration(verdict="evidence_against_sentinel"),
+    )
+
+    node = DGemmaTrace()
+    with pytest.raises(ValueError, match="unknown mode"):
+        node.render(canvas_trace=_FakeTrace(), mode="bogus")
+
+
+def test_entropy_heatmap_to_image_min_max_normalizes_per_render():
+    """`_entropy_heatmap_to_image` min-max normalizes to [0, 1] — a 2x2
+    grid with min=0.1, max=0.9 must map 0.1->0.0, 0.9->1.0, and the
+    midpoint 0.5 -> 0.5."""
+    from surfaces.comfyui.trace import _entropy_heatmap_to_image
+
+    image = _entropy_heatmap_to_image([[0.1, 0.9], [0.5, 0.1]])
+
+    assert image.shape == (1, 2, 2, 3)
+    assert image[0, 0, 0, 0].item() == pytest.approx(0.0)
+    assert image[0, 0, 1, 0].item() == pytest.approx(1.0)
+    assert image[0, 1, 0, 0].item() == pytest.approx(0.5)
+    assert image[0, 1, 1, 0].item() == pytest.approx(0.0)
+
+
+def test_entropy_heatmap_to_image_degenerate_all_equal_grid_normalizes_to_zero():
+    """A grid where every cell is equal (max == min) must not divide by
+    zero — normalizes to all-0 rather than raising/NaN-ing (e.g. a
+    single-frame trace, or a fully-converged run with zero entropy
+    spread)."""
+    from surfaces.comfyui.trace import _entropy_heatmap_to_image
+
+    image = _entropy_heatmap_to_image([[0.42, 0.42], [0.42, 0.42]])
+
+    assert not torch.isnan(image).any()
+    assert torch.equal(image[..., 0], torch.zeros(1, 2, 2))
+
+
+def test_entropy_heatmap_to_image_degenerate_empty_heatmap_does_not_raise():
+    from surfaces.comfyui.trace import _entropy_heatmap_to_image
+
+    image = _entropy_heatmap_to_image([])
+
+    assert image.shape == (1, 1, 1, 3)
+
+
+def test_render_end_to_end_entropy_mode_real_functions():
+    """One unmocked pass (real `consumers.analysis.build_entropy_heatmap`)
+    over a hand-built trace with real `entropy` tensors — pins that the
+    mode="entropy" path produces a correctly-shaped, normalized IMAGE with
+    no mocking involved."""
+    from dgemma.types import CanvasTrace, DiffusionFrame
+
+    frames = [
+        DiffusionFrame(
+            canvas_idx=0, step_idx=0, t=1.0, temperature=0.8,
+            committed_fraction_per_example=(0.0,), canvas=torch.tensor([[1, 2, 3]]),
+            entropy=torch.tensor([0.1, 0.5, 0.9]),
+        ),
+        DiffusionFrame(
+            canvas_idx=0, step_idx=1, t=0.5, temperature=0.6,
+            committed_fraction_per_example=(1.0,), canvas=torch.tensor([[1, 5, 3]]),
+            entropy=torch.tensor([0.2, 0.4, 0.6]),
+        ),
+    ]
+    trace = CanvasTrace(frames=frames, scheduler_name="EntropyBoundScheduler", scheduler_config={})
+
+    node = DGemmaTrace()
+    image, summary = node.render(canvas_trace=trace, cell_px=2, mode="entropy")
+
+    assert image.shape == (1, 2 * 2, 3 * 2, 3)
+    assert image.min().item() == pytest.approx(0.0)
+    assert image.max().item() == pytest.approx(1.0)
+    assert "steps=2" in summary

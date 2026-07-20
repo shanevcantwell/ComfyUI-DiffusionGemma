@@ -12,13 +12,26 @@ split: it imports up-and-over into the consumer tier, which is normal
 composition, not a layering inversion (both sit above the core).
 
 The one piece of non-trivial code in this file — building an `IMAGE` tensor
-from a plain `list[list[int]]` — is the ADR-CDG-003-sanctioned exception, not
-a violation: `consumers/analysis.py`'s own docstring says explicitly that
-ComfyUI-shaped tensor construction does NOT belong there, and plan.md step 6
-assigns it here ("a real tensor built here, in the adapter layer, from the
-plain array `consumers/analysis.py` returned"). No denoising-loop logic, no
-`for` loop over steps of its own — the heatmap/curve/corroboration
-computation itself is entirely `consumers.analysis`'s.
+from a plain `list[list[int]]`/`list[list[float]]` — is the ADR-CDG-003-
+sanctioned exception, not a violation: `consumers/analysis.py`'s own
+docstring says explicitly that ComfyUI-shaped tensor construction does NOT
+belong there, and plan.md step 6 assigns it here ("a real tensor built
+here, in the adapter layer, from the plain array `consumers/analysis.py`
+returned"). No denoising-loop logic, no `for` loop over steps of its own —
+the heatmap/curve/corroboration computation itself is entirely
+`consumers.analysis`'s. The `mode="entropy"` render path's min-max
+normalization (`_entropy_heatmap_to_image`) is the one piece of arithmetic
+that lives here rather than in `consumers.analysis`: it is a DISPLAY
+scaling decision (how to map an unbounded nats value into `[0,1]` pixel
+intensity for THIS render), not a measurement `consumers.analysis` owns —
+`build_entropy_heatmap` itself returns the raw un-normalized nats values,
+same "engine does measurement, adapter does presentation" split
+`cell_px`'s upscale already follows.
+
+ADR-CDG-014 (issue #61 P-D): `DGemmaTrace` gains a `mode` widget
+(`"commit"` | `"entropy"`, default `"commit"`) selecting which
+`consumers.analysis` heatmap function backs the rendered `IMAGE` — see the
+class docstring below.
 """
 from __future__ import annotations
 
@@ -37,6 +50,7 @@ if __package__ and __package__.count(".") >= 2:
     from ...consumers.analysis import (
         build_avalanche_curve,
         build_commit_heatmap,
+        build_entropy_heatmap,
         corroborate_no_mask_token,
     )
     from .socket_types import DGEMMA_CANVAS_TRACE
@@ -44,6 +58,7 @@ else:
     from consumers.analysis import (
         build_avalanche_curve,
         build_commit_heatmap,
+        build_entropy_heatmap,
         corroborate_no_mask_token,
     )
     from surfaces.comfyui.socket_types import DGEMMA_CANVAS_TRACE
@@ -58,6 +73,29 @@ def _heatmap_to_image(heatmap: list[list[int]]) -> torch.Tensor:
         return torch.zeros((1, 1, 1, 3), dtype=torch.float32)
     grid = torch.tensor(heatmap, dtype=torch.float32)  # (H, W)
     return grid.unsqueeze(0).unsqueeze(-1).expand(1, *grid.shape, 3).contiguous()
+
+
+def _entropy_heatmap_to_image(heatmap: list[list[float]]) -> torch.Tensor:
+    """Wrap `build_entropy_heatmap`'s continuous nats-valued grid into a
+    ComfyUI `IMAGE` tensor (issue #61 P-D `mode="entropy"`): same `(batch,
+    H, W, C)` float32-in-`[0,1]`, channels-last, grayscale-broadcast shape
+    as `_heatmap_to_image`, but entropy has no fixed `[0, 1]` range (its
+    ceiling is `ln(vocab)`, not captured on the frame) — so this function
+    min-max normalizes the grid to `[0, 1]` PER RENDER before wrapping.
+    This is a per-image display scaling, not a claim about an absolute
+    entropy scale: two renders' pixel intensities are NOT comparable across
+    different traces (each is normalized against its own min/max), only
+    within one rendered image. A degenerate all-equal grid (max == min,
+    e.g. a single-frame trace or a fully-converged run with zero entropy
+    spread) normalizes to all-zero rather than dividing by zero.
+    """
+    if not heatmap or not heatmap[0]:
+        return torch.zeros((1, 1, 1, 3), dtype=torch.float32)
+    grid = torch.tensor(heatmap, dtype=torch.float32)  # (H, W), nats
+    grid_min, grid_max = grid.min(), grid.max()
+    spread = grid_max - grid_min
+    normalized = torch.zeros_like(grid) if spread == 0 else (grid - grid_min) / spread
+    return normalized.unsqueeze(0).unsqueeze(-1).expand(1, *normalized.shape, 3).contiguous()
 
 
 def _format_summary(trace, curve: list[float], corroboration) -> str:
@@ -108,9 +146,19 @@ def _format_summary(trace, curve: list[float], corroboration) -> str:
 
 
 class DGemmaTrace:
-    """Renders a complete `CANVAS_TRACE` as a commit-state heatmap `IMAGE`
-    plus a `STRING` summary of the avalanche curve and mask-token
-    corroboration."""
+    """Renders a complete `CANVAS_TRACE` as a heatmap `IMAGE` plus a
+    `STRING` summary of the avalanche curve and mask-token corroboration.
+
+    `mode` (issue #61 P-D) selects which per-position signal the heatmap
+    renders: `"commit"` (default, unchanged from pre-P-D behavior) is
+    `build_commit_heatmap`'s changed/unchanged diff over consecutive
+    `frame.canvas` snapshots; `"entropy"` is `build_entropy_heatmap`'s
+    Tier-0 per-position predictive entropy (ADR-CDG-014), continuous rather
+    than 0/1, min-max normalized per render for display
+    (`_entropy_heatmap_to_image`'s docstring). Both modes share the same
+    `cell_px` upscale widget and the same STRING summary (the avalanche
+    curve / mask-token corroboration do not depend on which heatmap mode is
+    selected)."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -120,9 +168,16 @@ class DGemmaTrace:
                 # Nearest-neighbor upscale factor (operator finding,
                 # 2026-07-05: a raw steps×positions map — 256×11 observed —
                 # is unreadably small). Threads straight through to
-                # `build_commit_heatmap(scale=...)`; the scaling math is
-                # engine-side (ADR-CDG-003), this widget is pure unpack.
+                # `build_commit_heatmap`/`build_entropy_heatmap`'s own
+                # `scale=...`; the scaling math is engine-side
+                # (ADR-CDG-003), this widget is pure unpack.
                 "cell_px": ("INT", {"default": 6, "min": 1, "max": 32}),
+                # ADR-CDG-014 issue #61 P-D: which per-position signal the
+                # heatmap IMAGE renders. Default "commit" is byte-identical
+                # to every pre-P-D graph (no widget on an older saved graph
+                # resolves to this same default, mirroring `cell_px`'s own
+                # default-parity contract, `test_render_defaults_cell_px_to_6`).
+                "mode": (["commit", "entropy"], {"default": "commit"}),
             }
         }
 
@@ -131,11 +186,18 @@ class DGemmaTrace:
     FUNCTION = "render"
     CATEGORY = "DiffusionGemma"
 
-    def render(self, canvas_trace, cell_px: int = 6):
-        heatmap = build_commit_heatmap(canvas_trace, scale=cell_px)
+    def render(self, canvas_trace, cell_px: int = 6, mode: str = "commit"):
         curve = build_avalanche_curve(canvas_trace)
         corroboration = corroborate_no_mask_token(canvas_trace)
 
-        image = _heatmap_to_image(heatmap)
+        if mode == "entropy":
+            heatmap = build_entropy_heatmap(canvas_trace, scale=cell_px)
+            image = _entropy_heatmap_to_image(heatmap)
+        elif mode == "commit":
+            heatmap = build_commit_heatmap(canvas_trace, scale=cell_px)
+            image = _heatmap_to_image(heatmap)
+        else:
+            raise ValueError(f"DGemmaTrace: unknown mode {mode!r}, expected 'commit' or 'entropy'.")
+
         summary = _format_summary(canvas_trace, curve, corroboration)
         return (image, summary)
