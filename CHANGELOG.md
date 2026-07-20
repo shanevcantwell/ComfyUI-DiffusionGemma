@@ -4,6 +4,29 @@ This changelog starts at 0.3.0 — no retroactive entries for earlier releases.
 
 All notable user-facing changes to this project are documented here.
 
+## [Unreleased] — 2026-07-19
+### Added
+- Declarative doors end-to-end: constraints/pins, control-signal walker, capture tiers 0–2 + full DISTRIBUTION.
+- `KV_CACHE` surfaces (`DGemmaEncode`/`DGemmaDenoise` + socket; decoder-drive pending).
+- MCP `generate` widened: constraints/control_signals/capture; `run_id` cancel.
+- `DGemmaTokenTrace` (closes #11).
+- `DGemmaTrace` entropy mode.
+- β-rebuild composite slot.
+- Sampler terms-and-units mint (widget tooltips + MCP schema descriptions + contract docstrings).
+- ARCHITECTURE data-boundary crossing discipline.
+
+### Changed
+- ROADMAP Track B status column + runnable-today notes.
+- concept.md seam inventory reconciled.
+- test-coverage-plan.md rewritten (100%/100% on run-landed files).
+
+### Fixed
+- Stale live-seam sampler arity test.
+- Stale walker docstring.
+
+### Known
+- #110 (`t_min==t_max` ingress vs ADR-CDG-011 clause; strict-xfail pre-registered).
+
 ## [0.3.1] — 2026-07-14
 ### Documentation
 - Measurement-validity callout: per-step telemetry (`committed_fraction`, the commit
