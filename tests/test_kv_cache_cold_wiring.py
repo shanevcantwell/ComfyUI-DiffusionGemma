@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import torch
 
-from dgemma.loop import DEFAULT_ENTROPY_BOUND, DEFAULT_NUM_INFERENCE_STEPS, DEFAULT_T_MAX, DEFAULT_T_MIN
+from dgemma.loop import DEFAULT_ENTROPY_BOUND, DEFAULT_T_MAX, DEFAULT_T_MIN
 from dgemma.types import DGemmaModel
 from surfaces.comfyui.denoise import DGemmaDenoise
 from surfaces.comfyui.encode import DGemmaEncode
