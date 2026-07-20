@@ -516,6 +516,19 @@ class FakeDynamicCache:
     def get_seq_length(self, layer_idx: int = 0) -> int:
         return self.key_cache[layer_idx].shape[2]
 
+    def append(self, num_new_tokens: int) -> None:
+        """Grows every layer's seq_len dim by `num_new_tokens` — the fake's
+        stand-in for the real `DynamicLayer.update()` cache-write
+        (`cache_utils.py:254`) `encode_sequence`'s wrapped encoder call
+        triggers. Zero-valued appended tensors: this fake exists to exercise
+        shape/bookkeeping (cumulative_length growth), not numerical content."""
+        for i, key in enumerate(self.key_cache):
+            batch, heads, _, head_dim = key.shape
+            extra = torch.zeros((batch, heads, num_new_tokens, head_dim), dtype=key.dtype, device=key.device)
+            self.key_cache[i] = torch.cat([key, extra], dim=2)
+            value = self.value_cache[i]
+            self.value_cache[i] = torch.cat([value, extra.clone()], dim=2)
+
 
 class FakeDGemmaModelConfig:
     """Exposes the `.config` surface `geometry_from_model`
@@ -549,14 +562,83 @@ class FakeDGemmaModelConfig:
         }
 
 
+@dataclass
+class _FakeEncoderOutput:
+    """Mirrors `BaseModelOutputWithPast`'s `.past_key_values` access
+    `dgemma.kv_cache.encode_sequence` reads off the real encoder's forward
+    output (`modeling_diffusion_gemma.py:1156`)."""
+
+    past_key_values: Any
+
+
+class _FakeEncoderModel:
+    """Mirrors `DiffusionGemmaEncoderModel.forward`'s cache-advancing surface
+    (`modeling_diffusion_gemma.py:1082-1160`) at exactly the seam
+    `dgemma.kv_cache.encode_sequence` touches: consumes `input_ids`
+    (+ `past_key_values`/`position_ids`, accepted but not shape-checked
+    against `position_ids` by this fake), grows the passed-in
+    `FakeDynamicCache` by `input_ids.shape[-1]` new positions per layer (or
+    mints a fresh one sized to `num_hidden_layers` when `past_key_values` is
+    `None`), and returns a `_FakeEncoderOutput` carrying the advanced cache —
+    same object identity as the input cache when one was given (the real
+    encoder's `past_key_values.update()` also mutates in place; `encode_sequence`'s
+    own docstring is explicit that IT treats the KVCache payload as logically
+    read-only, which is a property of `encode_sequence`'s wrapping, not of the
+    underlying transformers cache-mutation semantics this fake mirrors
+    faithfully)."""
+
+    def __init__(self, num_hidden_layers: int) -> None:
+        self.num_hidden_layers = num_hidden_layers
+
+    def __call__(
+        self,
+        *,
+        input_ids: torch.Tensor,
+        past_key_values: "FakeDynamicCache | None" = None,
+        position_ids: torch.Tensor | None = None,
+    ) -> _FakeEncoderOutput:
+        num_new_tokens = input_ids.shape[-1]
+        if past_key_values is None:
+            cache = FakeDynamicCache(num_layers=self.num_hidden_layers, seq_len=0)
+        else:
+            cache = past_key_values
+        cache.append(num_new_tokens)
+        return _FakeEncoderOutput(past_key_values=cache)
+
+
+class _FakeDiffusionGemmaModel:
+    """Mirrors the inner `DiffusionGemmaModel` (`modeling_diffusion_gemma.py:1490-1496`,
+    `self.encoder = DiffusionGemmaEncoderModel(...)`) — the `.model.model.encoder`
+    hop `dgemma.kv_cache.encode_sequence` calls through, grounded against the
+    real `DiffusionGemmaForBlockDiffusion.model.encoder` path."""
+
+    def __init__(self, config: FakeDGemmaModelConfig) -> None:
+        self.encoder = _FakeEncoderModel(config.num_hidden_layers)
+
+
 class _FakeInnerModel:
+    """Mirrors the top-level `DiffusionGemmaForBlockDiffusion`: `.config`
+    (every `PreTrainedModel` exposes this — Phase 1's `geometry_from_model`/
+    ingress reads already ground on `dgemma_model.model.config`) plus `.model`
+    (the inner `DiffusionGemmaModel`, Phase 3's `.model.model.encoder` hop)."""
+
     def __init__(self, config: FakeDGemmaModelConfig) -> None:
         self.config = config
+        self.model = _FakeDiffusionGemmaModel(config)
 
 
 class _FakeTokenizer:
     def __init__(self, vocab_size: int = 32) -> None:
         self.vocab_size = vocab_size
+
+    def encode(self, text: str) -> list[int]:
+        """Deterministic stand-in for `PreTrainedTokenizerBase.encode` (the
+        real call `surfaces/comfyui/encode.py`'s `DGemmaEncode` uses) — one
+        id per character's ordinal, mod `vocab_size` so it never produces an
+        out-of-range id regardless of input text. Not a real tokenization;
+        exists so `DGemmaEncode`'s node body has SOME deterministic
+        `text -> ids` mapping to drive `encode_sequence` in tests."""
+        return [ord(ch) % self.vocab_size for ch in text] or [0]
 
 
 class _FakeProcessor:
@@ -573,10 +655,11 @@ def fake_dgemma_model(
     dtype: str = "bfloat16",
     device: str = "cpu",
 ) -> DGemmaModel:
-    """Builds a `DGemmaModel` whose `.model.config` and `.processor` expose
-    exactly the surface `dgemma.kv_cache.geometry_from_model` /
-    `tokenizer_fingerprint` / `validate_kv_cache_ingress` read — the fake
-    twin of a real `load_model()` result, sized for a unit test."""
+    """Builds a `DGemmaModel` whose `.model.config`, `.model.model.encoder`,
+    and `.processor` expose exactly the surface
+    `dgemma.kv_cache.geometry_from_model` / `tokenizer_fingerprint` /
+    `validate_kv_cache_ingress` / `encode_sequence` read — the fake twin of a
+    real `load_model()` result, sized for a unit test."""
     config = FakeDGemmaModelConfig(num_hidden_layers=num_hidden_layers, sliding_window=sliding_window)
     return DGemmaModel(
         model=_FakeInnerModel(config),
