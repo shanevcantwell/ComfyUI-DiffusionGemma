@@ -117,12 +117,12 @@ class CaptureSpec:
     top-k derivation + ingress only).
 
     Tier 2 fields (`capture_full_distribution`/`max_full_distribution_steps`,
-    ADR-CDG-014 Decision 3's Tier-2 row) are deliberately NOT added yet —
-    P-C's scope, landing once the budget-reject ingress design for the full
-    per-position distribution is implemented. Adding an inert Tier-2 knob now
-    would let a caller believe an opt-in they set has any effect, which is
-    the same lying-payload shape ADR-CDG-001 forbids applied to an unbuilt
-    feature instead of a captured value.
+    ADR-CDG-014 Decision 3's Tier-2 row) land in this phase (P-C): the full
+    per-position distribution is EXPLICIT opt-in WITH A BUDGET — an
+    unbounded request is rejected at ingress (`dgemma.ingress.
+    validate_capture`), never silently honored, per the ADR's load-bearing
+    clause (Decision 3 Tier 2, "an unbounded full-distribution request is
+    rejected at ingress, never silently honored").
     """
 
     top_k: int = 0
@@ -140,6 +140,39 @@ class CaptureSpec:
     gate-ratified recommendation when a caller opts Tier 1 on at all (issue
     #61 design-gate comment, 2026-07-13) is k=16 — a caller's own choice
     (`CaptureSpec(top_k=16)`), not this field's default."""
+
+    capture_full_distribution: bool = False
+    """Tier 2 knob (ADR-CDG-014 Decision 3's Tier-2 row, issue #61 P-C):
+    explicit opt-in for the full per-position distribution
+    (`softmax(logits)`, `float32[canvas_len, vocab]`, ~134 MB/step). `False`
+    (this field's default) is OFF — `DiffusionFrame.distribution` stays
+    `None` on every frame (additive-optional absence, Decision 1/2),
+    byte-identical to every run before this phase. Requesting Tier 2
+    (`True`) WITHOUT also supplying `max_full_distribution_steps` is rejected
+    at ingress (`dgemma.ingress.validate_capture`) — the load-bearing clause
+    that prevents a 48 GB box dying mid-run because a ~6.4 GB/canvas heavy
+    field defaulted on or was requested unbounded (rule 5, `EMIT-CANONICAL /
+    PARSE-AT-THE-DOOR` — reject the unbounded ask, never silently OOM)."""
+
+    max_full_distribution_steps: int | None = None
+    """Tier 2's budget (ADR-CDG-014 Decision 3/5): the maximum number of
+    steps for which `DiffusionFrame.distribution` is actually retained this
+    run. `None` (this field's default) means "no budget declared" — paired
+    with `capture_full_distribution=True` this is the unbounded-request
+    shape ingress rejects; paired with `capture_full_distribution=False`
+    (the common case) it is inert, matching every run that never touches
+    Tier 2. When `capture_full_distribution=True`, must be a positive int:
+    `0`/negative is rejected (a zero-or-negative budget can never retain
+    anything, which is either a caller mistake or better expressed as
+    `capture_full_distribution=False`). The budget caps *retained* frames
+    under `keep_frames="all"` regardless of `keep_frames` (Decision 5) — the
+    FIRST `max_full_distribution_steps` captured steps (in step order) are
+    the ones that carry a populated `distribution`; every step beyond the
+    budget carries `distribution=None`, the same absence semantics as Tier 2
+    being off entirely for that step. `on_frame` still sees every frame's
+    `distribution` live when Tier 2 is on (a streaming consumer that does
+    not retain gets the full stream, Decision 5) — only what the retained
+    `CanvasTrace` keeps is budget-limited."""
 
     keep_frames: Literal["last", "all"] = "all"
     """Validated (`dgemma.ingress.validate_capture`, issue #64 P1) but not
