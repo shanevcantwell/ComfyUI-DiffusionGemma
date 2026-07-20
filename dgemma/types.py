@@ -57,8 +57,9 @@ class DiffusionFrame:
         temperature = t_min + (t_max - t_min) * fraction
 
     `t` is that `fraction`: DIMENSIONLESS, the normalized position in the
-    schedule — 1.0 at the hottest (first) step, DECREASING toward (but not
-    reaching exactly) `1/num_inference_steps` at the last step. Despite the
+    schedule — 1.0 at the hottest (first) step, DECREASING to
+    `1/num_inference_steps` at the last step (`step_idx == num_inference_steps
+    - 1`, reached exactly) — never reaching 0. Despite the
     letter, `t` is a schedule POSITION, not a temperature (see `KNOB_DOCS`,
     `dgemma/loop.py`, for the full terms-and-units vocabulary this pack mints
     once). `temperature` is the resulting annealed sampling temperature: the

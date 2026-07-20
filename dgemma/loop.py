@@ -288,8 +288,9 @@ DEFAULT_CONFIDENCE = 0.005
 #   candidate sampling and the acceptance-entropy computation — there is no
 #   second, independently-tunable temperature hiding downstream of it.
 # - `t` (schedule position — NOT a temperature, despite the shared letter) is
-#   `(N - step_idx) / N`: dimensionless, DECREASING from 1 down toward (but
-#   never reaching) `1/N` as `step_idx` runs 0..N-1. See `anneal_temperature`
+#   `(N - step_idx) / N`: dimensionless, DECREASING from 1 down to `1/N`
+#   (reached exactly at the last step, `step_idx == N-1`) — toward but never
+#   reaching 0 — as `step_idx` runs 0..N-1. See `anneal_temperature`
 #   above for the exact formula this recomputes.
 # - `t_min`/`t_max` are TEMPERATURE endpoints (config knobs), not schedule
 #   positions, despite the lowercase-`t` naming: `T = t_min + (t_max -
