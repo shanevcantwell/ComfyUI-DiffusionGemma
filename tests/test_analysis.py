@@ -12,12 +12,20 @@ from consumers.analysis import (
     MaskTokenCorroboration,
     build_avalanche_curve,
     build_commit_heatmap,
+    build_entropy_heatmap,
+    build_token_identity_grid,
     corroborate_no_mask_token,
 )
 from dgemma.types import CanvasTrace, DiffusionFrame
 
 
-def _frame(canvas_idx: int, step_idx: int, canvas_row: list[int], committed_fraction: float) -> DiffusionFrame:
+def _frame(
+    canvas_idx: int,
+    step_idx: int,
+    canvas_row: list[int],
+    committed_fraction: float,
+    entropy_row: list[float] | None = None,
+) -> DiffusionFrame:
     return DiffusionFrame(
         canvas_idx=canvas_idx,
         step_idx=step_idx,
@@ -25,6 +33,7 @@ def _frame(canvas_idx: int, step_idx: int, canvas_row: list[int], committed_frac
         temperature=0.5,
         committed_fraction_per_example=(committed_fraction,),
         canvas=torch.tensor([canvas_row], dtype=torch.long),
+        entropy=None if entropy_row is None else torch.tensor(entropy_row, dtype=torch.float32),
     )
 
 
@@ -129,6 +138,131 @@ class TestBuildAvalancheCurve:
         curve = build_avalanche_curve(trace)
 
         assert curve == [0.1, 0.4, 1.0]
+
+
+class TestBuildEntropyHeatmap:
+    """ADR-CDG-014 issue #61 P-D: `build_entropy_heatmap` reads the real
+    Tier-0 `frame.entropy` measurement, not a canvas-diff proxy."""
+
+    def test_shape_and_hand_computed_values(self):
+        frames = [
+            _frame(0, 0, [1, 2, 3], 0.0, entropy_row=[0.1, 0.2, 0.3]),
+            _frame(0, 1, [1, 5, 3], 0.33, entropy_row=[0.4, 0.5, 0.6]),
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        heatmap = build_entropy_heatmap(trace)
+
+        assert len(heatmap) == 2
+        assert heatmap[0] == pytest.approx([0.1, 0.2, 0.3])
+        assert heatmap[1] == pytest.approx([0.4, 0.5, 0.6])
+
+    def test_scale_1_is_the_identity(self):
+        frames = [_frame(0, 0, [1, 2], 1.0, entropy_row=[0.1, 0.2])]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        assert build_entropy_heatmap(trace, scale=1) == build_entropy_heatmap(trace)
+        assert build_entropy_heatmap(trace, scale=1)[0] == pytest.approx([0.1, 0.2])
+
+    def test_scale_upscales_nearest_neighbor_on_both_axes(self):
+        frames = [
+            _frame(0, 0, [1, 2], 0.0, entropy_row=[1.0, 2.0]),
+            _frame(0, 1, [1, 5], 0.5, entropy_row=[3.0, 4.0]),
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        heatmap = build_entropy_heatmap(trace, scale=3)
+
+        assert len(heatmap) == 2 * 3
+        assert all(len(row) == 2 * 3 for row in heatmap)
+        assert heatmap[0] == heatmap[1] == heatmap[2] == [1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+        assert heatmap[3] == heatmap[4] == heatmap[5] == [3.0, 3.0, 3.0, 4.0, 4.0, 4.0]
+
+    def test_scale_below_1_raises(self):
+        trace = CanvasTrace(
+            frames=[_frame(0, 0, [1], 1.0, entropy_row=[0.1])],
+            scheduler_name="TestScheduler",
+            scheduler_config={},
+        )
+        with pytest.raises(ValueError, match="scale must be >= 1"):
+            build_entropy_heatmap(trace, scale=0)
+
+    def test_empty_trace_returns_empty_list_without_touching_entropy(self):
+        """No frames means nothing to raise on — matches
+        `build_commit_heatmap`'s existing empty-trace handling."""
+        trace = CanvasTrace(frames=[], scheduler_name="TestScheduler", scheduler_config={})
+
+        assert build_entropy_heatmap(trace) == []
+
+    def test_none_entropy_raises_absence_is_not_zero(self):
+        """ADR-CDG-014 Decision 2: a `None` entropy field means "not
+        captured this run" — reading it as zero-entropy would be the
+        ADR-CDG-001 lying-payload trap. This is the mutation-worthy
+        invariant: removing the `None` guard below would silently let
+        `frame.entropy.tolist()` raise an unrelated `AttributeError`
+        instead of this named, documented `ValueError`."""
+        frames = [_frame(0, 0, [1, 2], 1.0, entropy_row=None)]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        with pytest.raises(ValueError, match="frame.entropy is None"):
+            build_entropy_heatmap(trace)
+
+    def test_first_frame_missing_entropy_raises_even_if_later_frames_have_it(self):
+        """The guard checks EVERY frame, not just the first — a partially
+        captured trace (e.g. logits went unreachable mid-run) must not
+        silently skip the offending frame."""
+        frames = [
+            _frame(0, 0, [1, 2], 1.0, entropy_row=[0.1, 0.2]),
+            _frame(0, 1, [1, 2], 1.0, entropy_row=None),
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        with pytest.raises(ValueError, match="frame.entropy is None"):
+            build_entropy_heatmap(trace)
+
+
+class TestBuildTokenIdentityGrid:
+    """ADR-CDG-014 issue #61 P-D / issue #11: `build_token_identity_grid`
+    is a direct unpack of already-raw per-step `frame.canvas` snapshots —
+    the raw token id itself, not a changed/unchanged diff."""
+
+    def test_shape_and_hand_computed_values(self):
+        frames = [
+            _frame(0, 0, [10, 20, 30], 0.0),
+            _frame(0, 1, [10, 25, 30], 0.33),
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        grid = build_token_identity_grid(trace)
+
+        assert grid == [[10, 20, 30], [10, 25, 30]]
+
+    def test_unlike_commit_heatmap_first_frame_is_not_special_cased(self):
+        """`build_commit_heatmap` reports the first frame of a block as
+        all-1 (nothing locked in yet); `build_token_identity_grid` has no
+        such special case — it is a raw unpack, so the very first frame's
+        row is exactly its own canvas ids, not a sentinel."""
+        frames = [_frame(0, 0, [7, 8, 9], 1.0)]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        assert build_token_identity_grid(trace) == [[7, 8, 9]]
+
+    def test_empty_trace_returns_empty_list(self):
+        trace = CanvasTrace(frames=[], scheduler_name="TestScheduler", scheduler_config={})
+
+        assert build_token_identity_grid(trace) == []
+
+    def test_new_canvas_idx_is_not_diffed_across_blocks(self):
+        """No block-boundary special-casing needed at all (unlike
+        `build_commit_heatmap`) — each row is independently that frame's
+        own canvas, regardless of `canvas_idx` changes between rows."""
+        frames = [
+            _frame(0, 0, [1, 2], 1.0),
+            _frame(1, 0, [1, 2], 0.0),  # new block, identical ids
+        ]
+        trace = CanvasTrace(frames=frames, scheduler_name="TestScheduler", scheduler_config={})
+
+        assert build_token_identity_grid(trace) == [[1, 2], [1, 2]]
 
 
 class TestCorroborateNoMaskToken:

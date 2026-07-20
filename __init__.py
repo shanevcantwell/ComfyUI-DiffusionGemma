@@ -20,7 +20,14 @@ trap-prone `.txt` step-log convention `consumers/tally_audit.py`'s
 `KV_CACHE` seam's node pair — mint/advance a `DGEMMA_KV_CACHE` payload from
 text, and optionally consume one to condition a run (the decoder is not yet
 driven off the injected cache's tensors — Phase 4, gated on the ADR's
-real-weights de-risk smoke test).
+real-weights de-risk smoke test). `DGemmaTokenTrace` (ADR-CDG-014, issue #61
+P-D / issue #11) is the raw-pre-excision-ids debug node — thin wrap over
+`consumers/analysis.py`'s `build_token_identity_grid` plus
+`CanvasTrace.raw_canvas_ids`, same composition pattern as
+`DGemmaTrace`/`DGemmaTallyAudit`. `DGemmaTrace` itself gained a `mode`
+widget this phase (`"commit"` default | `"entropy"`) selecting between
+`build_commit_heatmap` and the new `build_entropy_heatmap` (Tier-0
+per-position predictive entropy) as the rendered heatmap `IMAGE`'s source.
 
 ComfyUI discovers a custom node pack by importing this module and reading
 NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS (+ `WEB_DIRECTORY`, checked
@@ -50,6 +57,7 @@ if __package__:
     from .surfaces.comfyui.run_log_writer import DGemmaRunLogWriter
     from .surfaces.comfyui.sampler import DGemmaSampler
     from .surfaces.comfyui.tally_audit import DGemmaTallyAudit
+    from .surfaces.comfyui.token_trace import DGemmaTokenTrace
     from .surfaces.comfyui.trace import DGemmaTrace
 else:
     from surfaces.comfyui.denoise import DGemmaDenoise
@@ -58,6 +66,7 @@ else:
     from surfaces.comfyui.run_log_writer import DGemmaRunLogWriter
     from surfaces.comfyui.sampler import DGemmaSampler
     from surfaces.comfyui.tally_audit import DGemmaTallyAudit
+    from surfaces.comfyui.token_trace import DGemmaTokenTrace
     from surfaces.comfyui.trace import DGemmaTrace
 
 NODE_CLASS_MAPPINGS: dict = {
@@ -68,6 +77,7 @@ NODE_CLASS_MAPPINGS: dict = {
     "DGemmaRunLogWriter": DGemmaRunLogWriter,
     "DGemmaEncode": DGemmaEncode,
     "DGemmaDenoise": DGemmaDenoise,
+    "DGemmaTokenTrace": DGemmaTokenTrace,
 }
 NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaLoader": "DiffusionGemma Loader",
@@ -77,6 +87,7 @@ NODE_DISPLAY_NAME_MAPPINGS: dict = {
     "DGemmaRunLogWriter": "DiffusionGemma Run Log Writer",
     "DGemmaEncode": "DiffusionGemma Encode (KV Cache)",
     "DGemmaDenoise": "DiffusionGemma Denoise (KV Cache)",
+    "DGemmaTokenTrace": "DiffusionGemma Token Trace",
 }
 
 # P3 (a): the live per-step view (`surfaces/comfyui/web/live_view.js`).

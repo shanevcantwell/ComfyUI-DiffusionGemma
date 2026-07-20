@@ -21,14 +21,18 @@ Working data note: `DiffusionFrame` (dgemma/types.py) carries the *aggregate*
 `committed_fraction_per_example` per step, not a per-position commit mask —
 the scheduler's raw `accepted_index` tensor is read once in
 `_FrameCollector.on_step_end` and reduced to a mean; it is not retained
-per-frame. Every function below that needs a per-position signal (the
-heatmap, the mask-token corroboration) therefore derives one from consecutive
-`frame.canvas` snapshots — "did this position's token id change since the
-previous frame" — rather than from a stored mask that doesn't exist. This is
-the forced reading of plan.md step 3's "entropy or commit-state per cell":
-no per-position entropy is captured either, so commit-state (via canvas
-diffing) is the only signal available, not an arbitrary pick between two
-equally-available options.
+per-frame. `build_commit_heatmap`/`corroborate_no_mask_token` therefore
+derive a per-position signal from consecutive `frame.canvas` snapshots —
+"did this position's token id change since the previous frame" — rather
+than from a stored mask that doesn't exist. This was, at the time those two
+functions were written, the only per-position signal available (no
+per-position entropy was captured yet); ADR-CDG-014 (issue #61) has since
+landed genuine per-position `entropy`/`top_k_ids`/`top_k_weights`/
+`distribution` capture on the frame (Tiers 0-2) — `build_entropy_heatmap`
+below reads the real Tier-0 measurement rather than a canvas-diff proxy.
+`build_token_identity_grid` (issue #11, P-D) is a third per-position view:
+the raw token id itself (not a diff, not an entropy value), straight off
+the same already-raw `frame.canvas` snapshots.
 
 Batch scope, stated rather than implied (review note, 2026-07-05): every
 function here reads example 0 of each frame's canvas only
@@ -111,6 +115,78 @@ def build_commit_heatmap(trace: CanvasTrace, scale: int = 1) -> list[list[int]]:
         for row in rows
         for _ in range(scale)  # tallen: each row -> scale rows
     ]
+
+
+def build_entropy_heatmap(trace: CanvasTrace, scale: int = 1) -> list[list[float]]:
+    """2D array, one row per frame in `trace.frames` order, one column per
+    canvas position — the Tier-0 DISTRIBUTION-seam sibling of
+    `build_commit_heatmap` (ADR-CDG-014 issue #61 P-D). Cell value is that
+    position's captured `frame.entropy[position]` (a `float`, nats — the
+    natural-log base `torch.distributions.Categorical.entropy()` uses), NOT
+    a 0/1 diff flag: entropy is a continuous per-position measurement, so
+    this heatmap's cells ARE the measurement, unlike the commit heatmap's
+    derived "did this change" boolean.
+
+    Raises `ValueError` if `trace.frames` is non-empty and any frame's
+    `entropy` is `None` — ADR-CDG-014 Decision 2's absence-vs-empty
+    discipline: `None` means "Tier 0 was not captured this run" (e.g. a
+    legacy trace, or a `logits`-unreachable run), and reading it as
+    zero-entropy would be exactly the ADR-CDG-001 lying-payload trap this
+    function must not commit. A consumer that wants a heatmap MUST have a
+    Tier-0-capturing trace; there is no honest degraded rendering of an
+    absent measurement (contrast `build_commit_heatmap`, which derives its
+    signal from `frame.canvas` — always present — so it has nothing to be
+    absent). Empty `trace.frames` returns `[]` without touching `entropy`,
+    matching `build_commit_heatmap`'s and `_heatmap_to_image`'s existing
+    empty-trace handling.
+
+    `scale` — identical nearest-neighbor upscale contract as
+    `build_commit_heatmap` (operator finding, 2026-07-05): raises
+    `ValueError` for `scale < 1`; `scale=1` (default) is the identity.
+    """
+    if scale < 1:
+        raise ValueError(f"scale must be >= 1, got {scale!r}.")
+    rows: list[list[float]] = []
+    for frame in trace.frames:
+        if frame.entropy is None:
+            raise ValueError(
+                "build_entropy_heatmap: frame.entropy is None — Tier 0 entropy was not "
+                "captured this run (ADR-CDG-014 Decision 2: absence is not zero-entropy). "
+                "Re-run with logits reachable, or use build_commit_heatmap for a trace "
+                "without Tier 0 capture."
+            )
+        row = [float(value) for value in frame.entropy.tolist()]
+        rows.append(row)
+    if scale == 1:
+        return rows
+    return [
+        [cell for cell in row for _ in range(scale)]  # widen: each cell -> scale columns
+        for row in rows
+        for _ in range(scale)  # tallen: each row -> scale rows
+    ]
+
+
+def build_token_identity_grid(trace: CanvasTrace) -> list[list[int]]:
+    """2D array, one row per frame in `trace.frames` order (keyed on each
+    frame's own `(canvas_idx, step_idx, t, temperature)` identity, per
+    `DiffusionFrame`'s docstring), one column per canvas position — the raw
+    per-position TOKEN ID held at that step, batch index 0 (single-example
+    scope, module docstring). This is issue #11's token-identity view: the
+    per-step `frame.canvas` snapshots are already raw/pre-excision
+    (`decode_frames`'s own "no excision" contract), so this function is a
+    direct unpack, not a derived signal — contrast `build_commit_heatmap`,
+    which reduces the same snapshots to a changed/unchanged diff.
+
+    Deliberately returns raw integer ids, not decoded text: decoding needs a
+    tokenizer, and this module stays tokenizer-free (module docstring,
+    ADR-CDG-003) — the same reason `dgemma.loop.decode_frames` (not this
+    module) owns text decoding. A decoded-token rendering is a surface-side
+    concern for whichever adapter has the model's processor (mirrors how
+    `consumers/tally_audit.py` takes already-decoded strings rather than
+    decoding itself).
+
+    `[]` for an empty trace."""
+    return [frame.canvas[0].tolist() for frame in trace.frames]
 
 
 def build_avalanche_curve(trace: CanvasTrace) -> list[float]:

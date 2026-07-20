@@ -27,6 +27,7 @@ from surfaces.comfyui.denoise import DGemmaDenoise
 from surfaces.comfyui.encode import DGemmaEncode
 from surfaces.comfyui.loader import DGemmaLoader
 from surfaces.comfyui.sampler import DGemmaSampler
+from surfaces.comfyui.token_trace import DGemmaTokenTrace
 from surfaces.comfyui.trace import DGemmaTrace
 
 _MINTED = {
@@ -128,6 +129,10 @@ def test_live_node_sockets_are_drawn_from_the_mint():
     trace_canvas_socket = trace_input["required"]["canvas_trace"][0]
     trace_values = _dgemma_values(trace_canvas_socket)
 
+    token_trace_input = DGemmaTokenTrace.INPUT_TYPES()
+    token_trace_canvas_socket = token_trace_input["required"]["canvas_trace"][0]
+    token_trace_values = _dgemma_values(token_trace_canvas_socket)
+
     encode_input = DGemmaEncode.INPUT_TYPES()
     encode_model_socket = encode_input["required"]["model"][0]
     encode_kv_cache_socket = encode_input["optional"]["kv_cache"][0]
@@ -141,7 +146,12 @@ def test_live_node_sockets_are_drawn_from_the_mint():
     )
 
     all_live_values = (
-        loader_values | sampler_values | trace_values | encode_values | denoise_values
+        loader_values
+        | sampler_values
+        | trace_values
+        | token_trace_values
+        | encode_values
+        | denoise_values
     )
     assert all_live_values, "expected at least one DGEMMA_* socket among the live nodes"
     assert all_live_values <= _MINTED, (
