@@ -41,7 +41,8 @@ instrument can exist:
 Two consequences follow directly, and both are the seed of everything else here:
 
 1. **The noise is the maximum-entropy state of the token space itself.** A
-   uniform draw over 262,144 tokens is 18 bits per position, and because the
+   uniform draw over 262,144 tokens is 18 bits per position (≈12.48 nats; the
+   scheduler's `entropy_bound` is denominated in nats), and because the
    Gemma vocabulary is multilingual, that noise renders as a polyglot cascade —
    katakana, Bengali, CJK, reserved `<unused>` tokens — not as a monotonous
    field of one sentinel. What you see in the early flipbook frames is not

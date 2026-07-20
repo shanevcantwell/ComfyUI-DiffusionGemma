@@ -267,6 +267,101 @@ DEFAULT_ENTROPY_BOUND = 0.1
 DEFAULT_GEN_LENGTH = 256
 DEFAULT_CONFIDENCE = 0.005
 
+# ONE-MINT terms-and-units vocabulary (units-glossary-tooltips work item):
+# every knob's units/semantics live HERE, once, and every door that surfaces
+# a knob — ComfyUI widget tooltips (`surfaces/comfyui/sampler.py`), the MCP
+# `generate`/`load_model` JSON-schema `description`s (`surfaces/mcp/commands/
+# generate.py`, `surfaces/mcp/commands/model.py`) — imports and re-uses this
+# text rather than re-typing it (rule-8 parity by construction: two doors
+# describing one knob can't drift apart if there is only one string). This is
+# the doctrine's `EMIT-CANONICAL` discipline applied to prose, not just
+# payloads: a tooltip and a schema description are two renderings of the same
+# canonical fact, not two independent claims that happen to agree today.
+#
+# Provenance for the units claims themselves (authoritative, transcribed from
+# the operator's terms-and-units brief, not re-derived here):
+#
+# - `T` (sampling temperature — the WIDGET value users think of as "the
+#   temperature") is the divisor in `softmax(z / T)`: a dimensionless scale
+#   factor on the model-native logit calibration, `T=1` reproducing the
+#   trained calibration exactly. Applied ONCE per step, upstream of BOTH
+#   candidate sampling and the acceptance-entropy computation — there is no
+#   second, independently-tunable temperature hiding downstream of it.
+# - `t` (schedule position — NOT a temperature, despite the shared letter) is
+#   `(N - step_idx) / N`: dimensionless, DECREASING from 1 down toward (but
+#   never reaching) `1/N` as `step_idx` runs 0..N-1. See `anneal_temperature`
+#   above for the exact formula this recomputes.
+# - `t_min`/`t_max` are TEMPERATURE endpoints (config knobs), not schedule
+#   positions, despite the lowercase-`t` naming: `T = t_min + (t_max -
+#   t_min) * t` (the affine map `anneal_temperature` evaluates). `t_min` is a
+#   virtual endpoint no real step ever actually applies — `t` bottoms out at
+#   `1/N`, never 0, so the coldest realized temperature is
+#   `t_min + (t_max - t_min) / N`, strictly above `t_min` itself. These field
+#   names come from the upstream `EntropyBoundScheduler` checkpoint config
+#   (`scheduling_entropy_bound.py`) — do NOT rename them to something more
+#   self-describing; that would desync this pack's kwargs from the installed
+#   diffusers scheduler's own `.config` attribute names `_FrameCollector`
+#   reads live (`effective_t_min`/`effective_t_max`, `dgemma/types.py`).
+# - `entropy_bound` is the per-step joint acceptance budget in NATS:
+#   `torch.distributions.Categorical.entropy()` (what this pack's capture
+#   path and the scheduler both use) is natural-log entropy, not bits.
+#   Default `0.1` nats. For scale: the 18-bits-per-position uniform-vocabulary
+#   melt VISION.md opens with is `18 * ln(2) ≈ 12.48` nats — i.e. roughly two
+#   orders of magnitude hotter than the default per-step acceptance budget,
+#   not directly comparable to it (one is the corruption entropy of the
+#   INITIAL canvas draw; the other is a per-step ACCEPTANCE threshold), but
+#   sharing the same nats unit is what makes that comparison meaningful at
+#   all rather than a bits-vs-nats category error.
+# - `confidence` is the pipeline's early-stop threshold: a dimensionless
+#   probability (not a unit-bearing quantity at all).
+KNOB_DOCS: dict[str, str] = {
+    "t_min": (
+        "Cold end of the temperature anneal (dimensionless, applied as the "
+        "divisor T in softmax(z/T)). Despite the lowercase-t name this is a "
+        "TEMPERATURE, not a schedule position — t bottoms out at 1/"
+        "num_inference_steps, so t_min itself is a virtual endpoint no step "
+        "actually reaches. T = t_min + (t_max - t_min) * t, t decreasing 1 -> "
+        "1/num_inference_steps across the run."
+    ),
+    "t_max": (
+        "Hot end of the temperature anneal (dimensionless, same softmax(z/T) "
+        "divisor as t_min) — the temperature applied at the very first step, "
+        "where the schedule position t == 1."
+    ),
+    "entropy_bound": (
+        "Per-step joint acceptance budget, in NATS (natural-log entropy, "
+        "matching torch.distributions.Categorical.entropy() — not bits). "
+        "A position commits this step only once its acceptance entropy "
+        "clears this bound. Default 0.1 nats; for scale, the uniform-vocab "
+        "noise draw's 18 bits/position is ~12.48 nats."
+    ),
+    "confidence": (
+        "Early-stop threshold: a dimensionless probability the pipeline's "
+        "adaptive-stop check compares a candidate's confidence against."
+    ),
+    "num_inference_steps": (
+        "Requested denoising step budget N (a plain count, not a physical "
+        "unit) — the schedule-position denominator: t = (N - step_idx)/N."
+    ),
+    "gen_length": (
+        "Canvas length in tokens (a token count) — how many positions the "
+        "denoising loop allocates for the generated turn."
+    ),
+    "seed": (
+        "RNG seed for the generator driving canvas initialization/renoise "
+        "(a plain integer, not unit-bearing). Omit/leave unset for a "
+        "nondeterministic run."
+    ),
+    "thinking": (
+        "EXPERIMENTAL boolean toggle: injects the <|think|> control token "
+        "via a system turn. Structurally one token short of native "
+        "enable_thinking=True (the chat template's `| trim` eats the "
+        "newline after <|think|>) — see run_diffusion's own docstring for "
+        "the honest gap. Behavioral impact unverified pending an E2E "
+        "thinking-mode run on real weights."
+    ),
+}
+
 # ONE-MINT provenance (issue #8 / model-card "thinking" toggle): these
 # literal strings are the DiffusionGemma tokenizer's control tokens, sourced
 # from `google/diffusiongemma-26B-A4B-it`'s `tokenizer_config.json`

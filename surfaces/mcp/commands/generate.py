@@ -77,6 +77,7 @@ if __package__ and __package__.count(".") >= 3:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        KNOB_DOCS,
         run_diffusion,
     )
     from ....dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
@@ -90,6 +91,7 @@ else:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        KNOB_DOCS,
         run_diffusion,
     )
     from dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
@@ -141,36 +143,38 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "The prompt to generate from"},
-                    "seed": {"type": "integer", "description": "RNG seed (omit for nondeterministic)"},
+                    # Every "description" below is sourced from the ONE-MINT
+                    # KNOB_DOCS vocabulary (`dgemma/loop.py`) — the same text
+                    # `surfaces/comfyui/sampler.py`'s widget tooltips read, so
+                    # the ComfyUI and MCP doors describe each knob identically
+                    # by construction (rule-8 parity), never a re-typed copy
+                    # that can drift.
+                    "seed": {"type": "integer", "description": KNOB_DOCS["seed"]},
                     "gen_length": {
                         "type": "integer",
-                        "description": "Canvas length in tokens",
+                        "description": KNOB_DOCS["gen_length"],
                         "default": DEFAULT_GEN_LENGTH,
                     },
                     "num_inference_steps": {
                         "type": "integer",
-                        "description": "Number of denoising steps",
+                        "description": KNOB_DOCS["num_inference_steps"],
                         "default": DEFAULT_NUM_INFERENCE_STEPS,
                     },
                     "entropy_bound": {
                         "type": "number",
-                        "description": "Per-step commit entropy threshold",
+                        "description": KNOB_DOCS["entropy_bound"],
                         "default": DEFAULT_ENTROPY_BOUND,
                     },
-                    "t_min": {"type": "number", "default": DEFAULT_T_MIN},
-                    "t_max": {"type": "number", "default": DEFAULT_T_MAX},
+                    "t_min": {"type": "number", "description": KNOB_DOCS["t_min"], "default": DEFAULT_T_MIN},
+                    "t_max": {"type": "number", "description": KNOB_DOCS["t_max"], "default": DEFAULT_T_MAX},
                     "confidence": {
                         "type": "number",
-                        "description": "Pipeline confidence_threshold for adaptive early-stop",
+                        "description": KNOB_DOCS["confidence"],
                         "default": DEFAULT_CONFIDENCE,
                     },
                     "thinking": {
                         "type": "boolean",
-                        "description": (
-                            "EXPERIMENTAL: inject the <|think|> control token via a system "
-                            "turn (see dgemma.loop.run_diffusion's docstring for the honest "
-                            "one-token gap versus native enable_thinking=True)."
-                        ),
+                        "description": KNOB_DOCS["thinking"],
                         "default": False,
                     },
                     "run_id": {

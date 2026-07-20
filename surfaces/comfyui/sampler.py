@@ -122,6 +122,7 @@ if __package__ and __package__.count(".") >= 2:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        KNOB_DOCS,
         decode_frames,
         run_diffusion,
     )
@@ -141,6 +142,7 @@ else:
         DEFAULT_NUM_INFERENCE_STEPS,
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
+        KNOB_DOCS,
         decode_frames,
         run_diffusion,
     )
@@ -259,22 +261,73 @@ class DGemmaSampler:
             "required": {
                 "model": (DGEMMA_MODEL,),
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 0xFFFFFFFFFFFFFFFF,
+                        "tooltip": KNOB_DOCS["seed"],
+                    },
+                ),
                 "num_inference_steps": (
                     "INT",
-                    {"default": DEFAULT_NUM_INFERENCE_STEPS, "min": 1, "max": 1024},
+                    {
+                        "default": DEFAULT_NUM_INFERENCE_STEPS,
+                        "min": 1,
+                        "max": 1024,
+                        "tooltip": KNOB_DOCS["num_inference_steps"],
+                    },
                 ),
-                "t_min": ("FLOAT", {"default": DEFAULT_T_MIN, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "t_max": ("FLOAT", {"default": DEFAULT_T_MAX, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "t_min": (
+                    "FLOAT",
+                    {
+                        "default": DEFAULT_T_MIN,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": KNOB_DOCS["t_min"],
+                    },
+                ),
+                "t_max": (
+                    "FLOAT",
+                    {
+                        "default": DEFAULT_T_MAX,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": KNOB_DOCS["t_max"],
+                    },
+                ),
                 "entropy_bound": (
                     "FLOAT",
-                    {"default": DEFAULT_ENTROPY_BOUND, "min": 0.0, "max": 1.0, "step": 0.001},
+                    {
+                        "default": DEFAULT_ENTROPY_BOUND,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.001,
+                        "tooltip": KNOB_DOCS["entropy_bound"],
+                    },
                 ),
                 "confidence": (
                     "FLOAT",
-                    {"default": DEFAULT_CONFIDENCE, "min": 0.0, "max": 1.0, "step": 0.001},
+                    {
+                        "default": DEFAULT_CONFIDENCE,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.001,
+                        "tooltip": KNOB_DOCS["confidence"],
+                    },
                 ),
-                "gen_length": ("INT", {"default": DEFAULT_GEN_LENGTH, "min": 1, "max": 8192}),
+                "gen_length": (
+                    "INT",
+                    {
+                        "default": DEFAULT_GEN_LENGTH,
+                        "min": 1,
+                        "max": 8192,
+                        "tooltip": KNOB_DOCS["gen_length"],
+                    },
+                ),
                 # EXPERIMENTAL (issue #22 honesty finding, in the widget
                 # itself, not just a docstring): the injected system-turn
                 # path is pinned by tests/test_chat_template_thinking.py to
@@ -287,17 +340,14 @@ class DGemmaSampler:
                 # one-token gap is UNVERIFIED — no E2E thinking-mode run has
                 # been done (needs the real 26B weights on GPU). This toggle
                 # ships as a documented, honest experiment, not a confirmed
-                # feature.
+                # feature. Tooltip text sourced from the KNOB_DOCS mint
+                # (`dgemma/loop.py`) — same ONE-MINT discipline as every
+                # other widget here, not a special case.
                 "thinking": (
                     "BOOLEAN",
                     {
                         "default": False,
-                        "tooltip": (
-                            "EXPERIMENTAL: injects the <|think|> control token via a "
-                            "system turn, one token short of native enable_thinking=True "
-                            "(structurally unreachable gap, see dgemma.loop docstring). "
-                            "Behavioral effect unverified — no E2E run on real weights yet."
-                        ),
+                        "tooltip": KNOB_DOCS["thinking"],
                     },
                 ),
             },

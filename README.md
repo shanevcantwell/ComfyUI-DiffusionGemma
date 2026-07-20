@@ -84,6 +84,26 @@ You can't catch that by reading the final text. You can watch it happen here.
   noise level `(t, temperature, step_idx)`, so traces from different runs stay
   comparable.
 
+### Terms and units
+
+The sampler's knobs mix schedule positions, temperatures, and an entropy
+budget — same-looking names, different units. Minted once as `KNOB_DOCS` in
+[`dgemma/loop.py`](dgemma/loop.py) (source of every widget tooltip and MCP
+schema description below — see that module for the full provenance):
+
+| Symbol | What it is | Units |
+| --- | --- | --- |
+| `T` (temperature) | Divisor in `softmax(z/T)`; applied once per step, upstream of both sampling and the acceptance entropy. `T=1` = trained calibration. | dimensionless |
+| `t` (schedule position) | `(N − step_idx)/N`; decreasing 1 → `1/N` across the run. Not a temperature, despite the letter — and never reaches 0. | dimensionless |
+| `t_min` / `t_max` | Config knobs naming the TEMPERATURE endpoints of `T = t_min + (t_max − t_min)·t`. `t_min` is a virtual endpoint no step actually applies (`t` bottoms at `1/N`). Upstream `EntropyBoundScheduler` field names — not renamed here. | dimensionless (temperatures, not schedule positions) |
+| `entropy_bound` | Per-step joint acceptance budget. | **nats** (natural-log — `torch.distributions.Categorical.entropy()`), default `0.1` |
+| `confidence` | Early-stop threshold. | dimensionless probability |
+
+For scale: the 18-bits-per-position uniform-vocabulary melt (see
+[VISION.md](VISION.md)) is ≈12.48 nats — roughly two orders of magnitude
+hotter than the default per-step `entropy_bound`, and comparable at all only
+because both are denominated in nats.
+
 ### What the telemetry does and doesn't show
 
 DiffusionGemma's per-step telemetry (`committed_fraction`, the commit heatmap, and
