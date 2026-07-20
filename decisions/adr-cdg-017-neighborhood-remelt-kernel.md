@@ -1,6 +1,6 @@
 # ADR-CDG-017 — Neighborhood remelt: a `RemeltSpec` payload occupying the `beta_rebuild` slot, resolving ADR-CDG-010 Open Question 2
 
-**Status**: proposed
+**Status**: accepted (ratified by independent design-gate review, 2026-07-20; operator veto standing)
 **Date**: 2026-07-20
 **Related**: ADR-CDG-010 (constraint composite and pinned mask — the `beta_rebuild`
 slot and Open Question 2 this ADR resolves), ADR-CDG-011 (control-signal CV/LFO —
@@ -675,6 +675,59 @@ deep remelt's ablation-seam shape (Open Question 1) and CDG-016's eventual
 payload relationship to this one (Open Question 4). Neither blocks Phase 1-4
 of this ADR's own roadmap, which is why they are open questions rather than
 blocking preconditions.
+
+## Gate decision record (independent Opus design-gate review, 2026-07-20)
+
+Ratified PASS by an independent Opus reviewer that did not author this draft, per
+the repo's design-gate process convention (`CLAUDE.md` §Process conventions). Every
+load-bearing code-ground claim was verified against the installed tree before
+ratification. Recorded findings:
+
+- **G1 — Doctrine (rules 1–8): conforms.** Rule 7 (declarative frozen-dataclass
+  payload, ingress-validated, no closure) holds; rule 6 statelessness is correctly
+  grounded as in-run-only reads of `_FrameCollector.frames` (Decision 7, verified
+  against `dgemma/participants.py`'s existing per-run-stateless participant shape);
+  rule 4 socket mint holds; rule 5 fail-loud on the `kernel="off"` vs unknown-kernel
+  boundary holds. **Verified:** `dgemma/composite.py:StepEndComposite` exposes a real
+  empty-defaulting `beta_rebuild: tuple[...]` slot that `run_diffusion`
+  (`dgemma/loop.py:1449`) currently does not fill — the ADR's "give the existing slot
+  a payload-built participant, don't build new composite machinery" premise is
+  ground-true.
+- **G2 — `remelted_mask` trace honesty (Decision 6): the subtlest claim, and it is
+  honest.** The `~accepted_index` static derivation is NOT the invalid move it
+  superficially resembles: `scheduler_output.accepted_index` is already read at
+  capture time (`dgemma/loop.py:710`), and under the `positions == "all_rejected"`
+  scope-guard the set of positions the kernel *will* rewrite is exactly
+  `~accepted_index` — so the frame records what will be remelted from a signal
+  present at capture time, not from observing a future write. This is the same
+  labeled-door discipline `DiffusionFrame.pinned_mask`'s docstring already
+  establishes (`dgemma/types.py:150-177`), with the scope-guard and the
+  widen-to-observed-write door both named. Conforms.
+- **G3 — Operator requirements: all three met.** ComfyUI node (Decision 9) and MCP
+  schema (Decision 10) born together; MCP descriptions sweep-ready and sourced from
+  the #111 `KNOB_DOCS` mint (Decision 11), verified against the live
+  `surfaces/mcp/commands/generate.py` `_unpack_*`/`KNOB_DOCS[...]` pattern and
+  `tests/test_units_glossary_mint.py`'s `is`-identity check; no second mint.
+- **G4 — "kernel on, capture off" interaction: decided, not implied.** Decision 3's
+  last bullet makes `remelt.kernel != "off"` with `capture.top_k == 0` a loud ingress
+  reject — closing the exact trust-and-degrade shape (silent uniform fallback that
+  looks "on") ADR-CDG-001 forbids.
+- **G5 — Cross-artifact seams intact.** OQ2 is resolved narrowly (one kernel, one
+  sub-phase) without foreclosing a future ordered-sub-phase body; the CDG-016 slot
+  collision and the `top_p`-vocabulary overlap are named with a stated fork
+  (Decision 8 / Open Question 4); future kernels (CDG-015 embedding-kNN, CDG-012
+  KV-derived) are non-foreclosed named `Literal` values, explicitly not shipped as
+  accepted-but-unimplemented (Decision 2, Option B rejected); the
+  `TruncationShape.top_k` vs `CaptureSpec.top_k` collision has a stated resolution
+  direction (distinct `KNOB_DOCS` keys, Decision 11 / Open Question 3).
+- **G6 — Noted, not blocking: the `kernel="off"` / `None` two-spelling.** Both are
+  byte-identical no-ops (Decision 1). This is a two-door-to-say-"no-remelt" shape,
+  but it deliberately reuses the established `Constraints()`/`ControlSignals()`
+  empty-payload precedent rather than inventing a new one — named here so a future
+  reader does not mistake it for an oversight.
+
+Format conforms to the `writing-adrs` skill; anticipated-failure anchoring
+(greenfield adaptation) is present on every introduced invariant.
 
 ## Supersession Relationships
 
