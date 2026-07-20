@@ -38,6 +38,7 @@ from dgemma.loop import (
 )
 from dgemma.model import load_model
 from dgemma.types import DGemmaModel
+from consumers.run_log import RunConfig
 from surfaces.comfyui.sampler import DGemmaSampler
 
 pytestmark = pytest.mark.live
@@ -118,9 +119,15 @@ def test_sampler_node_frames_real(live_model):
     catches the `server` package's `ImportError` and no-ops
     (`nodes/sampler.py:119-120`; confirmed absent in this venv,
     `tests/test_seam.py`), so `sample()` runs to completion unchanged and
-    this asserts the real 5-tuple / `OUTPUT_IS_LIST` shape it returns —
+    this asserts the real 6-tuple / `OUTPUT_IS_LIST` shape it returns —
     including `frames_image` (issue #21 rework) rendered from a REAL decoded
-    per-step series, not a fake tokenizer's stand-in strings.
+    per-step series, not a fake tokenizer's stand-in strings, and
+    `run_config` (the `DGEMMA_RUN_CONFIG` socket) echoing the exact
+    widget args this call was made with.
+
+    Each of the 6 `RETURN_TYPES`/`RETURN_NAMES` sockets is named explicitly
+    below (not just `len(result) == 6`) so the next socket addition fails
+    legibly at this assertion instead of silently unpacking wrong.
     """
     node = DGemmaSampler()
     result = node.sample(
@@ -138,8 +145,8 @@ def test_sampler_node_frames_real(live_model):
     )
 
     assert isinstance(result, tuple)
-    assert len(result) == 5
-    text, canvas_state, canvas_trace, frames, frames_image = result
+    assert len(result) == 6
+    text, canvas_state, canvas_trace, frames, frames_image, run_config = result
     assert isinstance(text, str)
     assert isinstance(frames, list)  # the OUTPUT_IS_LIST=True `frames` output
     assert all(isinstance(f, str) for f in frames)
@@ -151,3 +158,19 @@ def test_sampler_node_frames_real(live_model):
     assert frames_image.shape[-1] == 3
     assert frames_image.dtype == torch.float32
     assert torch.all(frames_image >= 0.0) and torch.all(frames_image <= 1.0)
+    # `run_config` (DGEMMA_RUN_CONFIG socket, consumers/run_log.py) — request
+    # echo of the exact widget args `sample()` was called with above.
+    assert isinstance(run_config, RunConfig)
+    assert run_config.prompt == "Why is the sky blue?"
+    assert run_config.model_repo_id == live_model.repo_id
+    assert run_config.seed == 0
+    assert run_config.num_inference_steps_requested == LIVE_NUM_STEPS
+    assert run_config.gen_length == LIVE_GEN_LENGTH
+    assert run_config.t_min == DEFAULT_T_MIN
+    assert run_config.t_max == DEFAULT_T_MAX
+    assert run_config.entropy_bound == DEFAULT_ENTROPY_BOUND
+    assert run_config.confidence == DEFAULT_CONFIDENCE
+    assert run_config.thinking is False
+    assert run_config.quant == live_model.quant
+    assert run_config.device == live_model.device
+    assert run_config.dtype == live_model.dtype

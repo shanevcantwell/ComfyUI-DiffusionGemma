@@ -13,7 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint, validate_kv_cache_ingress
+from dgemma.kv_cache import (
+    encode_sequence,
+    geometry_from_model,
+    tokenizer_fingerprint,
+    validate_kv_cache_ingress,
+)
 
 
 class TestHappyPath:
@@ -129,6 +134,46 @@ class TestV6DtypeDeviceMismatch:
         message = str(excinfo.value)
         assert "dtype" in message or "device" in message
         assert "move/cast" in message or "re-mint" in message
+
+
+class TestV6SkippedOnEmptyLayerCache:
+    """The legal degenerate case: a 0-hidden-layer model (`num_hidden_layers=0`)
+    paired with a matching 0-layer cache passes V1 (`cache_layer_count ==
+    expected_layer_count == 0`), which makes `cache_tensor` (line 191)
+    `None` — `payload.cache.key_cache[0] if cache_layer_count else None`
+    short-circuits on the falsy `cache_layer_count`, never indexing an empty
+    `key_cache` list. V6's dtype/device block (192->212) is then skipped
+    entirely rather than raising or erroring, and ingress still completes
+    (V5's orphan check still runs and still passes for a non-orphan
+    provenance) — this is the documented skip-side behavior for the
+    zero-layer edge, not an accident of a 0-length list happening not to
+    crash."""
+
+    def test_zero_layer_cache_skips_v6_and_passes(self, synthetic_kv_cache_factory):
+        model, cache = synthetic_kv_cache_factory(model_kwargs={"num_hidden_layers": 0})
+        assert len(cache.cache.key_cache) == 0
+        assert validate_kv_cache_ingress(cache, model) is None
+
+
+class TestEncodeSequenceAlreadyBatchedIds:
+    """`encode_sequence`'s `ids_tensor.dim() == 1` check (`dgemma/kv_cache.py`)
+    guards against a caller passing already-batched (2-D) `token_ids` — the
+    branch's false side (`284->286`, skipping the `unsqueeze(0)`) has no
+    exerciser today: the sole real caller, `DGemmaEncode.encode`, always
+    hands `encode_sequence` a flat `list[int]` straight from
+    `tokenizer.encode(text)` (1-D by construction). This test constructs the
+    2-D input directly to close the branch, and is honestly framed
+    (repo coverage-residual convention, issue #75) as covering a defensive
+    guard for a shape no current caller produces, not a real call path.
+    """
+
+    def test_2d_token_ids_skip_the_unsqueeze(self, dgemma_model_factory):
+        model = dgemma_model_factory()
+        # A list-of-one-list is already (batch=1, seq_len) shaped once
+        # `torch.as_tensor` sees it — `ids_tensor.dim() == 1` is False, so
+        # the `unsqueeze(0)` on the next line must NOT fire.
+        cache = encode_sequence(model, [[1, 2, 3]], into=None)
+        assert cache.cache.key_cache[0].shape[2] == 3
 
 
 class TestOrderingIsDeterministic:
