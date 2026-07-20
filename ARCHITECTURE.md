@@ -290,6 +290,101 @@ plus prose, and this paragraph is that prose stating its own fragility.
 
 ---
 
+## The data-boundary crossing discipline — bulk artifacts cross by pointer + identity sidecar
+
+Rule 5 governs a payload riding a socket *inside* one process; this section governs a
+**bulk artifact leaving one surface/process boundary for another** — a run-log JSONL, a
+serialized `kv_cache`, a tier-2 `DISTRIBUTION` capture, a `runs/`-banked corpus. The
+control plane carries a **pointer + identity sidecar**; the bulk bytes travel the data
+plane out of band. This is `CONSERVE-ACROSS-THE-DATA-BOUNDARY` made structural for CDG's
+payload vocabularies. The full evidence thread, the four-layer / seven-primitive
+decomposition, the composition proof, and the paired sk-mcp record live by pointer in
+issue #103 and **ADR-SKM-007** (`../semantic-kinematics-mcp/docs/ADRs/proposed/adr-skm-007-bulkembedder-primitive-decomposition.md`);
+this section conditions conduct, it does not restate that history (`THIN-CONTRACT`).
+
+### The failure class this section refuses: commensurability laundering
+
+**Data that type-checks but crosses mints.** sk-mcp#16's exhibit: two 4096-d embedding
+backends silently merged — shape-identical, mint-incommensurable. Every CDG bulk payload
+has the property: a serialized `kv_cache` is ⊥ its producing model / geometry / tokenizer;
+a `DISTRIBUTION` is ⊥ its vocabulary; a run-log is ⊥ its scheduler identity. **Shape cannot
+detect the mix; only carried mint identity can.** The identity sidecar exists so the
+boundary can *refuse* a mismatched mix at re-entry rather than laundering it into a corrupt
+merge. This sentence is what makes the discipline a conservation law, not a file-format
+convention.
+
+### Envelope / payload carve — the discipline binds the crossing, never the payload math
+
+The crossing primitives (below) are **payload-agnostic**. Payload *validity* is
+vocabulary-owned and lives at each consumer's own ingress — never in this discipline.
+Concretely: `kv_cache`'s validity is `dgemma/kv_cache.py:validate_kv_cache_ingress`'s
+V1–V6; a `DISTRIBUTION`'s is its tier discipline (sum-to-one, not shape); embeddings'
+would be L2-norm / dimension / centroid math. Those opinions are wrong for each other —
+magnitude is signal for a KV tensor and noise for a normalized embedding — so **payload
+math never enters this section** (opinion locality, GROUND_PHYSICS discipline 5). The
+carve has a code seam on the sk-mcp side: ADR-SKM-007 clause 3's *injected validator*
+(the durability loader takes the validity test *in*; it does not own it).
+
+### Container-freedom per payload class
+
+JSONL-one-record-per-line is the **embeddings-scale instance** (many small records), not
+the law. Few-huge-tensors (tier-2 `kv_cache`) and vocab×positions×steps (tier-2
+`DISTRIBUTION`) each need their own container under the **same** crossing discipline. The
+discipline fixes *pointer + sidecar + fail-loud re-entry*; the container is the first
+implementer's call per payload class.
+
+### The seven primitives (four layers) — consumers cite subsets by name
+
+Named so a consumer states "primitives 1+2+3+4," not "be like BulkEmbedder":
+
+- **Boundary/identity.** (1) **mint-identity guard** — sidecar carrying producer identity,
+  fail-loud on mismatch, atomic write-then-rename; (2) **self-distrust on resume** —
+  re-validate one's own prior artifact line-by-line, corrupt/invalid → retried, never
+  trusted.
+- **Durability.** (3) **append-only progress ledger**; (4) **typed failure markers** — an
+  honest failure serialized as data (idempotent retry, never a silent drop); (5) **bounded
+  volatile head** — window what a crash can cost.
+- **Transport economics.** (6) **ground-verified partitioning** — real tokenizer, no
+  estimate fiction (sk-mcp#20); (7) **budgeted packing** — pure envelope.
+- **Payload.** aggregation / validity math — **vocabulary-owned, OUTSIDE this discipline**
+  (the carve above).
+
+**Composition proof (why these are primitives, not one monolith):** each consumer needs a
+different subset. Run-log: 1+2+3+4. `kv_cache` serialization: 1 + the validity door (V1–V6
+already is it), no stream. Tier-2 `DISTRIBUTION`: 1+2+3+5 + a per-scale container. `runs/`
+banking: 1+3. None needs aggregation; only corpus embedding needs 6+7.
+
+### Consumers — honest per-instance status
+
+| Consumer | Primitives | Container | Status |
+|----------|-----------|-----------|--------|
+| Run-log emission (#72) | 1+2+3+4 | JSONL-per-record | **In force ComfyUI-side** (`consumers/run_log.py` over the `on_frame` observer); **MCP promotion pending** — the #103 Scope B fork, sidecar-vs-header residual resolved by the discipline (pure one-record-per-line stream, identity in sidecar). |
+| Serialized `kv_cache` (ADR-CDG-012 tier-2) | 1 + V1–V6 door | few-huge-tensors (free) | `NOT-YET-IMPLEMENTED` — the #103 fork. `Provenance` (mint sequence/edit-script, geometry, `tokenizer_fingerprint`) already IS the sidecar content; the residue is the tensor container. `save_kv_cache`/`load_kv_cache` unbuilt (`dgemma/kv_cache.py` docstring, Phase 5 conditional). |
+| Tier-2 `DISTRIBUTION` artifacts (ADR-CDG-014) | 1+2+3+5 | vocab×positions×steps (free) | Capture P-C **landed in-core** (`_FrameCollector` derives `distribution`, budget-gated); the **artifact/banking story is `NOT-YET-IMPLEMENTED`** — the in-core frame is not yet a boundary-crossing artifact. |
+| `runs/` raw-data banking (#101) | 1+3 | JSONL (via #72 emitter) | **Proposal** (#101, draft-for-ratification) — banks the #72 emitter's output per `docs/experiments/<entry>/runs/`; verdict-cites-banked-artifact floor amendment, review-gate today. |
+
+### Enforcement surface (GROUND_PHYSICS discipline 6)
+
+**Review-only at birth**, named honestly as prose-governed. The mechanizable surface is a
+**sidecar validator** — the fail-loud identity check at re-entry (sk-mcp's `_reconcile_meta`
+is the working exemplar; V1–V6 is CDG's `kv_cache` instance already live). Where a consumer
+carries no sidecar validator yet, its row above is prose-only and known-fragile until the
+crossing is built. The row(s) land in the enforcement-surface table below.
+
+**Extraction fork — named, not decided.** Extracting the payload-agnostic primitives (1–5)
+into a shared version-pinned library fires on the **third** independent implementation
+(two exist: thought-vault embedding bridge, sk-mcp's BulkEmbedder; CDG's post-s9 batch
+would author the third); precedent is `local-inference-pool` (primitive extracted, consumed
+as a pinned git dependency); the sk-mcp side is recorded in ADR-SKM-007's *Extraction Fork*
+section.
+
+**F-track convergence (forward, one sentence).** ADR-CDG-015's F-track crosses embedding
+vectors *literally*, so BulkEmbedder's antipodal-collapse guard is payload-math prior art
+for the ē off-manifold hazard — mean-of-vectors ≠ vector-of-mean, the ADR-CDG-012→015
+relocated hazard.
+
+---
+
 ## What the invariant does NOT govern (out of scope)
 
 - **The published repo name `ComfyUI-DiffusionGemma`** — conserved identity
@@ -560,6 +655,7 @@ names its test / type / review surface and its status.
 | E2E battery imports nothing from `dgemma`/`surfaces`/`consumers` (black-box independence, ADR-CDG-013 Decision 1) | `tests/e2e/test_e2e_import_guard.py` (subprocess `sys.modules` leak check, mirroring `tests/test_seam.py`'s shape, + a static AST scan) | **In force** — battery phase E0 (issue #59). |
 | Consumers orchestrate; they do not extend (rule 8 — sweeps/loops/batteries sequence surface primitives; no consumer-serving path accretes into the core) | Review-only + the existing rule-2 no-denoising-loop-in-surface-body posture (a sequencing loop belongs *above* the surfaces, not inside one; a body that grew one would already trip the surface-body review). The one in-repo consumer, `tests/e2e/driver.py`, is additionally *mechanically* black-boxed by the E2E import guard above (ADR-CDG-013 Decision 1) — but that guard proves independence of the driver, not the general rule | **Review-only — known-fragile** (GROUND_PHYSICS discipline 6). No mechanized cross-tier rule asserts "no consumer-serving path in the core" the way `tests/test_seam.py` asserts import direction; prose + the rule-2 review gate carry it today. A mechanizable surface (e.g. a consumer-plane import-graph rule) awaits the served-engine ADR that would give the tier a code boundary. Named honestly per issue #92 scope item 3. |
 | Lifecycle & tenancy of the ~53 GB load (in-process single-tenant today; no lifecycle delegation) | The physics of the 48 GB card (two ~53 GB loads do not fit) + rule 6's holder-only `StateManager` (`tests/test_mcp_statelessness.py` — asserts no run-state cached, does **not** assert single-tenancy) | **Review-only — known-fragile** (GROUND_PHYSICS discipline 6). The current single-tenancy is enforced by hardware limit + prose, not a test. The served-engine topology (ADR-candidate, §Lifecycle & tenancy) is the future home of a real enforcement surface (an engine-client boundary test) — **named, not decided**, trigger = a second concurrent surface needing the resident model. |
+| Bulk artifacts cross the surface/process boundary by pointer + identity sidecar; no bulk payload crosses without carried mint identity (commensurability-laundering refusal) | The **sidecar validator** — fail-loud identity check at re-entry (§The data-boundary crossing discipline). CDG's live instance is `kv_cache`'s `dgemma/kv_cache.py:validate_kv_cache_ingress` V1–V6 (`Provenance` sidecar); the general cross-consumer surface is prose. sk-mcp's `_reconcile_meta` is the working exemplar | **Review-only — known-fragile at birth** (GROUND_PHYSICS discipline 6), *except* the `kv_cache` re-entry door, which is In force (V1–V6, ADR-CDG-012, see the `KV_CACHE` row above). The other three consumers (run-log #72, tier-2 `DISTRIBUTION` banking, `runs/` #101) carry no sidecar validator yet — each becomes structural when its crossing is built. Extraction of the payload-agnostic primitives (1–5) into a shared pinned library would convert this prose into one imported guard — **named-not-decided**, trigger = the third implementation (ADR-SKM-007 §Extraction Fork). |
 | Node-pack coverage measured inside the ComfyUI subprocess and merged with unit-suite data (ADR-CDG-013 Decision 4) | `[tool.coverage.run]` (`pyproject.toml`: `parallel`, `concurrency=["thread"]`, `sigterm`, `source=["dgemma","surfaces","consumers"]`) + `sitecustomize.py` (`coverage.process_startup()`, a no-op unless `COVERAGE_PROCESS_START` is set) + `coverage combine` | **In force (mechanism verified E0; not yet exercised against a real battery run — E1/live phases pending the three operator-scheduled preconditions in issue #59 §5)**. |
 | Per-scenario green + combined-coverage readback banked to issue #59 / plan.md ("done" = all E2E scenarios green on the live model) | Battery run evidence, banked per ADR-CDG-013 Implementation Notes | `NOT-YET-IMPLEMENTED` — battery phases E2–E4 (issue #59). E0 landed the harness skeleton + S1; this phase (P2) adds S2 (full-knob), S3 (thinking-toggle, marked `xfail(strict=True)` against issue #9 — expected RED once live), and S4 (trace readout) to `tests/e2e/test_battery.py`/`driver.py`. All four scenarios (S1–S4) remain correctly SKIP-gated pending the three operator-scheduled live preconditions in issue #59 §5 — no scenario has run against the live model yet, so "green on the live model" is still unproven; only the harness/assertion code is built and unit-proven pre-infra. |
 
@@ -585,17 +681,32 @@ One row per invariant rule, each violation paired with its correct shape.
 | A consumer capability that exists on only one surface — e.g. the structured run-config/run-log that today rides `surfaces/comfyui/`'s `on_frame` observer but has no `surfaces/mcp/` equivalent | Surface parity: a run-record vocabulary is core/consumer-tier identity (`IDENTITY⊥ENVELOPE`), so it is reachable from every surface, promoted when a second surface needs it (rule 8; live instance below) |
 | A `KV_CACHE` crossing a node boundary with no provenance record, or with a geometry that silently disagrees with the loaded model | A validated `DGEMMA_KV_CACHE` payload — `validate_kv_cache_ingress`'s V1-V6 fires at every ingress door (IN-2/IN-3/IN-4), fail-on-mismatch with a both-token remedy message, never trust-and-degrade (ADR-CDG-012, rule 4/5) |
 
-**Live instance of the drift this tier catches (2026-07-16 session).** The structured
-run-log (issue #72) is presently a **ComfyUI-surface-only** capability: it rides
-`surfaces/comfyui/`'s read-only `on_frame` observer (the sanctioned executable crossing)
-with a post-run `consumers/` serializer, and its promotion to the MCP surface is recorded
-as a **trigger on #72**, not yet built. This is the *first live instance* of the drift
-class rule 8 and the lifecycle/tenancy naming exist to catch: a consumer-facing capability
-settling onto one surface before the orchestration tier is named makes surface-parity
-gaps invisible. Naming the tier is what turns "the MCP surface silently lacks run-logging"
-from an unnoticed asymmetry into a tracked #72 trigger. The record identity is the
-`dgemma/types.py` dataclasses (`IDENTITY⊥ENVELOPE`, issue #72 §Placement), so parity is
-reachable — the gap is one of *which surface exposes it*, exactly the rule-8 concern.
+**Live instance of the drift this tier catches (post-s8, 2026-07-20).** Three of the four
+core doors — `constraints=`/`control_signals=`/`capture=` — **landed on the MCP base
+surface** (issue #103 Scope A, PR #104): `surfaces/mcp/commands/generate.py`'s schema
+unpacks each JSON shape into the exact `dgemma.payloads` dataclasses and hands them to
+`run_diffusion`, validated core-side (never re-implemented, rule 5). That closes the
+biggest slice of the rule-8 asymmetry the tier exists to catch. Two gaps remain, tracked
+on #103:
+
+- **`kv_cache=` is blocked on serialization, not on parity intent.** It is deliberately
+  NOT exposed on the MCP surface (`surfaces/mcp/commands/generate.py` docstring, §kv_cache
+  scope note): `KVCache.cache` is a live `transformers.DynamicCache` with no JSON/disk
+  encoding today. This is not a surface asymmetry to close by transcription — it is a
+  data-boundary crossing that must be *built* first. **It points at the data-boundary
+  crossing discipline above** (the serialized-`kv_cache` consumer row): `Provenance` is
+  the sidecar, the residue is the tensor container, and `save_kv_cache`/`load_kv_cache`
+  are the `NOT-YET-IMPLEMENTED` crossing.
+- **Run-log emission (#72) is still ComfyUI-surface-only** — it rides
+  `surfaces/comfyui/`'s read-only `on_frame` observer with a `consumers/run_log.py`
+  serializer; MCP promotion is the #103 Scope B fork, now folded into the crossing
+  discipline (run-log consumer row).
+
+The remaining capability-parity inventory (`trace`, `frames`, `tally_audit`) is tracked as
+#103 Scope C. The record identity throughout is the `dgemma/types.py` dataclasses
+(`IDENTITY⊥ENVELOPE`, issue #72 §Placement), so parity is reachable — the gap is one of
+*which surface exposes it* (or, for `kv_cache`, *which crossing is built*), exactly the
+rule-8 concern.
 
 ---
 
