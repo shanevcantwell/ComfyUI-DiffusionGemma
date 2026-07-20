@@ -1,15 +1,14 @@
 """Enforcement tests for the `DiffusionFrame`/`CanvasTrace` capture discipline
-(ADR-CDG-014, issue #61 Phases P-A/P-B) — the R6 additive-optional field
+(ADR-CDG-014, issue #61 Phases P-A/P-B/P-C) — the R6 additive-optional field
 discipline, Tier 0's always-on per-position entropy capture, Tier 1's
-on-request top-k capture, and the capture-pre-pin ordering guarantee
+on-request top-k capture, Tier 2's explicit-opt-in-with-budget full
+distribution capture, and the capture-pre-pin ordering guarantee
 (ADR-CDG-010).
 
 Scope: additive-optional field discipline (Decision 1), Tier 0 entropy
 (Decision 3's always-on row, P-A), Tier 1 top-k (Decision 3's on-request row,
-P-B), and capture-pre-pin ordering (Decision 4). Tier 2 (`distribution` +
-budget) is NOT implemented here (P-C) — this suite only asserts its FIELD
-exists and defaults to `None` under the same additive-optional discipline,
-not its derivation.
+P-B), Tier 2 full distribution + retention budget (Decision 3/5's
+explicit-opt-in row, P-C), and capture-pre-pin ordering (Decision 4).
 
 **Issue #64 Phase 2 addition:** `pinned_mask` (ADR-CDG-010 Decision 4) and
 `effective_entropy_bound`/`effective_t_min`/`effective_t_max` (ADR-CDG-011
@@ -24,6 +23,13 @@ design (issue #64, gate-ratified 2026-07-13).
 `[canvas_len, 8]` — plus the capture-pre-pin ordering guarantee extended to
 Tier 1 (top-k derives from the same pre-pin `logits` entropy does, never a
 post-pin artifact).
+
+**Issue #61 P-C addition:** `TestTier2FullDistributionCapture` pins the
+plan's test (d) — an unbounded full-dist request raises at ingress (covered
+in `tests/test_ingress.py`); here, `_FrameCollector`-level unit coverage of
+the budget mechanics: off by default, on-with-budget populates
+`distribution` for exactly the first N captured steps, absent thereafter,
+independent of Tier 0/1, and (extended) capture-pre-pin ordering for Tier 2.
 """
 from __future__ import annotations
 
@@ -317,6 +323,156 @@ class TestTier1TopKCapture:
         assert collector.frames[0].top_k_weights.shape == (canvas_len, k)
 
 
+class TestTier2FullDistributionCapture:
+    """ADR-CDG-014 Decision 3/5's Tier 2 row (issue #61 P-C): full
+    per-position distribution, explicit opt-in WITH A BUDGET. Off by
+    default; on-with-budget populates `distribution` for exactly the first
+    `max_full_distribution_steps` captured steps (in step order), absent
+    thereafter regardless of `keep_frames`; Tier 0/1 fields are unaffected
+    by Tier 2's budget running out."""
+
+    def test_distribution_none_by_default(self):
+        """`capture_full_distribution=False` (the field's own default)
+        leaves `distribution` `None` even though `logits` is present (Tier
+        0 still fires) — byte-identical to every pre-P-C run."""
+        collector = _FrameCollector(scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8)
+        vocab, canvas_len = 6, 4
+        logits = torch.randn(1, canvas_len, vocab)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        frame = collector.frames[0]
+        assert frame.distribution is None
+        assert frame.entropy is not None  # Tier 0 unaffected by Tier 2 being off
+
+    def test_distribution_absent_when_logits_not_reachable(self):
+        """Additive-optional/absence discipline: requesting Tier 2 without
+        `logits` in callback_kwargs must not crash and must not fabricate a
+        zero/empty distribution — stays `None`, same absence semantics
+        entropy/top-k already get."""
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8,
+            capture_full_distribution=True, max_full_distribution_steps=5,
+        )
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True, True]]))
+
+        assert collector.frames[0].distribution is None
+
+    def test_distribution_populated_within_budget(self):
+        vocab, canvas_len = 10, 4
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(3), t_min=0.4, t_max=0.8, keep_frames="all",
+            capture_full_distribution=True, max_full_distribution_steps=3,
+        )
+        logits = torch.randn(1, canvas_len, vocab)
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        frame = collector.frames[0]
+        assert frame.distribution is not None
+        assert frame.distribution.shape == (canvas_len, vocab)
+
+    def test_distribution_matches_manual_softmax_over_same_logits(self):
+        vocab, canvas_len = 7, 3
+        logits = torch.randn(1, canvas_len, vocab)
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8,
+            capture_full_distribution=True, max_full_distribution_steps=1,
+        )
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        expected = torch.softmax(logits[0], dim=-1)
+        assert torch.allclose(collector.frames[0].distribution, expected, atol=1e-6)
+
+    def test_distribution_absent_past_the_budget(self):
+        """The budget caps RETAINED frames — steps beyond
+        `max_full_distribution_steps` carry `distribution=None`, regardless
+        of `keep_frames="all"` retaining the frame itself (Decision 5)."""
+        vocab, canvas_len, budget = 8, 3, 2
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(4), t_min=0.4, t_max=0.8, keep_frames="all",
+            capture_full_distribution=True, max_full_distribution_steps=budget,
+        )
+        for step_idx in range(4):
+            logits = torch.randn(1, canvas_len, vocab)
+            collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        assert len(collector.frames) == 4
+        for frame in collector.frames[:budget]:
+            assert frame.distribution is not None
+        for frame in collector.frames[budget:]:
+            assert frame.distribution is None
+
+    def test_tier0_and_tier1_unaffected_by_tier2_budget_exhaustion(self):
+        """Tier 0 (entropy)/Tier 1 (top-k) keep their own independent
+        policies — Tier 2's budget running out must not suppress them."""
+        vocab, canvas_len, k, budget = 6, 3, 4, 1
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(2), t_min=0.4, t_max=0.8, keep_frames="all",
+            top_k=k, capture_full_distribution=True, max_full_distribution_steps=budget,
+        )
+        for step_idx in range(2):
+            logits = torch.randn(1, canvas_len, vocab)
+            collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        first, second = collector.frames
+        assert first.distribution is not None
+        assert second.distribution is None
+        # Tier 0/1 unaffected on BOTH frames, including the one past budget.
+        for frame in (first, second):
+            assert frame.entropy is not None
+            assert frame.top_k_ids is not None
+            assert frame.top_k_weights is not None
+
+    def test_distribution_rows_sum_to_one(self):
+        """The full distribution is a real per-position probability
+        distribution, not a raw softmax-shaped tensor with drift — each
+        position's row sums to 1."""
+        vocab, canvas_len = 9, 5
+        logits = torch.randn(1, canvas_len, vocab)
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8,
+            capture_full_distribution=True, max_full_distribution_steps=1,
+        )
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        sums = collector.frames[0].distribution.sum(dim=-1)
+        assert torch.allclose(sums, torch.ones(canvas_len), atol=1e-5)
+
+    def test_2d_logits_without_batch_dim_supported_for_distribution(self):
+        """Mirrors entropy/top-k's own no-batch-dim support test."""
+        vocab, canvas_len = 5, 3
+        logits = torch.randn(canvas_len, vocab)  # no leading batch dim
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(1), t_min=0.4, t_max=0.8,
+            capture_full_distribution=True, max_full_distribution_steps=1,
+        )
+
+        collector.on_step_end(None, 0, 0, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        assert collector.frames[0].distribution.shape == (canvas_len, vocab)
+
+    def test_budget_none_with_flag_true_means_unbounded_in_direct_use(self):
+        """Ingress always pairs `capture_full_distribution=True` with a
+        budget through `run_diffusion`, but a caller driving the collector
+        directly (bypassing ingress) with `max_full_distribution_steps=None`
+        gets the documented degradation: no cap, every step populated —
+        never a crash."""
+        vocab, canvas_len = 6, 3
+        collector = _FrameCollector(
+            scheduler=_fake_scheduler(3), t_min=0.4, t_max=0.8, keep_frames="all",
+            capture_full_distribution=True, max_full_distribution_steps=None,
+        )
+        for step_idx in range(3):
+            logits = torch.randn(1, canvas_len, vocab)
+            collector.on_step_end(None, step_idx, step_idx, _callback_kwargs([[True] * canvas_len], logits=logits))
+
+        for frame in collector.frames:
+            assert frame.distribution is not None
+
+
 class TestCapturePrePinOrdering:
     """ADR-CDG-014 Decision 4 (ADR-CDG-010 ordering): capture is the
     composite's FIRST participant, so entropy derives from the step's
@@ -416,6 +572,45 @@ class TestCapturePrePinOrdering:
         assert torch.equal(collector.frames[0].top_k_ids, expected_ids)
         expected_weights = torch.softmax(expected_values, dim=-1)
         assert torch.allclose(collector.frames[0].top_k_weights, expected_weights, atol=1e-5)
+
+    def test_distribution_reflects_model_logits_not_pin_rewrite(self, fake_pipeline_factory):
+        """Same ordering proof as entropy/top-k above, extended to Tier 2
+        (issue #61 P-C): the full distribution derives from the pre-pin
+        `logits`, never from a canvas a later pin participant rewrote."""
+        vocab = 6
+        canvas_shape = (1, 4)
+        logits = torch.tensor(
+            [[[0.0, 1.0, 2.0, -1.0, 0.5, 3.0]] * canvas_shape[1]], dtype=torch.float32
+        )
+
+        built = fake_pipeline_factory(
+            num_inference_steps=1, vocab_size=vocab, canvas_shape=canvas_shape,
+        )
+        built.model.forward = lambda decoder_input_ids, **_ignored: type(
+            "Out", (), {"logits": logits}
+        )()
+
+        collector = _FrameCollector(
+            scheduler=built.scheduler, t_min=0.4, t_max=0.8, keep_frames="all",
+            capture_full_distribution=True, max_full_distribution_steps=1,
+        )
+
+        def pin(pipe, global_step, step_idx, callback_kwargs):
+            return {"canvas": torch.full_like(callback_kwargs["canvas"], 999)}
+
+        step_end = StepEndComposite(capture=collector.on_step_end, pin=(pin,))
+
+        result = built.pipeline(
+            num_inference_steps=1,
+            callback_on_step_end=step_end,
+            callback_on_step_end_tensor_inputs=["canvas", "logits", "scheduler_output"],
+        )
+
+        assert torch.all(result.sequences == 999)
+        assert not torch.all(collector.frames[0].canvas == 999)
+
+        expected = torch.softmax(logits[0], dim=-1)
+        assert torch.allclose(collector.frames[0].distribution, expected, atol=1e-5)
 
 
 def _fake_scheduler_with_config(

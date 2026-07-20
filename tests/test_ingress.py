@@ -195,12 +195,22 @@ class TestControlSignalsIngress:
 
 class TestCaptureIngress:
     """P1 `keep_frames` (issue #64 §1.4) + P-B `top_k` (ADR-CDG-014 Decision
-    3 Tier 1, issue #61)."""
+    3 Tier 1, issue #61) + P-C `capture_full_distribution`/
+    `max_full_distribution_steps` (ADR-CDG-014 Decision 3/5 Tier 2, issue
+    #61 P-C)."""
 
     class _FakeCaptureSpec:
-        def __init__(self, keep_frames="all", top_k=0):
+        def __init__(
+            self,
+            keep_frames="all",
+            top_k=0,
+            capture_full_distribution=False,
+            max_full_distribution_steps=None,
+        ):
             self.keep_frames = keep_frames
             self.top_k = top_k
+            self.capture_full_distribution = capture_full_distribution
+            self.max_full_distribution_steps = max_full_distribution_steps
 
     def test_none_is_a_no_op(self):
         validate_capture(None)  # must not raise
@@ -277,6 +287,81 @@ class TestCaptureIngress:
         rejected — `topk(vocab_size)` over a `vocab_size`-wide row is a
         legitimate, if degenerate, "capture the whole vocabulary" request)."""
         validate_capture(self._FakeCaptureSpec(top_k=100), vocab_size=100)  # must not raise
+
+    def test_tier2_off_by_default_is_a_no_op(self):
+        validate_capture(self._FakeCaptureSpec())  # must not raise
+
+    def test_tier2_absent_attributes_default_to_off_no_op(self):
+        """Duck-typed: an object exposing neither `capture_full_distribution`
+        nor `max_full_distribution_steps` (e.g. a pre-P-C stand-in) is a
+        no-op, not a crash."""
+
+        class NoTier2Attrs:
+            keep_frames = "all"
+            top_k = 0
+
+        validate_capture(NoTier2Attrs())  # must not raise
+
+    def test_tier2_with_budget_passes(self):
+        validate_capture(
+            self._FakeCaptureSpec(capture_full_distribution=True, max_full_distribution_steps=4)
+        )  # must not raise
+
+    def test_tier2_unbounded_request_rejected(self):
+        """The load-bearing clause (ADR-CDG-014 Decision 3 Tier 2):
+        `capture_full_distribution=True` with no budget is rejected at
+        ingress, never silently honored."""
+        capture = self._FakeCaptureSpec(capture_full_distribution=True, max_full_distribution_steps=None)
+        with pytest.raises(ValueError, match=r"capture_full_distribution=True requires max_full_distribution_steps"):
+            validate_capture(capture)
+        with pytest.raises(ValueError, match=r"Fix: pass max_full_distribution_steps=<positive int>"):
+            validate_capture(capture)
+
+    def test_tier2_budget_without_flag_is_inert_no_op(self):
+        """A budget given without `capture_full_distribution=True` does not
+        enable Tier 2 and does not raise — the boolean is the knob that
+        actually turns capture on."""
+        validate_capture(
+            self._FakeCaptureSpec(capture_full_distribution=False, max_full_distribution_steps=4)
+        )  # must not raise
+
+    def test_tier2_zero_budget_rejected(self):
+        capture = self._FakeCaptureSpec(capture_full_distribution=True, max_full_distribution_steps=0)
+        with pytest.raises(ValueError, match=r"max_full_distribution_steps must be > 0, got 0"):
+            validate_capture(capture)
+
+    def test_tier2_negative_budget_rejected(self):
+        capture = self._FakeCaptureSpec(capture_full_distribution=True, max_full_distribution_steps=-3)
+        with pytest.raises(ValueError, match=r"max_full_distribution_steps must be > 0, got -3"):
+            validate_capture(capture)
+
+    def test_tier2_non_int_budget_rejected(self):
+        capture = self._FakeCaptureSpec(capture_full_distribution=True, max_full_distribution_steps=2.5)
+        with pytest.raises(ValueError, match=r"max_full_distribution_steps must be an int, got 2\.5"):
+            validate_capture(capture)
+
+    def test_tier2_bool_budget_rejected(self):
+        """`bool` is a subclass of `int` — `True`/`False` must not silently
+        pass as `1`/`0` (same guard as `top_k`'s bool reject)."""
+        capture = self._FakeCaptureSpec(capture_full_distribution=True, max_full_distribution_steps=True)
+        with pytest.raises(ValueError, match=r"max_full_distribution_steps must be an int"):
+            validate_capture(capture)
+
+    def test_tier2_non_bool_flag_rejected(self):
+        capture = self._FakeCaptureSpec(capture_full_distribution="yes", max_full_distribution_steps=4)
+        with pytest.raises(ValueError, match=r"capture_full_distribution must be a bool"):
+            validate_capture(capture)
+
+    def test_real_capture_spec_tier2_budget_passes(self):
+        """The minted `CaptureSpec` dataclass itself, not just a duck-typed
+        stand-in — Tier 2 on with a real budget passes."""
+        validate_capture(
+            CaptureSpec(capture_full_distribution=True, max_full_distribution_steps=8)
+        )  # must not raise
+
+    def test_real_capture_spec_tier2_unbounded_rejected(self):
+        with pytest.raises(ValueError, match=r"requires max_full_distribution_steps"):
+            validate_capture(CaptureSpec(capture_full_distribution=True))
 
 
 class TestHookSourceConflict:
@@ -369,5 +454,18 @@ class TestValidateIngressComposition:
         with pytest.raises(ValueError, match=r"top_k=200 exceeds vocab_size=100"):
             validate_ingress(
                 None, None, CaptureSpec(top_k=200), None,
+                gen_length=10, num_inference_steps=4, vocab_size=100,
+            )
+
+    def test_valid_capture_tier2_budget_passes_through_validate_ingress(self):
+        validate_ingress(
+            None, None, CaptureSpec(capture_full_distribution=True, max_full_distribution_steps=4), None,
+            gen_length=10, num_inference_steps=4, vocab_size=100,
+        )  # must not raise
+
+    def test_capture_tier2_unbounded_reject_surfaces_through_validate_ingress(self):
+        with pytest.raises(ValueError, match=r"requires max_full_distribution_steps"):
+            validate_ingress(
+                None, None, CaptureSpec(capture_full_distribution=True), None,
                 gen_length=10, num_inference_steps=4, vocab_size=100,
             )
