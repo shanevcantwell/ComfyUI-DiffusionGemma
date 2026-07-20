@@ -56,11 +56,18 @@ class DiffusionFrame:
         fraction = (num_inference_steps - step_idx) / num_inference_steps
         temperature = t_min + (t_max - t_min) * fraction
 
-    `t` is that `fraction`: the normalized position in the schedule, 1.0 at
-    the hottest (first) step, decreasing toward (but not reaching exactly) 0
-    at the last step. `temperature` is the resulting annealed sampling
-    temperature. Both ride the frame so a reader never has to reconstruct one
-    from the other against the scheduler config.
+    `t` is that `fraction`: DIMENSIONLESS, the normalized position in the
+    schedule — 1.0 at the hottest (first) step, DECREASING to
+    `1/num_inference_steps` at the last step (`step_idx == num_inference_steps
+    - 1`, reached exactly) — never reaching 0. Despite the
+    letter, `t` is a schedule POSITION, not a temperature (see `KNOB_DOCS`,
+    `dgemma/loop.py`, for the full terms-and-units vocabulary this pack mints
+    once). `temperature` is the resulting annealed sampling temperature: the
+    divisor `T` applied once per step in `softmax(z / T)` upstream of both
+    candidate sampling and the acceptance-entropy computation — also
+    dimensionless, `T=1` reproducing the model-native logit calibration.
+    Both ride the frame so a reader never has to reconstruct one from the
+    other against the scheduler config.
 
     `num_inference_steps` in that formula is the scheduler's EFFECTIVE value
     (`scheduler.num_inference_steps` after `set_timesteps`), not necessarily
@@ -85,13 +92,17 @@ class DiffusionFrame:
 
     entropy: Any | None = None
     """Tier 0 capture (ADR-CDG-014 Decision 3, issue #14): per-position
-    predictive entropy, `float32[canvas_len]`, derived from this step's
-    **pre-pin** `logits` (`Categorical(logits=...).entropy()`) in the
-    capture participant — which runs FIRST in the composite (`capture ->
-    cancel -> beta-rebuild -> pin`, ADR-CDG-010). `entropy` is therefore the
-    model's own predictive entropy over the canvas, not a post-pin/post-
-    constraint artifact. Always populated when `logits` are reachable
-    (`run_diffusion` requests `"logits"` in
+    predictive entropy, `float32[canvas_len]`, in NATS — derived from this
+    step's **pre-pin** `logits` (`Categorical(logits=...).entropy()`, and
+    `torch.distributions.Categorical.entropy()` is natural-log, not bits/log2)
+    in the capture participant — which runs FIRST in the composite (`capture
+    -> cancel -> beta-rebuild -> pin`, ADR-CDG-010). Directly comparable to
+    `effective_entropy_bound` below (same nats unit — the acceptance check
+    this value is measured against) and to `KNOB_DOCS["entropy_bound"]`'s
+    (`dgemma/loop.py`) 18-bits-per-position ≈ 12.48 nats scale reference.
+    `entropy` is therefore the model's own predictive entropy over the
+    canvas, not a post-pin/post-constraint artifact. Always populated when
+    `logits` are reachable (`run_diffusion` requests `"logits"` in
     `callback_on_step_end_tensor_inputs`) — this is the "always on" Tier 0
     default (ADR-CDG-014 Decision 3): the cheapest honest slice of the
     DISTRIBUTION seam, ~1 KB/step.
@@ -168,8 +179,10 @@ class DiffusionFrame:
     effective_entropy_bound: float | None = None
     """ADR-CDG-011 clause 7 (honest telemetry): `scheduler.config.
     entropy_bound` read at THIS callback, i.e. the value `step()` actually
-    consumed producing this frame — never the `run_diffusion` ctor snapshot
-    or a control-signal binding's static curve. A walker (Phase 4,
+    consumed producing this frame — in NATS, same unit as `entropy` above
+    (both natural-log; see `KNOB_DOCS["entropy_bound"]`, `dgemma/loop.py`,
+    for the full units note) — never the `run_diffusion` ctor snapshot or a
+    control-signal binding's static curve. A walker (Phase 4,
     `NOT-YET-IMPLEMENTED`) that mutates `scheduler.config` mid-run makes this
     field diverge from the run's requested `entropy_bound`; a walker bug
     that silently fails to write through is therefore visible in the trace
@@ -180,14 +193,18 @@ class DiffusionFrame:
 
     effective_t_min: float | None = None
     """Companion to `effective_entropy_bound`: `scheduler.config.t_min` read
-    at this callback (ADR-CDG-011 clause 7). Feeds the same live-`t_min`
-    read `anneal_temperature` now uses for `t`/`temperature` (see
-    `_FrameCollector`), so a walker-mutated `t_min` is reflected consistently
-    across `t`/`temperature` and this field."""
+    at this callback (ADR-CDG-011 clause 7) — a TEMPERATURE (dimensionless
+    softmax divisor), not a schedule position, despite the lowercase-`t`
+    name (see `KNOB_DOCS["t_min"]`, `dgemma/loop.py`). Feeds the same
+    live-`t_min` read `anneal_temperature` now uses for `t`/`temperature`
+    (see `_FrameCollector`), so a walker-mutated `t_min` is reflected
+    consistently across `t`/`temperature` and this field."""
 
     effective_t_max: float | None = None
     """Companion to `effective_entropy_bound`/`effective_t_min`:
-    `scheduler.config.t_max` read at this callback (ADR-CDG-011 clause 7)."""
+    `scheduler.config.t_max` read at this callback (ADR-CDG-011 clause 7) —
+    same TEMPERATURE units as `effective_t_min` (see `KNOB_DOCS["t_max"]`,
+    `dgemma/loop.py`)."""
 
     @property
     def committed_fraction(self) -> float:
@@ -330,6 +347,13 @@ class CanvasTrace:
     frames: list[DiffusionFrame]
     scheduler_name: str
     scheduler_config: dict
+    """The `entropy_bound` (nats)/`t_min`/`t_max` (temperatures — dimensionless
+    softmax(z/T) endpoints, NOT schedule positions despite the lowercase-`t`
+    names) requested for this run, plus `num_inference_steps_requested`/
+    `num_inference_steps_effective` (see `_build_result`, `dgemma/loop.py`,
+    for the full per-key provenance). Same units as `KNOB_DOCS`
+    (`dgemma/loop.py`) mints once for every knob-facing door — see there for
+    the authoritative terms-and-units vocabulary this dict's keys instantiate."""
 
     raw_canvas_ids: Any | None = None
     """Pre-excision final canvas ids (ADR-CDG-014 Decision 6, issue #11):
