@@ -78,9 +78,16 @@ class TestDGemmaEncodeMintAndAdvance:
         (first,) = node.encode(model, "hello")
         (second,) = node.encode(model, " world", kv_cache=first)
 
-        assert second.provenance.minting_sequence[: len(first.provenance.minting_sequence)] == (
-            first.provenance.minting_sequence
+        # The advance must EXTEND the minting_sequence by the newly-encoded
+        # ids (ADR-CDG-012 §D.1 IN-3: "minting_sequence extends by the
+        # committed ids") — a prefix-only check passes even if the advance
+        # forgets to append, so pin both the prefix AND the strict growth by
+        # exactly the second call's token ids.
+        second_ids = tuple(
+            getattr(model.processor, "tokenizer", model.processor).encode(" world")
         )
+        assert second.provenance.minting_sequence == first.provenance.minting_sequence + second_ids
+        assert len(second.provenance.minting_sequence) > len(first.provenance.minting_sequence)
         assert sum(second.cumulative_length) > sum(first.cumulative_length)
 
     def test_kv_cache_none_default_mints_fresh(self, dgemma_model_factory):
