@@ -1,0 +1,955 @@
+{
+  "id": "f0130186-33cf-4265-9228-98be9381db06",
+  "revision": 0,
+  "last_node_id": 94,
+  "last_link_id": 77,
+  "nodes": [
+    {
+      "id": 82,
+      "type": "easy showAnything",
+      "pos": [
+        170,
+        810
+      ],
+      "size": [
+        440,
+        976
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "anything",
+          "shape": 7,
+          "type": "*",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "54d080bf6a4f52da287e984f305243c10db097f5",
+        "Node name for S&R": "easy showAnything",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |",
+        "thought\nHere are 23 random numerals, followed by a frequency table.\n\n### The Random Numerals:\n**7, 0, 2, 9, 4, 1, 1, 8, 5, 3, 2, 7, 0, 4, 4, 6, 1, 8, 7, 0, 5, 2, 9**\n\n***\n\n### Frequency Table\n\n| Numeral | Count |\n| :--- | :--- |\n| 0 | 3 |\n| 1 | 3 |\n| 2 | 3 |\n| 3 | 1 |\n| 4 | 3 |\n| 5 | 2 |\n| 6 | 1 |\n| 7 | 3 |\n| 8 | 2 |\n| 9 | 2 |\n| **Total** | **23** |"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 76,
+      "type": "DGemmaTrace",
+      "pos": [
+        -190,
+        -70
+      ],
+      "size": [
+        210,
+        110
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "canvas_trace",
+          "type": "DGEMMA_CANVAS_TRACE",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "heatmap",
+          "type": "IMAGE",
+          "links": [
+            11
+          ]
+        },
+        {
+          "name": "summary",
+          "type": "STRING",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-diffusiongemma",
+        "ver": "455dd09e43b11f31ce6edee0882d06fbbf31db87",
+        "Node name for S&R": "DGemmaTrace",
+        "aux_id": "shanevcantwell/ComfyUI-DiffusionGemma",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "cell_px": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        24,
+        "commit"
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 90,
+      "type": "Note",
+      "pos": [
+        50,
+        -70
+      ],
+      "size": [
+        470,
+        90
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Heatmap — watch the answer crystallize",
+      "properties": {
+        "text": "Pixel = one position x one step. X = positions, Y = steps (top->bottom). WHITE = changed this step (still moving), BLACK = locked in. Black spreading down = the commit front; early + all-at-once = premature crystallization.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Pixel = one position x one step. X = positions, Y = steps (top->bottom). WHITE = changed this step (still moving), BLACK = locked in. Black spreading down = the commit front; early + all-at-once = premature crystallization."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 77,
+      "type": "PreviewImage",
+      "pos": [
+        -190,
+        -250
+      ],
+      "size": [
+        710,
+        246
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 11
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "Preview Heatmap",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 91,
+      "type": "Note",
+      "pos": [
+        180,
+        590
+      ],
+      "size": [
+        340,
+        90
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "CanvasState — is the answer actually done?",
+      "properties": {
+        "text": "Is the text really finished? converged = schedule bottomed out (NOT proof of EOS). turn_closed = a real stop was hit. committed_fraction / steps_used = how far it got. Tell: converged=True but turn_closed=False = looks done, didn't finish.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Is the text really finished? converged = schedule bottomed out (NOT proof of EOS). turn_closed = a real stop was hit. committed_fraction / steps_used = how far it got. Tell: converged=True but turn_closed=False = looks done, didn't finish."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 92,
+      "type": "Note",
+      "pos": [
+        -190,
+        590
+      ],
+      "size": [
+        340,
+        90
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Trace Summary — the run's vitals",
+      "properties": {
+        "text": "Run vitals: scheduler + knobs, steps actually taken, and the avalanche curve (committed fraction per step, climbing to 1.0). Steep early climb = committed hard and fast, maybe a wrong basin. Also confirms no fixed MASK sentinel.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Run vitals: scheduler + knobs, steps actually taken, and the avalanche curve (committed fraction per step, climbing to 1.0). Steep early climb = committed hard and fast, maybe a wrong basin. Also confirms no fixed MASK sentinel."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 72,
+      "type": "DGemmaLoader",
+      "pos": [
+        -1250,
+        570
+      ],
+      "size": [
+        280,
+        110
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "DGEMMA_MODEL",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-diffusiongemma",
+        "ver": "455dd09e43b11f31ce6edee0882d06fbbf31db87",
+        "Node name for S&R": "DGemmaLoader",
+        "aux_id": "shanevcantwell/ComfyUI-DiffusionGemma",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "repo_id": true,
+            "quant": true,
+            "local_files_only": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "google/diffusiongemma-26B-A4B-it",
+        "none",
+        false
+      ],
+      "color": "#323",
+      "bgcolor": "#535"
+    },
+    {
+      "id": 87,
+      "type": "Note",
+      "pos": [
+        -1250,
+        740
+      ],
+      "size": [
+        280,
+        110
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Model & hardware",
+      "properties": {
+        "text": "First run auto-downloads ~53 GB (bf16) from HuggingFace and caches it. Wants >=60 GB GPU; smaller cards offload and slow. quant=none only. local_files_only = run offline once cached.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "First run auto-downloads ~53 GB (bf16) from HuggingFace and caches it. Wants >=60 GB GPU; smaller cards offload and slow. quant=none only. local_files_only = run offline once cached."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 88,
+      "type": "Note",
+      "pos": [
+        -1250,
+        910
+      ],
+      "size": [
+        280,
+        130
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Knobs to play with",
+      "properties": {
+        "text": "steps = denoise passes. t_min/t_max = temperature window (hotter/longer delays commitment). entropy_bound + confidence = what freezes each step. gen_length = canvas size. thinking = reasoning channel. Try: steps 48, t 0.4-0.8, eb 0.05, conf 0.005.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "steps = denoise passes. t_min/t_max = temperature window (hotter/longer delays commitment). entropy_bound + confidence = what freezes each step. gen_length = canvas size. thinking = reasoning channel. Try: steps 48, t 0.4-0.8, eb 0.05, conf 0.005."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 93,
+      "type": "DGemmaRunLogWriter",
+      "pos": [
+        -610,
+        710
+      ],
+      "size": [
+        330,
+        150
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "canvas_trace",
+          "type": "DGEMMA_CANVAS_TRACE",
+          "link": 74
+        },
+        {
+          "name": "run_config",
+          "type": "DGEMMA_RUN_CONFIG",
+          "link": 73
+        },
+        {
+          "name": "frames",
+          "type": "STRING",
+          "link": 75
+        },
+        {
+          "name": "canvas_state",
+          "type": "DGEMMA_CANVAS_STATE",
+          "link": 76
+        }
+      ],
+      "outputs": [
+        {
+          "name": "log_path",
+          "type": "STRING",
+          "links": [
+            77
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-diffusiongemma",
+        "ver": "d36555bc51fa216144511994ee295107a8f68e43",
+        "Node name for S&R": "DGemmaRunLogWriter"
+      },
+      "widgets_values": [
+        "dgemma_run_log",
+        "/srv/dev/DG-runs/"
+      ],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 86,
+      "type": "Note",
+      "pos": [
+        -970,
+        370
+      ],
+      "size": [
+        360,
+        90
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "What this is",
+      "properties": {
+        "text": "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed.",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Diffusion text: the model denoises a whole token canvas over N steps, not left-to-right. This graph lets you watch it crystallize. Observability, not speed."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 94,
+      "type": "PreviewAny",
+      "pos": [
+        -610,
+        920
+      ],
+      "size": [
+        330,
+        120
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 77
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        true
+      ],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 78,
+      "type": "PreviewAny",
+      "pos": [
+        -190,
+        70
+      ],
+      "size": [
+        340,
+        460
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview Trace Summary",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        null,
+        null,
+        true
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 75,
+      "type": "PreviewAny",
+      "pos": [
+        180,
+        70
+      ],
+      "size": [
+        340,
+        460
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview CanvasState",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        null,
+        null,
+        true
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 74,
+      "type": "PreviewAny",
+      "pos": [
+        -190,
+        810
+      ],
+      "size": [
+        330,
+        450
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "Preview Text",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewAny",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        null,
+        null,
+        true
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 73,
+      "type": "DGemmaSampler",
+      "pos": [
+        -940,
+        570
+      ],
+      "size": [
+        300,
+        470
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "DGEMMA_MODEL",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "canvas_state",
+          "type": "DGEMMA_CANVAS_STATE",
+          "links": [
+            9,
+            76
+          ]
+        },
+        {
+          "name": "canvas_trace",
+          "type": "DGEMMA_CANVAS_TRACE",
+          "links": [
+            10,
+            74
+          ]
+        },
+        {
+          "name": "frames",
+          "shape": 6,
+          "type": "STRING",
+          "links": [
+            15,
+            75
+          ]
+        },
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            72
+          ]
+        },
+        {
+          "name": "run_config",
+          "type": "DGEMMA_RUN_CONFIG",
+          "links": [
+            73
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-diffusiongemma",
+        "ver": "455dd09e43b11f31ce6edee0882d06fbbf31db87",
+        "Node name for S&R": "DGemmaSampler",
+        "aux_id": "shanevcantwell/ComfyUI-DiffusionGemma",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "prompt": true,
+            "seed": true,
+            "num_inference_steps": true,
+            "t_min": true,
+            "t_max": true,
+            "entropy_bound": true,
+            "confidence": true,
+            "gen_length": true,
+            "thinking": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Generate 23 random numerals, then complete a table with a count of the instances of each numeral.",
+        42,
+        "fixed",
+        48,
+        0.4,
+        0.8,
+        0.05,
+        0.005,
+        256,
+        false
+      ],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 85,
+      "type": "PreviewImage",
+      "pos": [
+        -190,
+        1320
+      ],
+      "size": [
+        330,
+        500
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 72
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    }
+  ],
+  "links": [
+    [
+      7,
+      72,
+      0,
+      73,
+      0,
+      "DGEMMA_MODEL"
+    ],
+    [
+      8,
+      73,
+      0,
+      74,
+      0,
+      "STRING"
+    ],
+    [
+      9,
+      73,
+      1,
+      75,
+      0,
+      "DGEMMA_CANVAS_STATE"
+    ],
+    [
+      10,
+      73,
+      2,
+      76,
+      0,
+      "DGEMMA_CANVAS_TRACE"
+    ],
+    [
+      11,
+      76,
+      0,
+      77,
+      0,
+      "IMAGE"
+    ],
+    [
+      12,
+      76,
+      1,
+      78,
+      0,
+      "STRING"
+    ],
+    [
+      15,
+      73,
+      3,
+      82,
+      0,
+      "STRING"
+    ],
+    [
+      72,
+      73,
+      4,
+      85,
+      0,
+      "IMAGE"
+    ],
+    [
+      73,
+      73,
+      5,
+      93,
+      1,
+      "DGEMMA_RUN_CONFIG"
+    ],
+    [
+      74,
+      73,
+      2,
+      93,
+      0,
+      "DGEMMA_CANVAS_TRACE"
+    ],
+    [
+      75,
+      73,
+      3,
+      93,
+      2,
+      "STRING"
+    ],
+    [
+      76,
+      73,
+      1,
+      93,
+      3,
+      "DGEMMA_CANVAS_STATE"
+    ],
+    [
+      77,
+      93,
+      0,
+      94,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "Sampling",
+      "bounding": [
+        -1260,
+        500,
+        990,
+        550
+      ],
+      "color": "#A88",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "Metadata",
+      "bounding": [
+        -200,
+        -320,
+        730,
+        1010
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "Outputs",
+      "bounding": [
+        -200,
+        740,
+        820,
+        1090
+      ],
+      "color": "#8A8",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.0566556110000542,
+      "offset": [
+        749.2779093423493,
+        -243.14880742717122
+      ]
+    },
+    "ue_links": [],
+    "frontendVersion": "1.45.20",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
