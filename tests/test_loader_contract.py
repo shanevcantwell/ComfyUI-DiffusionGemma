@@ -163,15 +163,14 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     }
 
 
-def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
-    """`local_files_only` stays off (download-permitting) by default when only
-    the required kwargs are passed — the HF-cache flow honors the toggle as
-    given, not a hardcoded True (ratification 2026-07-13: the dropdown-only
-    unconditional-True behavior was reverted)."""
-    captured = {}
+def test_loader_offline_first_succeeds_when_cached(monkeypatch):
+    """When the model is cached locally, `load()` tries offline first and
+    succeeds — no network calls made. This eliminates the HEAD-request
+    latency that previously added ~1 min before actual load."""
+    captured = []
 
     def fake_load_model(repo_id, quant, local_files_only):
-        captured["local_files_only"] = local_files_only
+        captured.append(local_files_only)
         return object()
 
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
@@ -179,7 +178,49 @@ def test_loader_local_files_only_defaults_to_false_when_omitted(monkeypatch):
     node = DGemmaLoader()
     node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
 
-    assert captured["local_files_only"] is False
+    # Single call, offline-first — no network needed when cached
+    assert captured == [True]
+
+
+def test_loader_falls_back_to_network_on_cache_miss(monkeypatch):
+    """When the model is NOT cached locally, `load()` catches
+    LocalEntryNotFoundError and retries with network access."""
+    from huggingface_hub.errors import LocalEntryNotFoundError
+    captured = []
+
+    def fake_load_model(repo_id, quant, local_files_only):
+        captured.append(local_files_only)
+        if local_files_only:
+            raise LocalEntryNotFoundError("not cached")
+        return object()
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+
+    # First try offline (fails), then retry online
+    assert captured == [True, False]
+
+
+def test_loader_respects_explicit_local_files_only_true(monkeypatch):
+    """When user explicitly sets `local_files_only=True` and cache is empty,
+    the error propagates — no silent network fallback."""
+    from huggingface_hub.errors import LocalEntryNotFoundError
+    captured = []
+
+    def fake_load_model(repo_id, quant, local_files_only):
+        captured.append(local_files_only)
+        raise LocalEntryNotFoundError("not cached")
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    with pytest.raises(LocalEntryNotFoundError):
+        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+
+    # Only one call — no retry when user explicitly requested offline
+    assert captured == [True]
 
 
 def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch):
