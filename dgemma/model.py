@@ -405,11 +405,13 @@ def _assert_tie_integrity(model) -> None:
         head_dim = sliding_head_dim if (is_sliding or not global_head_dim) else global_head_dim
         expected_shape = (num_attention_heads * head_dim, hidden_size)
 
-        enc_weight = encoder_layers[layer_idx].self_attn.q_proj.weight
-        dec_weight = decoder_layers[layer_idx].self_attn.q_proj.weight
+        enc_q_proj = encoder_layers[layer_idx].self_attn.q_proj
+        dec_q_proj = decoder_layers[layer_idx].self_attn.q_proj
+        enc_weight = enc_q_proj.weight
+        dec_weight = dec_q_proj.weight
 
         shape_ok = tuple(enc_weight.shape) == expected_shape
-        tie_ok = _tensor_ties_match(enc_weight, dec_weight)
+        tie_ok = _tensor_ties_match(enc_q_proj, dec_q_proj)
 
         if not shape_ok or not tie_ok:
             device_map = getattr(model, "hf_device_map", None)
@@ -434,26 +436,70 @@ def _assert_tie_integrity(model) -> None:
             )
 
 
-def _tensor_ties_match(enc_weight, dec_weight) -> bool:
-    """Same tensor (fast path, the common in-memory-tie case) OR
-    value-equal (the offload/meta-tensor case, where `data_ptr()`/identity
-    is not a reliable tie signal per the forensic verdict's toy-reproducer
-    finding that `torch.equal` itself can raise on meta tensors — this
-    helper narrows that to a clean boolean the guard can act on, catching
-    exactly the meta-tensor `NotImplementedError` and treating an
-    unresolvable comparison as a mismatch rather than crashing the guard
-    itself).
+def _resolve_meta_weight(module):
+    """Resolve `module.weight` to its real (non-meta) backing tensor when the
+    module sits under a cpu-offloaded `AlignDevicesHook(offload=True)` — the
+    common `device_map="auto"` + CPU-spill regime (2026-07-22 false-positive
+    probe on issue #119). Under that hook, the parameter itself is meta-at-rest
+    and the real data lives in `module._hf_hook.weights_map`, a
+    `PrefixedDataset` keyed by the parameter's LOCAL name (`"weight"`), not its
+    fully-qualified module path — so the lookup is always `weights_map["weight"]`,
+    resolved independently per side (one side may be GPU-resident while the
+    other is offloaded; the two sides are never assumed symmetric).
 
-    Meta tensors are EXCLUDED from the fast `data_ptr()` identity path
-    (mirrors transformers' own `tie_weights`, `modeling_utils.py`'s "In case
-    the AlignDevicesHook is on meta device, ignore tied weights as
-    data_ptr() is then always zero" comment): every meta tensor's
-    `data_ptr()` reads `0`, so two UNRELATED meta tensors would otherwise
-    spuriously compare as tied."""
-    if enc_weight.shape != dec_weight.shape:
+    Returns the resolved tensor, or `None` when the weight is meta and there is
+    no resolvable hook/weights_map to resolve it through — a genuinely
+    unverifiable tie, which the caller must treat as a failure, not a pass."""
+    weight = module.weight
+    if not weight.is_meta:
+        return weight
+    hook = getattr(module, "_hf_hook", None)
+    weights_map = getattr(hook, "weights_map", None)
+    if weights_map is None:
+        return None
+    try:
+        return weights_map["weight"]
+    except KeyError:
+        return None
+
+
+def _tensor_ties_match(enc_module, dec_module) -> bool:
+    """Same tensor (fast path, the common in-memory-tie case) OR
+    value-equal (the offload/meta-tensor case).
+
+    Takes the encoder/decoder `q_proj` MODULES (not bare `.weight` tensors) so
+    a meta-at-rest weight — the state accelerate's `AlignDevicesHook(offload=
+    True)` leaves the live parameter in — can be resolved to its real backing
+    tensor via `_resolve_meta_weight` before any comparison is attempted. This
+    closes the false-positive the 2026-07-22 discriminating probe found on
+    issue #119: `torch.equal` itself raises `NotImplementedError` on a meta
+    tensor ("Cannot copy out of meta tensor; no data!"), and the previous
+    version of this helper caught that into an unconditional `False` — so
+    every cpu-offloaded sampled layer reported a broken tie even when the tie
+    was, per the probe's three independent checks (shared weights_map storage,
+    hook-materialized `data_ptr` equality, and coherent live generation with
+    the guard bypassed), fully intact.
+
+    Meta tensors are EXCLUDED from the fast `data_ptr()` identity path on the
+    UNRESOLVED weight (mirrors transformers' own `tie_weights`,
+    `modeling_utils.py`'s "In case the AlignDevicesHook is on meta device,
+    ignore tied weights as data_ptr() is then always zero" comment): every
+    meta tensor's `data_ptr()` reads `0`, so two UNRELATED meta tensors would
+    otherwise spuriously compare as tied. Resolution happens first, then the
+    same identity/equality logic runs on the resolved (never-meta) tensors."""
+    if enc_module.weight.shape != dec_module.weight.shape:
         return False
+
+    enc_weight = _resolve_meta_weight(enc_module)
+    dec_weight = _resolve_meta_weight(dec_module)
+    if enc_weight is None or dec_weight is None:
+        # A meta weight with no resolvable _hf_hook/weights_map — genuinely
+        # unverifiable. Never silently pass an unverifiable tie.
+        return False
+
     same_real_storage = (
         enc_weight.device.type != "meta"
+        and dec_weight.device.type != "meta"
         and enc_weight.device == dec_weight.device
         and enc_weight.data_ptr() == dec_weight.data_ptr()
     )
@@ -461,9 +507,11 @@ def _tensor_ties_match(enc_weight, dec_weight) -> bool:
         return True
     try:
         return bool(torch.equal(enc_weight.detach().to("cpu"), dec_weight.detach().to("cpu")))
-    except (RuntimeError, NotImplementedError):
-        # Meta tensors (still on the meta device at guard time) or any other
-        # unresolvable comparison — never silently pass an unverifiable tie.
+    except (RuntimeError, NotImplementedError):  # pragma: no cover — backstop only: both
+        # branches above resolve meta tensors before this line runs, so the healthy
+        # offloaded-tie path (this fix's actual target) never reaches this except;
+        # kept as a non-crashing backstop for any other unresolvable comparison —
+        # never silently pass an unverifiable tie.
         return False
 
 

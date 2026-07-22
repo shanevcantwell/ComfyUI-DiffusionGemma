@@ -248,41 +248,200 @@ class TestTieIntegrityGuardCatchesCorruption:
                 model.model.encoder(input_ids=ids, attention_mask=torch.ones_like(ids))
 
 
+class _ModuleStub:
+    """Bare stand-in for `nn.Linear`-shaped `q_proj` modules: just a `.weight`
+    attribute, no `_hf_hook` (mirrors an un-dispatched/non-offloaded module).
+    `_tensor_ties_match`'s contract (fix #119 amendment) takes MODULES, not
+    bare tensors, so unit coverage on the non-offload paths needs something
+    with a `.weight` to pass in place of a real `nn.Linear`."""
+
+    def __init__(self, weight):
+        self.weight = weight
+
+
 class TestTensorTiesMatch:
     """Unit coverage for the helper `_assert_tie_integrity` uses to decide
     tie correctness — same-tensor fast path, value-equal fallback, and the
     meta-tensor `torch.equal` `NotImplementedError` the forensic verdict's
     toy reproducer independently found (fix candidate 3's upstream-crash
-    finding) must degrade to "not tied," never propagate out of the guard."""
+    finding) must degrade to "not tied," never propagate out of the guard.
+
+    These cases exercise the non-offload paths (no `_hf_hook` on the module —
+    `_resolve_meta_weight` returns the weight unchanged when it isn't meta).
+    The offload-aware `weights_map` resolution path is covered separately by
+    `TestTensorTiesMatchUnderRealOffload` below, against real accelerate
+    dispatch machinery."""
 
     def test_same_tensor_is_tied(self):
         w = torch.randn(4, 4)
-        assert _tensor_ties_match(w, w) is True
+        assert _tensor_ties_match(_ModuleStub(w), _ModuleStub(w)) is True
 
     def test_equal_values_different_storage_is_tied(self):
         a = torch.ones(4, 4)
         b = torch.ones(4, 4)
         assert a is not b
-        assert _tensor_ties_match(a, b) is True
+        assert _tensor_ties_match(_ModuleStub(a), _ModuleStub(b)) is True
 
     def test_different_shape_is_not_tied(self):
         a = torch.ones(4, 4)
         b = torch.ones(1, 4)
-        assert _tensor_ties_match(a, b) is False
+        assert _tensor_ties_match(_ModuleStub(a), _ModuleStub(b)) is False
 
     def test_different_values_is_not_tied(self):
         a = torch.zeros(4, 4)
         b = torch.ones(4, 4)
-        assert _tensor_ties_match(a, b) is False
+        assert _tensor_ties_match(_ModuleStub(a), _ModuleStub(b)) is False
 
-    def test_meta_tensor_comparison_degrades_to_not_tied(self):
-        """The forensic verdict's toy reproducer found `torch.equal` itself
-        raises `NotImplementedError` on meta tensors (transformers 5.13.0 +
-        this torch build) — the helper must catch that and report "not
-        tied" rather than letting the guard crash on an unrelated error."""
+    def test_meta_tensor_with_no_hook_is_not_tied(self):
+        """A meta weight with no `_hf_hook` at all (never dispatched through
+        accelerate) has no resolvable `weights_map` — `_resolve_meta_weight`
+        must return `None` and the guard must report "not tied" rather than
+        raising `AttributeError` or silently passing an unverifiable tie."""
         a = torch.empty(4, 4, device="meta")
         b = torch.empty(4, 4, device="meta")
-        assert _tensor_ties_match(a, b) is False
+        assert _tensor_ties_match(_ModuleStub(a), _ModuleStub(b)) is False
+
+
+@pytest.fixture()
+def toy_model_cpu_offloaded(toy_checkpoint_dir):
+    """Dispatches the shrunk tied model through REAL accelerate offload
+    machinery (`attach_align_device_hook`, the primitive `accelerate.cpu_offload`
+    and `dispatch_model` themselves call) so every module ends up meta-at-rest
+    with a genuine `AlignDevicesHook(offload=True)` + `weights_map` attached —
+    mirroring what `device_map="auto"` + CPU-spill produces in production, and
+    the exact state the 2026-07-22 discriminating probe found tripping the
+    pre-amendment guard into a false positive (issue #119).
+
+    Loaded single-device first (mirrors this repo's own `toy_model_single_device`
+    fixture) so the tie is genuine Python-object identity before offload
+    reshapes storage into the hook's `weights_map`."""
+    from transformers import DiffusionGemmaForBlockDiffusion
+
+    model = DiffusionGemmaForBlockDiffusion.from_pretrained(
+        toy_checkpoint_dir, dtype=torch.bfloat16, device_map={"": "cpu"}
+    )
+    state_dict = {n: p.to("cpu") for n, p in model.state_dict().items()}
+    from accelerate.hooks import attach_align_device_hook
+
+    attach_align_device_hook(
+        model,
+        execution_device=torch.device("cuda:0"),
+        offload=True,
+        weights_map=state_dict,
+    )
+    return model, state_dict
+
+
+class TestTensorTiesMatchUnderRealOffload:
+    """Offload-aware amendment coverage (2026-07-22, issue #119 false-positive
+    probe): the pre-amendment guard swallowed meta tensors' `torch.equal`
+    `NotImplementedError` into an unconditional `False`, so ANY cpu-offloaded
+    sampled layer reported a broken tie even when — per the probe's three
+    independent checks (shared `weights_map` storage, hook-materialized
+    `data_ptr` equality, coherent generation with the guard bypassed) — the
+    tie was fully intact. These tests drive the REAL accelerate dispatch
+    machinery (`attach_align_device_hook`), not a mock of the guard's own
+    comparison."""
+
+    def test_healthy_offloaded_tie_passes(self, toy_model_cpu_offloaded):
+        model, _ = toy_model_cpu_offloaded
+        enc_q = model.model.encoder.language_model.layers[1].self_attn.q_proj
+        dec_q = model.model.decoder.layers[1].self_attn.q_proj
+
+        assert enc_q.weight.is_meta and dec_q.weight.is_meta  # sanity: genuinely offloaded
+        assert _tensor_ties_match(enc_q, dec_q) is True
+
+        # And the full guard, exercised end-to-end, must not raise either.
+        _assert_tie_integrity(model)
+
+    def test_healthy_offloaded_tie_passes_at_last_layer(self, toy_model_cpu_offloaded):
+        """The guard samples layer 0 and the last layer — the false positive
+        was found specifically at the last layer in the live-verify run
+        (layer 29 of the real 26-layer checkpoint), so this repeats the
+        healthy-tie check at this toy config's last layer explicitly."""
+        model, _ = toy_model_cpu_offloaded
+        last_idx = model.config.text_config.num_hidden_layers - 1
+        enc_q = model.model.encoder.language_model.layers[last_idx].self_attn.q_proj
+        dec_q = model.model.decoder.layers[last_idx].self_attn.q_proj
+
+        assert enc_q.weight.is_meta and dec_q.weight.is_meta
+        assert _tensor_ties_match(enc_q, dec_q) is True
+
+    def test_perturbed_weights_map_entry_is_detected(self, toy_checkpoint_dir):
+        """Perturb ONE side's weights_map entry to genuinely different
+        storage/values (not just a different Python object) before attaching
+        the offload hooks — the resolved-tensor comparison must still catch
+        the mismatch and the full guard must raise with the actionable
+        message, not silently pass because both sides are meta."""
+        from accelerate.hooks import attach_align_device_hook
+        from transformers import DiffusionGemmaForBlockDiffusion
+
+        model = DiffusionGemmaForBlockDiffusion.from_pretrained(
+            toy_checkpoint_dir, dtype=torch.bfloat16, device_map={"": "cpu"}
+        )
+        state_dict = {n: p.to("cpu") for n, p in model.state_dict().items()}
+        perturbed_key = "model.encoder.language_model.layers.0.self_attn.q_proj.weight"
+        assert perturbed_key in state_dict  # sanity: key actually present pre-perturbation
+        state_dict[perturbed_key] = torch.zeros_like(state_dict[perturbed_key])
+
+        attach_align_device_hook(
+            model,
+            execution_device=torch.device("cuda:0"),
+            offload=True,
+            weights_map=state_dict,
+        )
+
+        enc_q = model.model.encoder.language_model.layers[0].self_attn.q_proj
+        dec_q = model.model.decoder.layers[0].self_attn.q_proj
+        assert enc_q.weight.is_meta and dec_q.weight.is_meta  # still genuinely offloaded
+        assert _tensor_ties_match(enc_q, dec_q) is False
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _assert_tie_integrity(model)
+        message = str(excinfo.value)
+        assert "tied" in message.lower()
+        assert "119" in message
+
+    def test_meta_weight_with_hook_stripped_is_not_tied(self, toy_model_cpu_offloaded):
+        """A module whose weight is meta but whose `_hf_hook` has been
+        removed (e.g. a partial/broken dispatch state) has no resolvable
+        `weights_map` — `_resolve_meta_weight` must return `None` and the
+        guard must report "not tied," not silently pass an unverifiable tie
+        by falling through to some other comparison."""
+        model, _ = toy_model_cpu_offloaded
+        enc_q = model.model.encoder.language_model.layers[0].self_attn.q_proj
+        dec_q = model.model.decoder.layers[0].self_attn.q_proj
+        assert enc_q.weight.is_meta  # still meta after the hook is stripped below
+
+        del enc_q._hf_hook
+
+        assert _tensor_ties_match(enc_q, dec_q) is False
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _assert_tie_integrity(model)
+        assert "119" in str(excinfo.value)
+
+    def test_meta_weight_with_missing_weights_map_entry_is_not_tied(self, toy_model_cpu_offloaded):
+        """A module whose `_hf_hook.weights_map` is present but genuinely
+        missing the `"weight"` key (a corrupted/incomplete offload store,
+        distinct from `_hf_hook` being absent entirely) must degrade to "not
+        tied" via `_resolve_meta_weight`'s `KeyError` branch, not raise
+        `KeyError` out of the guard."""
+        model, _ = toy_model_cpu_offloaded
+        enc_q = model.model.encoder.language_model.layers[0].self_attn.q_proj
+        dec_q = model.model.decoder.layers[0].self_attn.q_proj
+        assert enc_q.weight.is_meta
+
+        weights_map = enc_q._hf_hook.weights_map
+        key = weights_map.prefix + "weight"
+        assert key in weights_map.dataset  # sanity: entry present before deletion
+        del weights_map.dataset[key]
+
+        assert _tensor_ties_match(enc_q, dec_q) is False
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _assert_tie_integrity(model)
+        assert "119" in str(excinfo.value)
 
 
 class TestPairwiseColocatedDeviceMap:
