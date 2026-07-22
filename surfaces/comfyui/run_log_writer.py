@@ -72,11 +72,11 @@ def _resolve_output_path(filename_prefix: str, debug_log_path: str) -> Path:
     counter" input here to disambiguate on)."""
     if debug_log_path:
         output_path = Path(debug_log_path)
-        # User may provide an existing directory — append the default filename.
-        # Unlike the ComfyUI fallback path (which uses timestamps/counters),
-        # repeated runs to the same directory will overwrite the previous log.
+        # User may provide an existing directory — append a timestamped filename
+        # so repeated runs don't collide (matching the ComfyUI fallback path).
         if output_path.is_dir():
-            return output_path / f"{filename_prefix}.jsonl"
+            timestamp = time.strftime("%Y%m%dT%H%M%S")
+            return output_path / f"{filename_prefix}_{timestamp}.jsonl"
         return output_path
 
     if folder_paths is None:

@@ -166,15 +166,30 @@ class TestResolveOutputPath:
 
     def test_debug_log_path_existing_directory_appends_filename(self, tmp_path):
         """When debug_log_path points to an existing directory, append
-        {filename_prefix}.jsonl — this is the user-facing path that was
-        broken before (IsADirectoryError when passing a directory)."""
+        {filename_prefix}_{timestamp}.jsonl — timestamped so repeated runs
+        don't collide (matching the ComfyUI fallback path)."""
         resolved = _resolve_output_path("my_run", str(tmp_path))
-        assert resolved == tmp_path / "my_run.jsonl"
+        assert resolved.parent == tmp_path
+        assert resolved.name.startswith("my_run_")
+        assert resolved.suffix == ".jsonl"
+
+    def test_debug_log_path_directory_repeated_runs_produce_unique_files(self, tmp_path):
+        """Two calls with the same directory + prefix produce different paths.
+        Mock time.strftime to simulate distinct seconds."""
+        from unittest.mock import patch
+        timestamps = iter(["20260722T150000", "20260722T150001"])
+        with patch("surfaces.comfyui.run_log_writer.time") as mock_time:
+            mock_time.strftime = lambda fmt: next(timestamps)
+            path_a = _resolve_output_path("my_run", str(tmp_path))
+            path_b = _resolve_output_path("my_run", str(tmp_path))
+        assert path_a != path_b
+        assert path_a.name == "my_run_20260722T150000.jsonl"
+        assert path_b.name == "my_run_20260722T150001.jsonl"
 
     def test_debug_log_path_symlink_to_directory_appends_filename(self, tmp_path):
         """Symlinks to directories are followed by Path.is_dir() — the
         path keeps the symlink (which resolves at write time) and appends
-        the filename (same as a real directory)."""
+        a timestamped filename (same as a real directory)."""
         dir_target = tmp_path / "real_dir"
         dir_target.mkdir()
         symlink = tmp_path / "link_to_dir"
@@ -182,7 +197,8 @@ class TestResolveOutputPath:
         resolved = _resolve_output_path("my_run", str(symlink))
         # The path uses the symlink (not the resolved target) — it resolves
         # through the symlink when open() is called in write_run_log.
-        assert resolved == symlink / "my_run.jsonl"
+        assert resolved.name.startswith("my_run_")
+        assert resolved.suffix == ".jsonl"
 
     def test_no_override_and_no_folder_paths_raises(self, monkeypatch):
         monkeypatch.setattr("surfaces.comfyui.run_log_writer.folder_paths", None)
