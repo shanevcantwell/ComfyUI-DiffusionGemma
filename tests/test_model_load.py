@@ -90,8 +90,21 @@ class FakeProcessor:
     `load_model` never inspects it beyond storing it on `DGemmaModel`."""
 
 
+class FakeConfig:
+    """Stands in for `AutoConfig.from_pretrained`'s return value — `load_model`
+    only forwards this to `_resolve_placement` (fix #119), which this test
+    class stubs out (`_install_fakes` monkeypatches `_resolve_placement` to a
+    fixed `"auto"` return) so these kwargs-shape/error-wrapping tests stay
+    about `load_model`'s own request-building and error-mapping behavior —
+    not about placement policy or tie-integrity, which get their own real
+    (non-mocked) coverage against a genuine shrunk checkpoint in
+    `test_tie_integrity_guard.py`."""
+
+
 class TestLoadModel:
-    def _install_fakes(self, monkeypatch, captured: dict, hf_device_map=None, raise_on=None):
+    def _install_fakes(
+        self, monkeypatch, captured: dict, hf_device_map=None, raise_on=None, skip_tie_guard=True
+    ):
         def fake_from_pretrained(repo_id, **kwargs):
             if raise_on == "model":
                 raise OSError(f"{repo_id} is not a local folder and is not a valid model identifier")
@@ -106,10 +119,28 @@ class TestLoadModel:
             captured["processor_kwargs"] = kwargs
             return FakeProcessor()
 
+        def fake_config_from_pretrained(repo_id, **kwargs):
+            if raise_on == "config":
+                raise OSError(f"{repo_id} is not a local folder and is not a valid model identifier")
+            captured["config_repo_id"] = repo_id
+            captured["config_kwargs"] = kwargs
+            return FakeConfig()
+
         monkeypatch.setattr(
             "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
         )
         monkeypatch.setattr("dgemma.model.AutoProcessor.from_pretrained", fake_processor_from_pretrained)
+        monkeypatch.setattr("dgemma.model.AutoConfig.from_pretrained", fake_config_from_pretrained)
+        # This class exercises load_model's own kwargs-building/error-mapping
+        # behavior — _resolve_placement (fix #119 placement policy) and
+        # _assert_tie_integrity (fix #119 guard) are covered on their own
+        # merits, against real transformers objects, in
+        # test_tie_integrity_guard.py. Stubbing them here keeps a FakeHfModel
+        # (no real config/module tree) from tripping the guard's attribute
+        # access on a concern this class isn't testing.
+        if skip_tie_guard:
+            monkeypatch.setattr("dgemma.model._resolve_placement", lambda config, **kw: "auto")
+            monkeypatch.setattr("dgemma.model._assert_tie_integrity", lambda model: None)
 
     def test_load_kwargs_shape(self, monkeypatch):
         """quant="none" is the only path left: device_map="auto",
@@ -215,6 +246,8 @@ class TestLoadModel:
         ValueError raised inside from_pretrained (e.g. a real config bug)
         must propagate as itself, not get relabeled as a load-resolution
         error."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured)
 
         def raising_from_pretrained(repo_id, **kwargs):
             raise ValueError("unrelated config bug")
@@ -224,6 +257,72 @@ class TestLoadModel:
         )
 
         with pytest.raises(ValueError, match="unrelated config bug"):
+            load_model(repo_id="fake/repo")
+
+    def test_explicit_device_map_used_verbatim_and_skips_placement_policy(self, monkeypatch):
+        """fix #119: a caller-supplied `device_map` is never second-guessed —
+        `_resolve_placement` must not even be called, and `AutoConfig.from_pretrained`
+        (only needed to *decide* a placement) is skipped entirely."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, skip_tie_guard=True)
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("_resolve_placement must not be called when device_map is explicit")
+
+        monkeypatch.setattr("dgemma.model._resolve_placement", fail_if_called)
+
+        explicit_map = {"": "cpu"}
+        load_model(repo_id="fake/repo", device_map=explicit_map)
+
+        assert captured["kwargs"]["device_map"] == explicit_map
+        assert "config_repo_id" not in captured  # AutoConfig.from_pretrained never called
+
+    def test_no_explicit_device_map_calls_resolve_placement_with_fetched_config(self, monkeypatch):
+        """fix #119: the default (no explicit device_map) path fetches the
+        repo's config and hands it to `_resolve_placement` — this is the new
+        seam `_resolve_placement`'s own tests (test_tie_integrity_guard.py)
+        exercise directly; here we only check `load_model` wires it up."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, skip_tie_guard=True)
+
+        seen = {}
+
+        def fake_resolve_placement(config, **kwargs):
+            seen["config"] = config
+            return "auto"
+
+        monkeypatch.setattr("dgemma.model._resolve_placement", fake_resolve_placement)
+
+        load_model(repo_id="fake/repo")
+
+        assert captured["config_repo_id"] == "fake/repo"
+        assert isinstance(seen["config"], FakeConfig)
+        assert captured["kwargs"]["device_map"] == "auto"
+
+    def test_config_load_failure_raises_clean_runtime_error(self, monkeypatch):
+        """The config fetch (fix #119, needed only to decide placement) fails
+        the same way the model/processor fetches do — an actionable
+        RuntimeError, not a raw OSError."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, raise_on="config")
+
+        with pytest.raises(RuntimeError, match="fake/nonexistent-repo"):
+            load_model(repo_id="fake/nonexistent-repo")
+
+    def test_tie_integrity_guard_is_called_before_returning(self, monkeypatch):
+        """fix #119: `_assert_tie_integrity` runs on every load (unless a
+        test explicitly stubs it) — a real corruption must be visible to a
+        caller of `load_model`, not just to whoever calls the guard directly."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, skip_tie_guard=False)
+
+        def raising_guard(model):
+            raise RuntimeError("tie-integrity guard fired")
+
+        monkeypatch.setattr("dgemma.model._assert_tie_integrity", raising_guard)
+        monkeypatch.setattr("dgemma.model._resolve_placement", lambda config, **kw: "auto")
+
+        with pytest.raises(RuntimeError, match="tie-integrity guard fired"):
             load_model(repo_id="fake/repo")
 
 
