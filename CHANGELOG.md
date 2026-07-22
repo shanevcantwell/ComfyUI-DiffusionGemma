@@ -24,6 +24,7 @@ All notable user-facing changes to this project are documented here.
 - test-coverage-plan.md rewritten (100%/100% on run-landed files).
 
 ### Fixed
+- `DGemmaRunLogWriter`: `debug_log_path` as directory now appends `{filename_prefix}.jsonl` instead of writing to the directory path itself (#124).
 - Stale live-seam sampler arity test.
 - Stale walker docstring.
 
