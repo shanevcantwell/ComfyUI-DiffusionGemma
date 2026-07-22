@@ -24,6 +24,7 @@ All notable user-facing changes to this project are documented here.
 - test-coverage-plan.md rewritten (100%/100% on run-landed files).
 
 ### Fixed
+- #124 — `debug_log_path` as a directory now appends `{filename_prefix}.jsonl` instead of writing to the directory path itself (which created a file destroying the directory).
 - Stale live-seam sampler arity test.
 - Stale walker docstring.
 
