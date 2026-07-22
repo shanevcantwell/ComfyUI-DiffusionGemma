@@ -7,11 +7,12 @@ exists to honor): this module imports **only** stdlib +
 enforcement surface for that invariant is `test_e2e_import_guard.py`, not
 this docstring; keep it that way when editing this file.
 
-Three operator-scheduled preconditions are named in issue #59 §5 / ADR-CDG-013
-and are NOT satisfied as of this phase:
-1. The `custom_nodes` symlink at `/srv/dev/ComfyUI/custom_nodes/
-   ComfyUI-DiffusionGemma` is dead (points at a repo that no longer exists) —
-   repointing it touches the shared ComfyUI install and is operator-gated.
+Three operator-scheduled preconditions are named in issue #59 §5 / ADR-CDG-013:
+1. `/srv/dev/ComfyUI/custom_nodes/ComfyUI-DiffusionGemma` must load *this*
+   pack's code — either a symlink resolving into this source clone, or a
+   real, independent git checkout whose HEAD matches this source clone's
+   HEAD (`_pack_identity()`, issue #122 — the original symlink-only check
+   rejected the real-checkout topology the operator's infra evolved to).
 2. The GPU must be free of llauncher's resident model-server tenants
    (`localhost:8081/8082`) — operator-coordinated infra.
 3. The real weights (`google/diffusiongemma-26B-A4B-it`, ~53.6GB) must be
@@ -79,16 +80,93 @@ def _comfyui_installed() -> bool:
     return COMFYUI_ROOT.is_dir() and (COMFYUI_ROOT / "main.py").is_file() and COMFYUI_VENV_PYTHON.is_file()
 
 
-def _pack_loadable() -> bool:
-    """The custom_nodes symlink must resolve to *this* pack root — the named
-    operator-gated precondition (issue #59 §5 precondition 1). A dead or
-    missing symlink means ComfyUI will not load the pack at all."""
-    if not CUSTOM_NODES_LINK.is_symlink() and not CUSTOM_NODES_LINK.exists():
-        return False
+def _git_head_sha(repo_dir: Path) -> str | None:
+    """`git rev-parse HEAD` for `repo_dir`, or None if it isn't a usable git
+    checkout (no `.git`, git not on PATH, detached/corrupt worktree, subprocess
+    failure, etc.) — every failure mode degrades to None rather than raising,
+    so callers can fold this into the existing SKIP-not-ERROR discipline."""
+    if not (repo_dir / ".git").exists():
+        return None
     try:
-        return CUSTOM_NODES_LINK.resolve() == PACK_ROOT.resolve() and CUSTOM_NODES_LINK.exists()
-    except OSError:
-        return False
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_dir),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
+def _pack_identity(
+    deployed_path: Path | None = None, source_root: Path | None = None
+) -> tuple[bool, str | None]:
+    """Whether ComfyUI will load *this* pack's code — the substantive
+    invariant behind issue #59 §5 precondition 1 — and, on failure, a
+    human-readable reason naming what was checked.
+
+    The gate conserves code IDENTITY (which commit is deployed), not the
+    ENVELOPE it arrived in (symlink vs. real directory) — see issue #122.
+    Two topologies satisfy identity:
+
+    (a) `deployed_path` is a symlink resolving into `source_root` — the
+        original topology, still supported.
+    (b) `deployed_path` is a real, independent git checkout whose HEAD
+        commit equals `source_root`'s HEAD commit — the topology the
+        operator's infra evolved to (issue #122); a fresh clone at the
+        same commit loads the identical code a symlink would.
+
+    A real checkout at a *different* commit is a stale deploy: a legitimate
+    SKIP naming both SHAs, not a hard failure.
+    """
+    if deployed_path is None:
+        deployed_path = CUSTOM_NODES_LINK
+    if source_root is None:
+        source_root = PACK_ROOT
+
+    if not deployed_path.is_symlink() and not deployed_path.exists():
+        return False, f"{deployed_path} does not exist"
+
+    if deployed_path.is_symlink():
+        try:
+            resolved = deployed_path.resolve()
+        except OSError:
+            return False, f"{deployed_path} is a symlink but could not be resolved"
+        if resolved == source_root.resolve() and deployed_path.exists():
+            return True, None
+        return False, (
+            f"{deployed_path} is a symlink resolving to {resolved}, "
+            f"not this pack's source ({source_root.resolve()})"
+        )
+
+    # Not a symlink: a real directory. Accept iff it's an independent git
+    # checkout whose HEAD matches the source clone's HEAD (issue #122).
+    deployed_sha = _git_head_sha(deployed_path)
+    if deployed_sha is None:
+        return False, (
+            f"{deployed_path} is a real directory (not a symlink) with no usable "
+            f"git checkout (.git missing or unreadable) — cannot verify code "
+            f"identity against this pack's source ({source_root})"
+        )
+    source_sha = _git_head_sha(source_root)
+    if source_sha is None:
+        return False, f"source clone {source_root} has no usable git checkout to compare against"
+    if deployed_sha == source_sha:
+        return True, None
+    return False, (
+        f"{deployed_path} is a real checkout at HEAD {deployed_sha}, which does not match "
+        f"this source clone's HEAD {source_sha} ({source_root}) — stale deploy"
+    )
+
+
+def _pack_loadable() -> bool:
+    """Boolean convenience wrapper around `_pack_identity()`."""
+    return _pack_identity()[0]
 
 
 def _free_port(port: int) -> bool:
@@ -108,11 +186,11 @@ def _skip_reason() -> str | None:
             f"ComfyUI install not found/usable at {COMFYUI_ROOT} "
             "(expected main.py + .venv/bin/python) — skipping e2e battery."
         )
-    if not _pack_loadable():
+    loadable, identity_reason = _pack_identity()
+    if not loadable:
         return (
-            f"custom_nodes symlink {CUSTOM_NODES_LINK} does not resolve to this pack "
-            f"({PACK_ROOT}) — operator-gated precondition (issue #59 §5.2) unmet; "
-            "skipping e2e battery."
+            f"pack identity check failed: {identity_reason} — operator-gated "
+            "precondition (issue #59 §5.2 / issue #122) unmet; skipping e2e battery."
         )
     if not _weights_cached():
         return (
