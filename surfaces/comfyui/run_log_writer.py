@@ -71,7 +71,13 @@ def _resolve_output_path(filename_prefix: str, debug_log_path: str) -> Path:
     never collide (unlike an image batch, there is no natural "batch
     counter" input here to disambiguate on)."""
     if debug_log_path:
-        return Path(debug_log_path)
+        output_path = Path(debug_log_path)
+        # User may provide an existing directory — append the default filename.
+        # Unlike the ComfyUI fallback path (which uses timestamps/counters),
+        # repeated runs to the same directory will overwrite the previous log.
+        if output_path.is_dir():
+            return output_path / f"{filename_prefix}.jsonl"
+        return output_path
 
     if folder_paths is None:
         raise RuntimeError(

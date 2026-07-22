@@ -164,6 +164,26 @@ class TestResolveOutputPath:
         resolved = _resolve_output_path("ignored_prefix", str(override))
         assert resolved == override
 
+    def test_debug_log_path_existing_directory_appends_filename(self, tmp_path):
+        """When debug_log_path points to an existing directory, append
+        {filename_prefix}.jsonl — this is the user-facing path that was
+        broken before (IsADirectoryError when passing a directory)."""
+        resolved = _resolve_output_path("my_run", str(tmp_path))
+        assert resolved == tmp_path / "my_run.jsonl"
+
+    def test_debug_log_path_symlink_to_directory_appends_filename(self, tmp_path):
+        """Symlinks to directories are followed by Path.is_dir() — the
+        path keeps the symlink (which resolves at write time) and appends
+        the filename (same as a real directory)."""
+        dir_target = tmp_path / "real_dir"
+        dir_target.mkdir()
+        symlink = tmp_path / "link_to_dir"
+        symlink.symlink_to(dir_target)
+        resolved = _resolve_output_path("my_run", str(symlink))
+        # The path uses the symlink (not the resolved target) — it resolves
+        # through the symlink when open() is called in write_run_log.
+        assert resolved == symlink / "my_run.jsonl"
+
     def test_no_override_and_no_folder_paths_raises(self, monkeypatch):
         monkeypatch.setattr("surfaces.comfyui.run_log_writer.folder_paths", None)
         with pytest.raises(RuntimeError, match="no ComfyUI folder_paths available"):
