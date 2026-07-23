@@ -223,13 +223,6 @@ class DGemmaLoader:
                 "default": DEFAULT_QUANT,
                 "tooltip": "none = full bf16 (~53GB VRAM) · autoround = pre-quantized INT4 (~30GB VRAM, requires auto-round extra)",
             }),
-            # Off by default: keep the HF download-and-cache behavior. On:
-            # forces both from_pretrained calls to resolve only from the local
-            # HF cache (no network) — useful once a checkpoint is already
-            # cached (e.g. tokenizer-only test runs). Kept active regardless of
-            # the folder_paths flag (ratification 2026-07-13): it applies to the
-            # HF-cache flow too and is wanted independent of the dropdown.
-            "local_files_only": ("BOOLEAN", {"default": False}),
         }
         spec: dict = {"required": required}
 
@@ -276,5 +269,7 @@ class DGemmaLoader:
                 )
             return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
 
-        # PRIMARY path: HF identifier. Pass the widget toggle through directly.
-        return (load_model(repo_id=None, quant=quant, local_files_only=local_files_only),)
+        # PRIMARY path: HF identifier. Always network-available — transformers
+        # checks cache before hitting the network. Issue #136: local_files_only
+        # widget removed; hardcoded False.
+        return (load_model(repo_id=None, quant=quant, local_files_only=False),)

@@ -60,18 +60,18 @@ def test_nodes_modules_do_not_import_comfy():
     assert not any(m == "comfy" or m.startswith("comfy.") for m in sys.modules)
 
 
-def test_loader_input_types_declares_quant_and_local_files_only():
+def test_loader_input_types_declares_quant_only():
     """Issue #132: repo_id is no longer a widget — the pack loads one model.
-    `quant` COMBO with tooltip and `local_files_only` BOOLEAN are in
-    `required`."""
+    Issue #136: local_files_only removed from widget — no user-facing value,
+    crashes on incomplete cache. Only `quant` COMBO remains."""
     spec = DGemmaLoader.INPUT_TYPES()
     assert "repo_id" not in spec["required"]
+    assert "local_files_only" not in spec["required"]
     assert "quant" in spec["required"]
     assert spec["required"]["quant"][0] == ["none", "autoround"]
     # quant has a tooltip explaining VRAM impact
     assert "tooltip" in spec["required"]["quant"][1]
     assert "VRAM" in spec["required"]["quant"][1]["tooltip"]
-    assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
 
 
 def test_loader_input_types_hides_folder_paths_dropdown_by_default():
@@ -140,11 +140,11 @@ def test_loader_declarations():
 
 
 def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
-    """Primary HF-identifier flow (ratification 2026-07-13): `load()` forwards
-    `repo_id=None`/`quant`/`local_files_only` to `load_model`, pure
-    pass-through/wrap (ADR-CDG-003). repo_id=None lets the core auto-select
-    the checkpoint matching quant mode: DEFAULT_REPO_ID for "none",
-    AUTOROUND_REPO_ID for "autoround"."""
+    """Primary HF-identifier flow: `load()` forwards `repo_id=None`/`quant`
+    to `load_model`, pure pass-through/wrap (ADR-CDG-003). repo_id=None lets
+    the core auto-select. Issue #136: local_files_only is hardcoded False —
+    no widget, always network-available (transformers checks cache first).
+    The compat param is accepted but ignored."""
     sentinel = object()
     captured = {}
 
@@ -157,14 +157,14 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    # repo_id param is compat-only — the loader passes None for auto-selection
+    # compat params (repo_id, local_files_only) accepted but ignored
     result = node.load(repo_id="any-value", quant="none", local_files_only=True)
 
     assert result == (sentinel,)
     assert captured == {
-        "repo_id": None,  # core auto-selects based on quant mode
+        "repo_id": None,
         "quant": "none",
-        "local_files_only": True,
+        "local_files_only": False,  # hardcoded — widget removed (#136)
     }
 
 
@@ -184,18 +184,17 @@ def test_loader_passes_none_repo_for_autoround_quant(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    result = node.load(quant="autoround", local_files_only=False)
+    result = node.load(quant="autoround")
 
     assert result == (sentinel,)
     assert captured["repo_id"] is None  # core auto-selects Intel INT4 checkpoint
     assert captured["quant"] == "autoround"
 
 
-def test_loader_passes_widget_default_false_through(monkeypatch):
-    """Widget default is `local_files_only=False` — the loader passes it
-    through directly, no forced offline-first. The kludge that always tried
-    `True` first then retried on cache miss violated ground physics:
-    the widget IS the ground truth, not a suggestion to override."""
+def test_loader_hardcodes_local_files_only_false(monkeypatch):
+    """Issue #136: local_files_only is hardcoded False — no widget, always
+    network-available. Transformers checks cache before hitting the network,
+    so this is identical to what every other ComfyUI loader does."""
     captured = []
 
     def fake_load_model(repo_id, quant, local_files_only):
@@ -205,15 +204,14 @@ def test_loader_passes_widget_default_false_through(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    # No explicit local_files_only — uses widget default (False)
-    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+    node.load(quant="none")
 
     assert captured == [False]
 
 
-def test_loader_passes_explicit_true_through_no_retry(monkeypatch):
-    """When user sets `local_files_only=True`, it passes through as-is.
-    No retry machinery — a single call, whatever exception propagates."""
+def test_loader_propagates_cache_miss_directly(monkeypatch):
+    """When load_model raises (cache miss, network error, etc.), the exception
+    propagates directly — no retry machinery."""
     from huggingface_hub.errors import LocalEntryNotFoundError
     captured = []
 
@@ -225,80 +223,27 @@ def test_loader_passes_explicit_true_through_no_retry(monkeypatch):
 
     node = DGemmaLoader()
     with pytest.raises(LocalEntryNotFoundError):
-        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+        node.load(quant="none")
 
-    # Single call — no retry, no wrapper unwrapping
-    assert captured == [True]
-
-
-def test_loader_propagates_cache_miss_without_retry_on_default(monkeypatch):
-    """When widget default (False) is used and load_model raises,
-    the exception propagates directly — no silent offline→online retry.
-    The kludge tried True first, caught LocalEntryNotFoundError, then
-    retried with False. That was generating behavior instead of executing
-    intent: the user said False, so call with False once."""
-    from huggingface_hub.errors import LocalEntryNotFoundError
-    captured = []
-
-    def fake_load_model(repo_id, quant, local_files_only):
-        captured.append(local_files_only)
-        raise LocalEntryNotFoundError("not cached")
-
-    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
-
-    node = DGemmaLoader()
-    with pytest.raises(LocalEntryNotFoundError):
-        # No explicit local_files_only — uses widget default (False)
-        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
-
-    # Single call with False — no retry machinery
     assert captured == [False]
 
 
-def test_loader_propagates_accelerate_valueerror_without_retry(monkeypatch):
-    """When `local_files_only=True` hits a cache miss and accelerate raises
-    ValueError (meta device without weights), the loader propagates it.
-    The old kludge only caught LocalEntryNotFoundError + RuntimeError wrapper,
-    so accelerate's ValueError fell through as an unhandled node failure.
-    After removal: there is no retry, so any exception from load_model
-    propagates directly — which IS the correct behavior since the user
-    explicitly requested offline."""
+def test_loader_compat_param_local_files_only_is_ignored(monkeypatch):
+    """Issue #136: the compat param `local_files_only` is accepted (for
+    /prompt POST backward compat) but ignored — hardcoded False."""
     captured = []
 
     def fake_load_model(repo_id, quant, local_files_only):
         captured.append(local_files_only)
-        raise ValueError(
-            "weight is on the meta device, we need a `value` to put in on 0."
-        )
+        return object()
 
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    with pytest.raises(ValueError, match="meta device"):
-        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+    # compat param True is ignored — still gets False
+    node.load(quant="none", local_files_only=True)
 
-    # Single call — no retry machinery to mask the real error
-    assert captured == [True]
-
-
-def test_loader_respects_explicit_local_files_only_true(monkeypatch):
-    """When user explicitly sets `local_files_only=True` and cache is empty,
-    the error propagates — no silent network fallback."""
-    from huggingface_hub.errors import LocalEntryNotFoundError
-    captured = []
-
-    def fake_load_model(repo_id, quant, local_files_only):
-        captured.append(local_files_only)
-        raise LocalEntryNotFoundError("not cached")
-
-    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
-
-    node = DGemmaLoader()
-    with pytest.raises(LocalEntryNotFoundError):
-        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
-
-    # Only one call — no retry when user explicitly requested offline
-    assert captured == [True]
+    assert captured == [False]
 
 
 def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch):
