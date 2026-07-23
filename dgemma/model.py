@@ -295,8 +295,8 @@ def load_model(
             raise RuntimeError(
                 f"quant='autoround' requires the auto-round library, but it is not "
                 f"installed in this Python environment. Fix: run "
-                f"`pip install 'comfyui-diffusiongemma[quant]'` (or `pip install auto-round`) "
-                f"in ComfyUI's own Python environment. Original error: {exc}"
+                f"`pip install 'auto-round>=0.5'` in ComfyUI's own Python environment. "
+                f"Original error: {exc}"
             ) from exc
         raise
     except OSError as exc:
