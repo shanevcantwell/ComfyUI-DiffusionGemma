@@ -1,134 +1,41 @@
 # ComfyUI-DiffusionGemma
 <img width="1774" height="1674" alt="image" src="https://github.com/user-attachments/assets/38871944-af3f-42ba-9422-cc222ec3e4eb" />
 
-A ComfyUI node pack for **DiffusionGemma** — text generation by *uniform-state
-discrete diffusion*, exposed as a ComfyUI graph you can watch, instrument, and
-take apart.
+A ComfyUI node pack for **DiffusionGemma** — discrete diffusion text generation
+with per-step canvas snapshots, commit heatmaps, and structured trace data. Watch
+meaning crystallize out of noise.
 
 > ### ✅ Status: working end-to-end
 >
-> Prompt in → text out, live in ComfyUI: every entropy knob on a widget, a
-> **live per-step view** of the canvas denoising as it runs, a **picture
-> flipbook** of the whole process, and a **trace node** (commit heatmap +
-> summary) to read what happened. Verified on real weights across two GPUs.
+> Prompt in → text out, every entropy knob on a widget, per-step canvas tracking,
+> flipbooks, and a **trace node** (commit heatmap + summary) to read what happened.
+> Verified on real weights across two GPUs.
 >
-> **VRAM footprint today: ~50GB bf16 + CPU spill, needs a ≥48GB card.**
-> `quant="none"` is the only load path (bitsandbytes can't touch this
-> model's fused MoE experts — see "What works today" below); the model
-> card's ~18GB quantized / consumer-GPU footprint is **not yet reachable
-> through this pack**. A real quantized load path is tracked in
-> [issue #4](../../issues/4).
->
-> Where it's headed lives in the [roadmap](ROADMAP.md).
+> **VRAM footprint:** ~30 GB with `quant='autoround'` (INT4), ~50 GB bf16 (`quant='none'`).
+> Quantized path lands in [issue #4](../../issues/4).
 
 | Phase | What landed | Evidence |
 |-------|-------------|----------|
 | P0 — recon & spec | ADRs 001–003, build plan | [decisions/](decisions/) |
 | P1 — vertical slice | `DGemmaLoader` + `DGemmaSampler`, prompt→text + validity readout | 3 live PASSes (recorded in-repo) |
 | P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | live PASS + entropy_bound sweep |
-| P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, live per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
+| P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
 
-## What this does
+---
 
-A ComfyUI node pack that runs **DiffusionGemma** (Google's discrete diffusion text model) as an instrumentable graph. Unlike autoregressive LLMs, DiffusionGemma generates text by *annealing a canvas of noise* — every position starts random and crystallizes into coherent output step-by-step. This pack captures the full per-step trajectory: schedule position `t`, temperature `T`, entropy, commit fraction — and exposes it as heatmaps, flipbooks, and structured trace data you can replay after the run.
+## Quick start
+
+A ComfyUI node pack that runs **DiffusionGemma** (Google's discrete diffusion text
+model) as an instrumentable graph. Unlike autoregressive LLMs, DiffusionGemma
+generates text by *annealing a canvas of noise* — every position starts random and
+crystallizes into coherent output step-by-step. This pack captures the full per-step
+trajectory: schedule position `t`, temperature `T`, entropy, commit fraction — and
+exposes it as heatmaps, flipbooks, and structured trace data you can replay after
+the run.
 
 **Nodes:** `DGemmaLoader` → `DGemmaSampler` → `DGemmaTrace`
 
-## What it is — meaning annealed out of noise
-
-Every answer starts as a **canvas of pure noise**: 256 positions, each a random
-token drawn from the whole multilingual vocabulary — maximum entropy, no meaning
-anywhere. Generation is an **annealing**. A temperature schedule starts hot and
-cools; at each step the positions the model is most *certain* about — the
-lowest-entropy ones — freeze into place, while the rest are re-noised and tried
-again. The text isn't written left-to-right. It **precipitates out of the
-entropy field**: the confident tokens crystallizing first, the uncertain ones
-settling last, until a coherent answer has cooled out of the noise.
-
-That process is the thing this pack lets you **watch**. The "schedule" here is
-a temperature-and-entropy trajectory over a canvas of discrete tokens — no sigma
-curve, no latent space. The whole point is to see the **commit-front** sweep
-across the canvas: where meaning locks in early, where it stays molten, and —
-sometimes — where the model anneals confidently into a *wrong* answer and can't
-climb back out, exactly the way real annealing gets trapped in a local minimum.
-You can't catch that by reading the final text. You can watch it happen here.
-
-## What works today
-
-- **`DGemmaLoader`** — loads `google/diffusiongemma-26B-A4B-it` via transformers,
-  drives via the Diffusers pipeline (ADR-CDG-004). `quant` offers `none` only
-  (bf16 with CPU spill — fits a 48 GB card). bitsandbytes `nf4`/`int8` were
-  removed (issue #18): they can't touch this model's fused 3D MoE experts —
-  bnb only swaps `nn.Linear`, silently skipping ~22.84 B of 26 B params, so the
-  "quantized" load is still ~46 GB and mislabeled as 4-bit on *any* card. A real
-  quantized path for smaller cards is tracked in issue #4.
-- **`DGemmaSampler`** — all knobs as widgets, defaults from grounded live runs:
-  `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`,
-  `confidence=0.005`, `gen_length=256`, `seed`, and a **`thinking` toggle**
-  (injects the model's `<|think|>` control token). Outputs: `STRING` (clean —
-  the model's thought-channel frame is excised at the id level, never leaked),
-  `CANVAS_STATE`, `CANVAS_TRACE`, `frames` — a per-step `STRING` list (raw,
-  unexcised decode of every captured canvas snapshot: the in-graph text
-  "flipbook" from noise to coherent text) — and **`images`** (#21): that same
-  per-step series rendered as a single batched `IMAGE`. Being a standard IMAGE
-  batch (not a per-frame list), it plugs straight into **VideoHelperSuite's
-  `Video Combine`** or `SaveAnimatedWEBP` for a shareable **GIF / MP4 / WEBP** —
-  no adapter node needed.
-- **Honesty readout** on `CANVAS_STATE`: `converged`, `committed_fraction`,
-  `steps_used`, `turn_closed` (did the model actually end its turn, vs. run out
-  of canvas), `answer_tokens` (pre-EOS count — trailing canvas-fill excluded),
-  `thought` (channel content when thinking is on). A wrong-knob run *tells you*
-  it's wrong instead of handing you plausible garbage. If you're asking "did
-  this run finish?", read `turn_closed` (or the `finished_honestly` property),
-  not `converged` — adaptive stopping can legitimately halt with
-  `converged=False` on a clean, correct run.
-- **Live view** — while the sampler runs, its node paints the canvas denoising
-  step by step (`web/live_view.js`, fed by per-step server events; one event per
-  step, verified 1:1 against `steps_used`).
-- **`DGemmaTrace`** — post-hoc analysis over the complete trace: commit heatmap
-  (`IMAGE`, positions × steps) + text summary. Frames are keyed by absolute
-  noise level `(t, temperature, step_idx)`, so traces from different runs stay
-  comparable.
-
-### Terms and units
-
-The sampler's knobs mix schedule positions, temperatures, and an entropy
-budget — same-looking names, different units. Minted once as `KNOB_DOCS` in
-[`dgemma/loop.py`](dgemma/loop.py) (source of every widget tooltip and MCP
-schema description below — see that module for the full provenance):
-
-| Symbol | What it is | Units |
-| --- | --- | --- |
-| `T` (temperature) | Divisor in `softmax(z/T)`; applied once per step, upstream of both sampling and the acceptance entropy. `T=1` = trained calibration. | dimensionless |
-| `t` (schedule position) | `(N − step_idx)/N`; decreasing 1 → `1/N` across the run. Not a temperature, despite the letter — and never reaches 0. | dimensionless |
-| `t_min` / `t_max` | Config knobs naming the TEMPERATURE endpoints of `T = t_min + (t_max − t_min)·t`. `t_min` is a virtual endpoint no step actually applies (`t` bottoms at `1/N`). Upstream `EntropyBoundScheduler` field names — not renamed here. | dimensionless (temperatures, not schedule positions) |
-| `entropy_bound` | Per-step joint acceptance budget. | **nats** (natural-log — `torch.distributions.Categorical.entropy()`), default `0.1` |
-| `confidence` | Early-stop threshold. | dimensionless probability |
-
-For scale: the 18-bits-per-position uniform-vocabulary melt (see
-[VISION.md](VISION.md)) is ≈12.48 nats — roughly two orders of magnitude
-hotter than the default per-step `entropy_bound`, and comparable at all only
-because both are denominated in nats.
-
-### What the telemetry does and doesn't show
-
-DiffusionGemma's per-step telemetry (`committed_fraction`, the commit heatmap, and
-`DGemmaTrace`) measures **commit dynamics** — *when* each canvas position freezes as the
-diffusion process anneals. This is real and useful for observing annealing progression.
-
-It does **not** measure **provenance** — *whether* a frozen token was computed by the
-diffusion process from in-canvas evidence, or emitted one-shot from the model's memorized
-autoregressive prior. Under default usage these can diverge: content can freeze early and
-unchanged from a memorized answer-shape, producing a clean annealing curve while doing no
-checkable work in-canvas (observed in the 2026-07-14 gatsby-counts probe). Read the commit
-telemetry as *"when did this position settle,"* never as *"this position was
-diffusion-computed."* Provenance-sensitive workflows (constraints/pins, KV-cache injection,
-per-token commit emission) are the way to separate the two; see the resolution path below.
-
-See the [gatsby-counts experiment record](https://github.com/shanevcantwell/design-docs/blob/main/experiments/2026-07-14-dg-gatsby-counts-ar-prior-latch/README.md)
-for the evidence, and [issue #78](../../issues/78) for the full finding and resolution path.
-
-## Install
+### Install
 
 ```bash
 cd ComfyUI/custom_nodes
@@ -137,88 +44,166 @@ git clone https://github.com/shanevcantwell/ComfyUI-DiffusionGemma
 ```
 
 Requires `transformers==5.13.0` (DiffusionGemma support) and
-`diffusers>=0.39.0` (the pipeline + schedulers — see ADR-CDG-004). Weights
-(~54 GB bf16, ungated) download from
-[google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it)
+`diffusers>=0.39.0` (the pipeline + schedulers — see ADR-CDG-004). Weights download
+from [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it)
 on first load.
 
-### Hardware & memory — the honest requirements
+### Hardware & memory
 
-This is a **large model with no quantized path yet** (issue #4 — bitsandbytes
-can't quantize its fused MoE experts, so you load full bf16, ~54 GB). The model
-card asks for a ≥ 60 GB GPU for a naïve full-VRAM load — but **you do not need
-one**, because **ComfyUI's memory management carries it**: it offloads weights to
-system RAM and streams them to the GPU as needed.
+| Mode | VRAM | Load time | Notes |
+|------|------|-----------|-------|
+| `quant='autoround'` (INT4) | ~30 GB | ~27 s | Pre-quantized checkpoint, working forward pass |
+| `quant='none'` (bf16) | ~50 GB | slower | Full precision, CPU spill via ComfyUI offload |
 
-- **Disk — ~54 GB free.** The weights download once to your HuggingFace cache
-  (`~/.cache/huggingface`, or wherever `HF_HOME` points); budget the space before
-  you start.
-- **First run is slow — that's the download, not a hang.** The very first load
-  pulls the full ~54 GB from HuggingFace before generation begins; on a normal
-  connection that's a long, silent wait. It's **cached after**, so every load
-  afterward is far faster. Once it's cached, flip the loader's `local_files_only`
-  on to skip the network check entirely.
-- **VRAM — confirmed running on 48 GB (RTX-8000) and, squeezed, 24 GB
-  (RTX-3090).** 24 GB is the tested practical floor: it *just* fits, riding
-  ComfyUI's automatic offload.
-- **System RAM — the requirement people miss.** Whatever isn't resident in VRAM
-  lives in system RAM, so you need room to hold most of a ~54 GB model off-GPU.
-  On a 24 GB card the bulk of it rides in RAM — thin system memory, not VRAM, is
-  what actually stops a run.
-- **Speed — offload costs time:** ~2.3 s/step on the 48 GB card with CPU spill,
-  slower as VRAM shrinks. More VRAM → less offload → faster. (Instrumentability,
-  not speed — as ever.)
-- **Below ~24 GB VRAM:** not yet — a quantized / GGUF path for 8–16 GB cards is
-  still open (issues #4, #15).
+- **Disk — ~54 GB free** for bf16 cache; INT4 pulls a smaller pre-quantized checkpoint.
+- **First run is slow** — that's the download, not a hang. Cached after first load; flip `local_files_only` on to skip network checks.
+- **System RAM matters.** Whatever isn't in VRAM lives in system RAM. Thin system memory, not VRAM, is what actually stops a run under heavy offload.
+- **Speed — offload costs time:** ~2.3 s/step on 48 GB with CPU spill, faster as VRAM grows.
 
 **Example graphs** ([examples/](examples/)): start with
 **`p3-trace-annotated.ui.json`** — the annotated canvas graph that *teaches* the
-Loader → Sampler → Trace flow; open it in the ComfyUI canvas and read the embedded
-Note nodes. The runnable smoke graphs (API format, operator-verified live) build
-up the same shape in steps: `ping-smoke` (P1 minimal), `p2-knobs-smoke` (all
-widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant).
+Loader → Sampler → Trace flow; open it in ComfyUI and read the embedded Note nodes.
+
+---
+
+## How it works
+
+### Uniform-state diffusion vs. autoregressive & masked models
+
+Traditional text generation is **left-to-right**: each token locks in permanently, no
+revision. Masked diffusion improves on this with "fill-in-the-blank" slots, but once a
+position is unmasked, the token is fixed — still one-way commitment.
+
+**DiffusionGemma departs from both.** It starts every position at **maximum entropy** —
+a uniform draw from the full 262,144-token vocabulary (≈18 bits per position). The
+generative process is a **cooling schedule**: temperature shrinks, distributions sharpen,
+and positions freeze when their entropy drops below a configurable bound. Unfrozen
+positions are re-noised each step, giving the model **native self-correction** — a token
+can commit, then remelt if context shifts push its entropy back above budget.
+
+The polyglot cascade you see mid-run (Katakana, Bengali, CJK flickering) isn't a glitch;
+it's the visual signature of maximum-entropy categorical noise before the model narrows
+its focus.
+
+### The nodes
+
+- **`DGemmaLoader`** — loads `google/diffusiongemma-26B-A4B-it`. Choose `quant='none'`
+  (bf16) or `quant='autoround'` (INT4 pre-quantized checkpoint). Drives via the
+  Diffusers pipeline (ADR-CDG-004).
+- **`DGemmaSampler`** — all knobs as widgets. Defaults from grounded live runs:
+  `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`, `confidence=0.005`,
+  `gen_length=256`, `seed`, and a **`thinking` toggle** (injects `<|think|>` control
+  token). Outputs: `STRING` (clean — thought-channel excised at the id level),
+  `CANVAS_STATE`, `CANVAS_TRACE`, `frames` (per-step text flipbook), and **`images`**
+  (#21) — per-step series as a batched `IMAGE` that plugs into VideoHelperSuite for
+  shareable GIF / MP4 / WEBP.
+- **`DGemmaTrace`** — post-hoc analysis: commit heatmap (`IMAGE`, positions × steps) +
+  text summary. Frames keyed by `(t, temperature, step_idx)` so traces from different
+  runs stay comparable.
+
+### Knobs & units
+
+The sampler's knobs mix schedule positions, temperatures, and an entropy budget — same-looking names, different units:
+
+| Symbol | What it is | Units | Default |
+|--------|-----------|-------|---------|
+| `T` (temperature) | Divisor in `softmax(z/T)`; sharpens distribution as it shrinks. `T=1` = trained calibration. | dimensionless | — |
+| `t` (schedule position) | `(N − step_idx)/N`; decreasing 1 → `1/N`. Not a temperature. | dimensionless | — |
+| `t_min` / `t_max` | Temperature endpoints of `T = t_min + (t_max − t_min)·t` | dimensionless (temperatures) | `0.4`, `0.8` |
+| `entropy_bound` | Per-step joint acceptance budget — positions below this freeze | **nats** | `0.1` |
+| `confidence` | Early-stop threshold | probability | `0.005` |
+
+Full provenance: [`KNOB_DOCS`](dgemma/loop.py) in `dgemma/loop.py`.
+
+### Honesty readout
+
+`CANVAS_STATE` reports: `converged`, `committed_fraction`, `steps_used`,
+`turn_closed` (did the model end its turn, or run out of canvas?), `answer_tokens`
+(pre-EOS count), `thought` (channel content when thinking is on). A wrong-knob run
+*tells you* it's wrong instead of handing you plausible garbage.
+
+**What telemetry does and doesn't show:** commit dynamics measure *when* positions
+freeze, not *whether* they were diffusion-computed vs. emitted from the model's
+autoregressive prior. Read committed_fraction as "when did this settle," never as
+"this was computed in-canvas." See [issue #78](../../issues/78) for the full finding.
+
+---
+
+## Under the hood
+
+### The sublimation problem
+
+Current uniform-state models **skip the liquid phase** — snapping from maximum-entropy
+noise directly to solid tokens without holding superposition across steps. Lowering
+confidence thresholds doesn't help; outputs just boil off into uncorrelated noise.
+
+The bottleneck is architectural: all intervention points cluster at the pipeline's output,
+forcing binary commit-or-reset decisions. The model has no continuous embedding space to
+hold multi-step distributional beliefs — it jumps from noise to solid because that's the
+only seam available.
+
+### The crystalline proxy
+
+Without access to a trained mask anchor (DiffusionGemma lacks one), this pack enforces
+constraint propagation through a **cellular automaton over solid tokens**. When a position
+commits, it triggers a **local remelt** — briefly re-annealing neighbors so they adapt
+structurally. This sidesteps sublimation by treating text as linked crystals that adjust
+to each other, not a single liquid pool.
+
+The division of labor: the cellular automaton enforces strict topological rules locally;
+the model's bidirectional attention ensures semantic coherence globally. It works with
+existing output seams — no weight modifications required.
+
+### The embedding seam barrier
+
+True **liquid-state decoding** requires intervention at the input embedding seam, not the
+output. Models using latent refinement decoding and soft-masked diffusion solve
+superposition by operating in continuous embedding space (Equation 3: split embeddings
+into mask weight + predicted token weight, balanced by `α`). DiffusionGemma has no trained
+mask anchor — substituting `Ē` (expected uniform mixture of all tokens) lands off-manifold
+in a semantic dead zone. Without continued pre-training, the model interprets it as garbage.
+
+**Next frontier:** shifting intervention to input embeddings for true distributional
+smoothing before the first token forms. See [VISION.md](VISION.md) and
+[ROADMAP.md](ROADMAP.md).
+
+---
 
 ## Known limitations (tracked, not hidden)
 
-- **`thinking=true` can spend the whole canvas thinking** and return an empty
-  answer — the readout flags it (`turn_closed=False, answer_tokens=0`) and
-  issue #9 tracks the budget-policy design question.
-- Knob response is **not a smooth dial**: block-autoregression makes output
-  respond discontinuously to threshold knobs (plateaus and cliffs — issue #10
-  has measured sweeps).
-- Raw pre-excision canvas ids are captured engine-side as of 0.3.0, not yet
-  exposed on any socket (issue #11) — wanted for token-level trace analysis.
-- Quantized loading for consumer cards **below the ~24 GB offload floor**
-  (8–16 GB) is unresolved
-  (issue #4) — the AWQ-INT4/compressed-tensors candidate surveyed there was
-  smoke-tested and found incompatible with this pack's pinned `transformers`
-  version (a real architecture-revision mismatch, not a config error); no
-  viable candidate is currently identified. GGUF/llama.cpp (issue #15) is the
-  most promising remaining direction on accessibility grounds, but is parked
-  pending a design bridge for the live-view/trace instrumentation gap.
+- **`thinking=true` can spend the whole canvas thinking** and return an empty answer —
+  the readout flags it (`turn_closed=False, answer_tokens=0`). Issue #9 tracks budget-policy design.
+- Knob response is **not a smooth dial**: block-autoregression makes output respond
+  discontinuously to threshold knobs (plateaus and cliffs — issue #10 has measured sweeps).
+- Raw pre-excision canvas ids are captured engine-side as of 0.3.0, not yet exposed on any
+  socket (issue #11) — wanted for token-level trace analysis.
+- Quantized loading for consumer cards **below ~24 GB VRAM** is unresolved (issues #4, #15).
+  GGUF/llama.cpp is the most promising remaining direction, parked pending a design bridge
+  for live-view/trace instrumentation.
+
+---
 
 ## Where the design lives
 
 | Doc | What it holds |
 |-----|---------------|
-| **[VISION.md](VISION.md)** | *Why it might matter* — the questions the instrument was built to ask, each tagged `[established]` / `[hypothesis]` / `[open]`. Speculative by design, cited throughout. |
-| **[ROADMAP.md](ROADMAP.md)** | *Where it's headed* — the forward view in two tracks: engineering seam work (issue #35) and the liquid-phase research program. Pointer-heavy; VISION holds the *why*, `decisions/` the *decided*. |
+| **[VISION.md](VISION.md)** | *Why it might matter* — questions tagged `[established]` / `[hypothesis]` / `[open]`. Speculative by design, cited throughout. |
+| **[ROADMAP.md](ROADMAP.md)** | *Where it's headed* — engineering seam work and the liquid-phase research program. Pointer-heavy; VISION holds the *why*, `decisions/` the *decided*. |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Contributor-facing map — how the pieces fit and why. |
-| **[decisions/](decisions/)** | ADRs — *why* the load-bearing choices were made. |
-| **[ADR-CDG-001](decisions/adr-cdg-001-native-socket-types.md)** | Native socket types instead of reusing `SIGMAS`/`LATENT`. |
-| **ADR-CDG-002 → 004** | Access path: load via transformers, **drive via the Diffusers pipeline** (004 amends 002). |
-| **ADR-CDG-005** | `CANVAS_STATE` is a resumable save-state, not a display snapshot. |
-| **[ADR-CDG-006](decisions/adr-cdg-006-advanced-sampler-step-window-resume.md)** | `DGemmaSamplerAdvanced` — step-windowed, chainable/resumable sampler (**proposed**, not yet built). |
+| **[decisions/](decisions/)** | ADRs — *why* load-bearing choices were made. |
+
+---
 
 ## Come explore
 
-This is an instrument for poking at how this diffusion LLM thinks. Questions,
-findings, and half-formed ideas are exactly the point. The
-**[Discussions](../../discussions)** tab is open for show-and-tell (post a
-trace, a heatmap, a run that annealed somewhere strange) and for ideas.
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
+This is an instrument for poking at how this diffusion LLM thinks. Questions, findings,
+and half-formed ideas are exactly the point. The **[Discussions](../../discussions)** tab
+is open for show-and-tell (post a trace, a heatmap, a run that annealed somewhere strange)
+and for ideas. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
 
 Watch the process in action on YouTube: [**@reflectiveattention**](https://youtube.com/@reflectiveattention).
+
+---
 
 ## License
 
