@@ -28,6 +28,12 @@ take apart.
 | P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | live PASS + entropy_bound sweep |
 | P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, live per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
 
+## What this does
+
+A ComfyUI node pack that runs **DiffusionGemma** (Google's discrete diffusion text model) as an instrumentable graph. Unlike autoregressive LLMs, DiffusionGemma generates text by *annealing a canvas of noise* — every position starts random and crystallizes into coherent output step-by-step. This pack captures the full per-step trajectory: schedule position `t`, temperature `T`, entropy, commit fraction — and exposes it as heatmaps, flipbooks, and structured trace data you can replay after the run.
+
+**Nodes:** `DGemmaLoader` → `DGemmaSampler` → `DGemmaTrace`
+
 ## What it is — meaning annealed out of noise
 
 Every answer starts as a **canvas of pure noise**: 256 positions, each a random
@@ -209,8 +215,10 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 This is an instrument for poking at how this diffusion LLM thinks. Questions,
 findings, and half-formed ideas are exactly the point. The
 **[Discussions](../../discussions)** tab is open for show-and-tell (post a
-trace, a heatmap, a run that annealed somewhere strange) and for ideas. See
-**[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
+trace, a heatmap, a run that annealed somewhere strange) and for ideas.
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
+
+Watch the process in action on YouTube: [**@reflectiveattention**](https://youtube.com/@reflectiveattention).
 
 ## License
 
