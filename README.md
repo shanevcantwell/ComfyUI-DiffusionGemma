@@ -50,9 +50,9 @@ Requires `transformers==5.13.0` (DiffusionGemma support) and `diffusers>=0.39.0`
 | `quant='autoround'` (INT4) | ~30.7 GB | ~27 s | Pre-quantized checkpoint. Accessible on standard 32GB/48GB setups. |
 | `quant='none'` (bf16) | ~50 GB | slower | Full precision, CPU spill via ComfyUI offload. |
 
-* **Disk:** ~54 GB free for bf16 cache; INT4 pulls a smaller pre-quantized checkpoint.
-* **First run is slow:** That's the download, not a hang. Cached after first load; flip `local_files_only` on to skip network checks.
-* **System RAM matters:** Whatever isn't in VRAM lives in system RAM. Thin system memory, not VRAM, is what actually stops a run under heavy offload.
+- **Disk:** ~54 GB free for bf16 cache; INT4 pulls a smaller pre-quantized checkpoint.
+- **First run is slow:** That's the download, not a hang. Cached after first load; flip `local_files_only` on to skip network checks.
+- **System RAM matters:** Whatever isn't in VRAM lives in system RAM. Thin system memory, not VRAM, is what actually stops a run under heavy offload.
 - **Speed — offload costs time:** ~2.3 s/step on 48 GB with CPU spill, faster as VRAM grows.
 
 **Example graphs** ([examples/](examples/)): start with
