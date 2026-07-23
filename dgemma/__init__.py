@@ -28,7 +28,7 @@ from .loop import (
     THINK_TOKEN,
     run_diffusion,
 )
-from .model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+from .model import AUTOROUND_REPO_ID, DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame
 
 __all__ = [
@@ -44,6 +44,7 @@ __all__ = [
     "DEFAULT_T_MAX",
     "DEFAULT_T_MIN",
     "DEFAULT_REPO_ID",
+    "AUTOROUND_REPO_ID",
     "THINK_TOKEN",
     "load_model",
     "run_diffusion",

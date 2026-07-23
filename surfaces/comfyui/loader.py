@@ -284,8 +284,11 @@ class DGemmaLoader:
         # explicitly set it True, we never retry online; if False (default)
         # or omitted, we try offline first and only hit the network on miss.
         try:
-            return (load_model(repo_id=DEFAULT_REPO_ID, quant=quant, local_files_only=True),)
+            # repo_id=None lets load_model auto-select the checkpoint matching
+            # the quant mode: DEFAULT_REPO_ID for "none", AUTOROUND_REPO_ID for
+            # "autoround" — see dgemma/model.py load_model() docstring.
+            return (load_model(repo_id=None, quant=quant, local_files_only=True),)
         except LocalEntryNotFoundError:
             if local_files_only:
                 raise  # user explicitly requested offline — don't retry
-            return (load_model(repo_id=DEFAULT_REPO_ID, quant=quant, local_files_only=False),)
+            return (load_model(repo_id=None, quant=quant, local_files_only=False),)

@@ -55,13 +55,17 @@ The topology is hierarchical: core → MCP → consumers. New consumers wrap MCP
 Run the server: `python -m surfaces.mcp.server` (requires `pip install -e '.[mcp]'`)
 
 ### `load_model`
-Load DiffusionGemma into memory. Must specify model and quant explicitly — no silent defaults.
+Load DiffusionGemma into memory. The checkpoint is auto-selected based on quant mode when no explicit repo_id is given.
 
 **Parameters:**
-- `model` (string, required) — HuggingFace repo ID or local path; default: `google/diffusiongemma-26B-A4B-it`
-- `quant` (string, required) — `'none'` for bf16 (~50 GB VRAM), `'autoround'` for INT4 pre-quantized (~30 GB VRAM)
+- `repo_id` (string, optional) — HuggingFace repo ID or local path. When omitted (`None`), auto-selects:  
+  - `quant='none'` → `google/diffusiongemma-26B-A4B-it` (bf16, ~53 GB VRAM)  
+  - `quant='autoround'` → `Intel/diffusiongemma-26B-A4B-it-int4-AutoRound` (INT4 W4A16, ~30 GB VRAM)
+- `quant` (string, required) — `'none'` for bf16 (~53 GB VRAM), `'autoround'` for INT4 pre-quantized (~30 GB VRAM, requires `auto-round` library)
 
 **Returns:** model loaded status, device placement, dtype.
+
+**Error handling:** If `quant='autoround'` but `auto-round` is not installed, raises an actionable `RuntimeError` naming the fix command (`pip install 'comfyui-diffusiongemma[quant]'`).
 
 ### `model_status`
 Query the current state of a loaded model without triggering generation.

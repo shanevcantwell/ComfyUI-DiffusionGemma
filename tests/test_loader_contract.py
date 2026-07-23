@@ -141,8 +141,10 @@ def test_loader_declarations():
 
 def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     """Primary HF-identifier flow (ratification 2026-07-13): `load()` forwards
-    `repo_id`/`quant`/`local_files_only` straight to `load_model`, pure
-    pass-through/wrap (ADR-CDG-003)."""
+    `repo_id=None`/`quant`/`local_files_only` to `load_model`, pure
+    pass-through/wrap (ADR-CDG-003). repo_id=None lets the core auto-select
+    the checkpoint matching quant mode: DEFAULT_REPO_ID for "none",
+    AUTOROUND_REPO_ID for "autoround"."""
     sentinel = object()
     captured = {}
 
@@ -155,15 +157,38 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    # repo_id param is compat-only — the loader hardcodes DEFAULT_REPO_ID
+    # repo_id param is compat-only — the loader passes None for auto-selection
     result = node.load(repo_id="any-value", quant="none", local_files_only=True)
 
     assert result == (sentinel,)
     assert captured == {
-        "repo_id": "google/diffusiongemma-26B-A4B-it",
+        "repo_id": None,  # core auto-selects based on quant mode
         "quant": "none",
         "local_files_only": True,
     }
+
+
+def test_loader_passes_none_repo_for_autoround_quant(monkeypatch):
+    """When quant='autoround', the loader still passes repo_id=None — the
+    core resolves it to AUTOROUND_REPO_ID (Intel INT4 checkpoint). This
+    ensures the loader never hardcodes a bf16 checkpoint for an INT4 load."""
+    sentinel = object()
+    captured = {}
+
+    def fake_load_model(repo_id, quant, local_files_only):
+        captured["repo_id"] = repo_id
+        captured["quant"] = quant
+        captured["local_files_only"] = local_files_only
+        return sentinel
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    result = node.load(quant="autoround", local_files_only=False)
+
+    assert result == (sentinel,)
+    assert captured["repo_id"] is None  # core auto-selects Intel INT4 checkpoint
+    assert captured["quant"] == "autoround"
 
 
 def test_loader_offline_first_succeeds_when_cached(monkeypatch):
@@ -250,8 +275,9 @@ def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch
         local_model_dir="smuggled-selection",
     )
 
-    # HF identifier used; the guard was never even consulted while disabled.
-    assert captured["repo_id"] == "google/diffusiongemma-26B-A4B-it"
+    # HF identifier used (repo_id=None for core auto-selection); 
+    # the guard was never even consulted while disabled.
+    assert captured["repo_id"] is None
     assert resolve_calls == []
 
 
