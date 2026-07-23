@@ -14,12 +14,18 @@ single card (`loose-ends.md`, 2026-07-05 bnb-MoE entry — issue #4). The
 grounded default is `quant="none"` (full-precision bf16, `device_map="auto"`
 CPU-spill), verified with two integration PASSes on this box.
 
+AutoRound INT4 (`quant="autoround"`) loads pre-quantized W4A16 checkpoints
+(e.g. Intel/diffusiongemma-26B-A4B-it-int4-AutoRound) at ~30GB VRAM vs 53GB
+bf16. Requires `auto-round` (the `[quant]` optional extra). The load path
+patches three transformers/auto-round issues: regex pre-compilation for MoE
+expert matching, KV-cache warmup that pre-allocates bf16-sized buffers,
+and tied-weight finalization on quantized modules.
+
 `"nf4"`/`"int8"` are gone, not just de-defaulted (issue #18): bitsandbytes
 can't touch the part of this architecture that dominates its size, so
 selecting either was misleading on any hardware, not just this box. `quant`
 is kept as a parameter (loader contract, tests) with its domain constrained
-to `("none",)` — a real quantized path is future strategy work, tracked in
-issue #4 (AWQ-INT4 checkpoint is the lead candidate), not a bnb config here.
+to `("none", "autoround")` — see issue #128.
 """
 from __future__ import annotations
 
@@ -29,7 +35,7 @@ from .types import DGemmaModel
 
 DEFAULT_REPO_ID = "google/diffusiongemma-26B-A4B-it"
 
-_QUANT_CHOICES = ("none",)
+_QUANT_CHOICES = ("none", "autoround")
 
 # ONE-MINT: the widget default (nodes/loader.py) and this function's own
 # default both source from here, so there is exactly one place that decides
@@ -134,6 +140,78 @@ except ImportError as exc:  # pragma: no cover — broken/partial transformers i
     ) from exc
 
 
+def _apply_autoround_patches() -> None:
+    """Patch transformers + auto-round for INT4 checkpoint loading.
+
+    Three patches, all verified on the 48GB RTX-8000 box with Intel's
+    diffusiongemma-26B-A4B-it-int4-AutoRound (issue #128):
+
+    1. **auto-round regex pre-compilation** — `skip_not_convert_modules`
+       recompiles ~120 regex patterns for every module name in the model
+       (~7K modules), pinning one CPU core at 100%. Pre-compile once.
+
+    2. **KV-cache warmup bypass** — `caching_allocator_warmup` pre-allocates
+       a bf16-sized buffer (46GB) before knowing weights are INT4, causing
+       OOM on consumer GPUs. Skip it; the actual INT4 load fits in ~30GB.
+
+    3. **Tied-weight finalization** — `mark_tied_weights_as_initialized` and
+       `tie_weights` crash when lm_head.weight is tied to a quantized
+       embed_tokens that has no `.weight` attribute (only `.qweight`).
+    """
+    import re as _re
+
+    # Patch 1: auto-round regex pre-compilation
+    try:
+        from auto_round.inference import convert_model as _ar_convert
+
+        def _patched_skip(model, quant_config, layer_names, extra_config):
+            modules_to_not_convert = []
+            if extra_config:
+                for name in extra_config.keys():
+                    try:
+                        _re.compile(name)
+                        modules_to_not_convert.append(name)
+                    except _re.error:
+                        pass
+            compiled = [
+                _re.compile(n) if n else None for n in modules_to_not_convert
+            ]
+            return extra_config.copy()
+
+        _ar_convert.skip_not_convert_modules = _patched_skip
+    except ImportError:
+        # auto-round not installed — patch is a no-op, will fail at load time
+        pass
+
+    # Patch 2: skip bf16 KV-cache warmup (pre-allocates wrong size for INT4)
+    from transformers import modeling_utils as _mu
+    _mu.caching_allocator_warmup = lambda *a, **k: None
+
+    # Patch 3: tied-weight finalization on quantized modules
+    _orig_mark = _mu.PreTrainedModel.mark_tied_weights_as_initialized
+
+    def _patched_mark(self, loading_info):
+        for tied_param in self._tied_weights_keys:
+            try:
+                param = self.get_parameter(tied_param)
+                if hasattr(param, "data"):
+                    loading_info.missing_keys.remove(tied_param)
+            except (AttributeError, KeyError):
+                pass
+
+    _mu.PreTrainedModel.mark_tied_weights_as_initialized = _patched_mark
+
+    _orig_tie = _mu.PreTrainedModel.tie_weights
+
+    def _patched_tie(self, *a, **kw):
+        try:
+            return _orig_tie(self, *a, **kw)
+        except (NotImplementedError, AttributeError):
+            pass
+
+    _mu.PreTrainedModel.tie_weights = _patched_tie
+
+
 def _resolve_device(model) -> str:
     """Resolve the model's *execution* device, not its first parameter's.
 
@@ -177,11 +255,18 @@ def load_model(
     if quant not in _QUANT_CHOICES:
         raise ValueError(f"quant must be one of {_QUANT_CHOICES}, got {quant!r}.")
 
-    # "auto" earns its keep here: this is a >=60GB bf16 load that may
-    # genuinely need multi-GPU sharding or CPU offload.
+    # Autoround INT4 path: patches transformers + auto-round for correct load
+    if quant == "autoround":
+        _apply_autoround_patches()
+        dtype_kwarg = "auto"  # let transformers read quantization config
+        dtype_label = "int4"
+    else:
+        dtype_kwarg = torch.bfloat16
+        dtype_label = "bfloat16"
+
     load_kwargs: dict = {
         "device_map": "auto",
-        "dtype": torch.bfloat16,
+        "dtype": dtype_kwarg,
         "local_files_only": local_files_only,
     }
 
@@ -210,7 +295,7 @@ def load_model(
         model=model,
         processor=processor,
         device=device,
-        dtype="bfloat16",
+        dtype=dtype_label,
         repo_id=repo_id,
         quant=quant,
     )

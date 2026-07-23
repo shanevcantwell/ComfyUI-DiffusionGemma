@@ -68,10 +68,20 @@ import os
 # this move's own execution. Enforcement: tests/test_comfyui_loader_context.py
 # and tests/test_dual_context_import.py (the R-1 tripwires).
 if __package__ and __package__.count(".") >= 2:
-    from ...dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from ...dgemma.model import (
+        _QUANT_CHOICES,
+        DEFAULT_QUANT,
+        DEFAULT_REPO_ID,
+        load_model,
+    )
     from .socket_types import DGEMMA_MODEL
 else:
-    from dgemma.model import DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
+    from dgemma.model import (
+        _QUANT_CHOICES,
+        DEFAULT_QUANT,
+        DEFAULT_REPO_ID,
+        load_model,
+    )
     from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
 # Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
@@ -209,12 +219,10 @@ class DGemmaLoader:
         # deliberate (un-ComfyUI) load path (ratification 2026-07-13).
         required = {
             "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
-            # "none" is the only honest option (issue #18): bitsandbytes
-            # cannot quantize DiffusionGemma's fused 3D MoE experts, so
-            # "nf4"/"int8" were removed from the selector rather than left
-            # to silently not do what they claim — see dgemma/model.py's
-            # DEFAULT_QUANT provenance comment.
-            "quant": (["none"], {"default": DEFAULT_QUANT}),
+            # "none" = full bf16 (53GB VRAM); "autoround" = pre-quantized
+            # W4A16 INT4 checkpoint (~30GB VRAM, requires auto-round extra).
+            # See issue #128.
+            "quant": (list(_QUANT_CHOICES), {"default": DEFAULT_QUANT}),
             # Off by default: keep the HF download-and-cache behavior. On:
             # forces both from_pretrained calls to resolve only from the local
             # HF cache (no network) — useful once a checkpoint is already
