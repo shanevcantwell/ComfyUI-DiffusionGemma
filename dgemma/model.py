@@ -34,6 +34,9 @@ import torch
 from .types import DGemmaModel
 
 DEFAULT_REPO_ID = "google/diffusiongemma-26B-A4B-it"
+# Pre-quantized AutoRound W4A16 checkpoint — ~30GB VRAM vs 53GB bf16.
+# Used as the default when quant="autoround" and no explicit repo_id is given.
+AUTOROUND_REPO_ID = "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound"
 
 _QUANT_CHOICES = ("none", "autoround")
 
@@ -233,16 +236,20 @@ def _resolve_device(model) -> str:
 
 
 def load_model(
-    repo_id: str = DEFAULT_REPO_ID,
+    repo_id: str | None = None,
     quant: str = DEFAULT_QUANT,
     local_files_only: bool = False,
 ) -> DGemmaModel:
     """Load `DiffusionGemmaForBlockDiffusion` + its processor onto `DGemmaModel`.
 
-    `quant` accepts only `"none"` (issue #18 — full-precision bf16 load,
-    `device_map="auto"`, CPU-spills the ~42.5GiB of MoE expert params that
-    bitsandbytes could never quantize anyway). Kept as a parameter/field for
-    the loader contract; a real quantized path is tracked in issue #4.
+    `repo_id` defaults to the quant-appropriate checkpoint:
+    - `quant="none"` → `DEFAULT_REPO_ID` (Google bf16, ~53GB VRAM)
+    - `quant="autoround"` → `AUTOROUND_REPO_ID` (Intel INT4 W4A16, ~30GB VRAM)
+    Pass an explicit path or HF repo ID to override.
+
+    `quant` accepts `"none"` (full-precision bf16 load, `device_map="auto"`,
+    CPU-spills the ~42.5GiB of MoE expert params that bitsandbytes could never
+    quantize) or `"autoround"` (pre-quantized W4A16 INT4 checkpoint via auto-round).
 
     `local_files_only` forwards unchanged to both `from_pretrained` calls —
     off (default) keeps the normal HF download-and-cache behavior; on,
@@ -254,6 +261,10 @@ def load_model(
     """
     if quant not in _QUANT_CHOICES:
         raise ValueError(f"quant must be one of {_QUANT_CHOICES}, got {quant!r}.")
+
+    # Auto-select the checkpoint matching the quant mode when no explicit repo
+    if repo_id is None:
+        repo_id = AUTOROUND_REPO_ID if quant == "autoround" else DEFAULT_REPO_ID
 
     # Autoround INT4 path: patches transformers + auto-round for correct load
     if quant == "autoround":
@@ -272,7 +283,22 @@ def load_model(
 
     try:
         model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
-        processor = AutoProcessor.from_pretrained(repo_id, local_files_only=local_files_only)
+        processor = AutoProcessor.from_pretrained(
+            repo_id,
+            local_files_only=local_files_only,
+        )
+    except ImportError as exc:
+        # auto-round not installed when quant="autoround" — surface an
+        # actionable message instead of a raw transformers ImportError deep
+        # in the accelerate dispatch stack (handoff 2026-07-23 open question 3)
+        if quant == "autoround":
+            raise RuntimeError(
+                f"quant='autoround' requires the auto-round library, but it is not "
+                f"installed in this Python environment. Fix: run "
+                f"`pip install 'auto-round>=0.5'` in ComfyUI's own Python environment. "
+                f"Original error: {exc}"
+            ) from exc
+        raise
     except OSError as exc:
         # transformers/huggingface_hub surface an unresolvable repo as an
         # OSError subclass (LocalEntryNotFoundError, RepositoryNotFoundError,

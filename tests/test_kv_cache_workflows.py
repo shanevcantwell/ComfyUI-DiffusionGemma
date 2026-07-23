@@ -28,7 +28,8 @@ import pytest
 
 from __init__ import NODE_CLASS_MAPPINGS
 
-_EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+# Workflows moved to examples/smoke-tests/ per #127 (b4c5eca, 2026-07-22).
+_EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples" / "smoke-tests"
 _KV_CACHE_WORKFLOWS = sorted(_EXAMPLES_DIR.glob("*kv-cache*.api.json"))
 
 

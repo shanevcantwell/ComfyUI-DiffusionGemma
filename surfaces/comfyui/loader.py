@@ -84,15 +84,8 @@ else:
     )
     from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
-# Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
-# until weights actually live under ComfyUI model dirs. See the module
-# docstring for the enable trigger (#15 GGUF graduation / #4 conventional
-# checkpoint placement). When False (the default, current state): the dropdown
-# is omitted from `INPUT_TYPES` entirely — hidden, not merely de-defaulted —
-# and the HF-identifier `repo_id` flow is the sole visible load path. Flip to
-# True on the trigger day; the scan/resolve functions and their tests already
-# ship, so enabling is a one-line change, not a re-implementation.
-_LOCAL_FOLDERS_ENABLED = False
+# DiffusionGemma is an LLM — weights live under text_encoders, not diffusion_models.
+_LOCAL_FOLDERS_ENABLED = True
 
 # `folder_paths` is a ComfyUI-runtime module: real inside a live ComfyUI
 # process (its repo root is on sys.path at startup — `ComfyUI/main.py`), and
@@ -104,8 +97,6 @@ _LOCAL_FOLDERS_ENABLED = False
 # the dual-context gate above (that branches on a deterministic `__package__`
 # signal that is always one of two known values); here the signal is
 # "importable or not" itself, so ImportError is the correct, narrow gate.
-from huggingface_hub.errors import LocalEntryNotFoundError
-
 try:
     import folder_paths
 except ImportError:
@@ -117,7 +108,7 @@ except ImportError:
 # folder. Order matters only for de-duplication below (first hit wins), not
 # for correctness — a name present under both folders resolves to whichever
 # is scanned first.
-_MODEL_FOLDER_KEYS = ("diffusion_models", "text_encoders")
+_MODEL_FOLDER_KEYS = ("text_encoders",)
 
 # transformers/HF checkpoints are a SHARD DIRECTORY (config.json,
 # tokenizer files, one-or-more model-*.safetensors), not a single file, so
@@ -218,18 +209,13 @@ class DGemmaLoader:
         # `from_pretrained()` out of the HF hub cache (`HF_HOME`) — the pack's
         # deliberate (un-ComfyUI) load path (ratification 2026-07-13).
         required = {
-            "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
-            # "none" = full bf16 (53GB VRAM); "autoround" = pre-quantized
+            # "none" = full bf16 (~53GB VRAM); "autoround" = pre-quantized
             # W4A16 INT4 checkpoint (~30GB VRAM, requires auto-round extra).
             # See issue #128.
-            "quant": (list(_QUANT_CHOICES), {"default": DEFAULT_QUANT}),
-            # Off by default: keep the HF download-and-cache behavior. On:
-            # forces both from_pretrained calls to resolve only from the local
-            # HF cache (no network) — useful once a checkpoint is already
-            # cached (e.g. tokenizer-only test runs). Kept active regardless of
-            # the folder_paths flag (ratification 2026-07-13): it applies to the
-            # HF-cache flow too and is wanted independent of the dropdown.
-            "local_files_only": ("BOOLEAN", {"default": False}),
+            "quant": (list(_QUANT_CHOICES), {
+                "default": DEFAULT_QUANT,
+                "tooltip": "none = full bf16 (~53GB VRAM) · autoround = pre-quantized INT4 (~30GB VRAM, requires auto-round extra)",
+            }),
         }
         spec: dict = {"required": required}
 
@@ -251,8 +237,8 @@ class DGemmaLoader:
 
     def load(
         self,
-        repo_id: str,
         quant: str,
+        repo_id: str = DEFAULT_REPO_ID,  # compat param — ignored, hardcoded below
         local_files_only: bool = False,
         local_model_dir: str | None = None,
     ):
@@ -276,14 +262,7 @@ class DGemmaLoader:
                 )
             return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
 
-        # PRIMARY path: HF identifier. Try offline-first (skip all HEAD
-        # requests when cached), fall back to network on cache miss.
-        # The widget's local_files_only toggle is honored — if the user
-        # explicitly set it True, we never retry online; if False (default)
-        # or omitted, we try offline first and only hit the network on miss.
-        try:
-            return (load_model(repo_id=repo_id, quant=quant, local_files_only=True),)
-        except LocalEntryNotFoundError:
-            if local_files_only:
-                raise  # user explicitly requested offline — don't retry
-            return (load_model(repo_id=repo_id, quant=quant, local_files_only=False),)
+        # PRIMARY path: HF identifier. Always network-available — transformers
+        # checks cache before hitting the network. Issue #136: local_files_only
+        # widget removed; hardcoded False.
+        return (load_model(repo_id=None, quant=quant, local_files_only=False),)
