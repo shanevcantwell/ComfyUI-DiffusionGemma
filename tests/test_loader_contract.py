@@ -60,15 +60,17 @@ def test_nodes_modules_do_not_import_comfy():
     assert not any(m == "comfy" or m.startswith("comfy.") for m in sys.modules)
 
 
-def test_loader_input_types_declares_repo_id_quant_and_local_files_only():
-    """Ratification 2026-07-13: the HF-identifier flow is PRIMARY and visible —
-    `repo_id` STRING (default DEFAULT_REPO_ID), `quant`, and the
-    `local_files_only` BOOLEAN are all in `required`."""
+def test_loader_input_types_declares_quant_and_local_files_only():
+    """Issue #132: repo_id is no longer a widget — the pack loads one model.
+    `quant` COMBO with tooltip and `local_files_only` BOOLEAN are in
+    `required`."""
     spec = DGemmaLoader.INPUT_TYPES()
-    assert "repo_id" in spec["required"]
-    assert spec["required"]["repo_id"][0] == "STRING"
+    assert "repo_id" not in spec["required"]
     assert "quant" in spec["required"]
-    assert spec["required"]["quant"][0] == ["none"]
+    assert spec["required"]["quant"][0] == ["none", "autoround"]
+    # quant has a tooltip explaining VRAM impact
+    assert "tooltip" in spec["required"]["quant"][1]
+    assert "VRAM" in spec["required"]["quant"][1]["tooltip"]
     assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
 
 
@@ -95,8 +97,8 @@ def test_loader_input_types_surfaces_dropdown_in_optional_when_enabled(monkeypat
 
     spec = DGemmaLoader.INPUT_TYPES()
 
-    # HF-identifier still primary/visible/required.
-    assert "repo_id" in spec["required"]
+    # repo_id no longer a widget (issue #132) — the pack loads one model.
+    assert "repo_id" not in spec["required"]
     # Dropdown is optional (a COMBO — bare list of options), not required.
     assert spec["optional"]["local_model_dir"] == (["some-local-model"],)
     assert "local_model_dir" not in spec["required"]
@@ -153,7 +155,8 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    result = node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+    # repo_id param is compat-only — the loader hardcodes DEFAULT_REPO_ID
+    result = node.load(repo_id="any-value", quant="none", local_files_only=True)
 
     assert result == (sentinel,)
     assert captured == {

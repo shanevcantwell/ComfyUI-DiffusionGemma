@@ -218,11 +218,13 @@ class DGemmaLoader:
         # `from_pretrained()` out of the HF hub cache (`HF_HOME`) — the pack's
         # deliberate (un-ComfyUI) load path (ratification 2026-07-13).
         required = {
-            "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
-            # "none" = full bf16 (53GB VRAM); "autoround" = pre-quantized
+            # "none" = full bf16 (~53GB VRAM); "autoround" = pre-quantized
             # W4A16 INT4 checkpoint (~30GB VRAM, requires auto-round extra).
             # See issue #128.
-            "quant": (list(_QUANT_CHOICES), {"default": DEFAULT_QUANT}),
+            "quant": (list(_QUANT_CHOICES), {
+                "default": DEFAULT_QUANT,
+                "tooltip": "none = full bf16 (~53GB VRAM) · autoround = pre-quantized INT4 (~30GB VRAM, requires auto-round extra)",
+            }),
             # Off by default: keep the HF download-and-cache behavior. On:
             # forces both from_pretrained calls to resolve only from the local
             # HF cache (no network) — useful once a checkpoint is already
@@ -251,8 +253,8 @@ class DGemmaLoader:
 
     def load(
         self,
-        repo_id: str,
         quant: str,
+        repo_id: str = DEFAULT_REPO_ID,  # compat param — ignored, hardcoded below
         local_files_only: bool = False,
         local_model_dir: str | None = None,
     ):
@@ -282,8 +284,8 @@ class DGemmaLoader:
         # explicitly set it True, we never retry online; if False (default)
         # or omitted, we try offline first and only hit the network on miss.
         try:
-            return (load_model(repo_id=repo_id, quant=quant, local_files_only=True),)
+            return (load_model(repo_id=DEFAULT_REPO_ID, quant=quant, local_files_only=True),)
         except LocalEntryNotFoundError:
             if local_files_only:
                 raise  # user explicitly requested offline — don't retry
-            return (load_model(repo_id=repo_id, quant=quant, local_files_only=False),)
+            return (load_model(repo_id=DEFAULT_REPO_ID, quant=quant, local_files_only=False),)
