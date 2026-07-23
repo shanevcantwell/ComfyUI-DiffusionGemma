@@ -43,6 +43,10 @@ The topology is hierarchical: core → MCP → consumers. New consumers wrap MCP
 2. **MCP is the base surface.** ComfyUI consumes MCP — it is one consumer among many, not a privileged path. Any agent calling MCP tools has equal access to all capability.
 3. **Stateless core.** Only the model load persists (~50 GB bf16 or ~30 GB INT4). Every run constructs a fresh scheduler, canvas, and run state. Two identical calls yield identical results.
 4. **Analysis is downstream.** `consumers/analysis.py` parses already-emitted `CanvasTrace`. It does not live in `dgemma/`'s import graph.
+5. **Protected load-time mechanics (Do not refactor).** The `load_model` INT4 (`autoround`) path relies on three structural patches to prevent consumer hardware OOMs and CPU bottlenecks. **Do not remove or bypass these:**
+   - `auto-round` regex pre-compilation (prevents O(N×M) CPU pinning during load).
+   - KV-cache warmup bypass (prevents 46GB bf16 buffer pre-allocation on INT4 loads).
+   - Tied-weight finalization guard (catches `AttributeError` for quantized embeddings).
 
 ---
 
