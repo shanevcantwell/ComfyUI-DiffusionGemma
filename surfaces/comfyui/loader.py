@@ -292,3 +292,12 @@ class DGemmaLoader:
             if local_files_only:
                 raise  # user explicitly requested offline — don't retry
             return (load_model(repo_id=None, quant=quant, local_files_only=False),)
+        except RuntimeError as exc:
+            # dgemma/model.py wraps OSError (including LocalEntryNotFoundError)
+            # into a RuntimeError with the original as __cause__ — catch that
+            # wrapper so the offline→online fallback still fires on cache miss.
+            if isinstance(exc.__cause__, LocalEntryNotFoundError):
+                if local_files_only:
+                    raise  # user explicitly requested offline — don't retry
+                return (load_model(repo_id=None, quant=quant, local_files_only=False),)
+            raise
