@@ -15,7 +15,8 @@ Eight rules, all simultaneous. Rules 1–7 govern the core/surface seam; rule 8 
 
 1. **One core, one contract.** `dgemma/` is the sole contract: `load_model` (`dgemma/model.py:157`) and `run_diffusion` (`dgemma/loop.py:465`, returning `(text, CanvasState, CanvasTrace)`). Every surface reaches the model *only* through these two functions. The core imports with zero ComfyUI present — enforced by subprocess test in `tests/test_seam.py`. *(→ ADR-CDG-003, ADR-CDG-008 · `ONE-DOOR`)*
 
-2. **Surfaces are peers over the core.** MCP is the base surface; ComfyUI is one consumer among many. No `for`-loop-over-denoising-steps in a surface body. *(→ ADR-CDG-008 · `ONE-DOOR`)*
+2. **MCP is the canonical surface; ComfyUI consumes MCP.** The MCP surface wraps core into tools. ComfyUI calls those tools — it does not import `dgemma/` directly. No `for`-loop-over-denoising-steps in a consumer body. *(→ ADR-CDG-008 · `ONE-DOOR`)*
+   **GAP (#137):** ComfyUI currently imports core directly (`surfaces/comfyui/loader.py`, `sampler.py`). Reconciling to MCP-consumer topology is tracked in issue #137.
 
 3. **Analysis is a downstream consumer, not core work.** The core emits canonical `CanvasTrace`; derived analysis parses it from outside the core's import graph. Enforced by `tests/test_seam.py::test_dgemma_does_not_import_consumers_package`. *(→ ADR-CDG-008 · `EMIT-CANONICAL / PARSE-AT-THE-DOOR`)*
 
@@ -41,12 +42,12 @@ Top (consumer) to bottom (substrate).
 |   humans @ ComfyUI graph . MCP clients/agents . scripts   |
 |   tests/e2e/driver.py  (in-repo instance; black-box)      |
 +-----------------------------------------------------------+
-        |  surface calls only
+        |  MCP tool calls only
    consumers/  (analysis: parses CanvasTrace)
         v
 +-----------------------------------------------------------+
-| surfaces/                                                 |
-|   comfyui/  (landed, was nodes/)    mcp/  (landed)        |  -- peers
+| SURFACE TIER                                              |
+|   mcp/  — canonical surface (server.py, state_manager.py) |
 +-----------------------------------------------------------+
         |  load_model + run_diffusion  -- THE ONE CONTRACT
 +-----------------------------------------------------------+
@@ -58,6 +59,9 @@ Top (consumer) to bottom (substrate).
 
    [lifecycle & tenancy plane -- NOT-YET-BUILT: today in-process single-tenant;
     served-engine (llauncher-owned) is an ADR-candidate, not decided]
+
+   **GAP (#137):** `surfaces/comfyui/` currently sits beside MCP calling core directly.
+   The diagram above shows the target topology: ComfyUI consumes MCP tools.
 ```
 
 ### Orchestration / consumer plane — sequences the surfaces (rule 8)
@@ -70,12 +74,12 @@ External to the pack. Composes and sequences already-contracted surface primitiv
 
 Pure trace-analysis functions: `consumers/analysis.py` (`build_commit_heatmap`, `build_avalanche_curve`, `build_entropy_heatmap`, `build_token_identity_grid`). Parses an already-captured `CanvasTrace`; never re-derives what the core emitted, never drives the model. Imports the contract type; the core imports nothing from here.
 
-### Surface tier — peer surfaces over the one contract (`surfaces/*`)
+### Surface tier — MCP is canonical; ComfyUI consumes it
 
-Each module is a thin adapter: unpack args → call one `dgemma.*` function → wrap the result. No denoising-step loop in a surface body (ADR-CDG-003).
+The MCP surface wraps core into tools. Consumers call those tools — they do not import `dgemma/` directly.
 
-- **`surfaces/comfyui/`** — ComfyUI node graph (`loader.py`, `sampler.py`, `trace.py`, `token_trace.py`, `frames_image.py`, `socket_types.py`) + `web/`.
-- **`surfaces/mcp/`** — Base MCP surface (`server.py`, `state_manager.py`, `commands/{model,generate}.py`). State manager persists only the loaded model (rule 6).
+- **`surfaces/mcp/`** — Canonical surface (`server.py`, `state_manager.py`, `commands/{model,generate}.py`). Thin adapter: unpack args → call one `dgemma.*` function → wrap the result. State manager persists only the loaded model (rule 6).
+- **`surfaces/comfyui/`** — ComfyUI node graph (`loader.py`, `sampler.py`, `trace.py`, `token_trace.py`, `frames_image.py`, `socket_types.py`) + `web/`. **GAP (#137):** currently imports core directly instead of consuming MCP tools. Reconciling to MCP-consumer topology is tracked in issue #137.
 
 ### Core — the one contract (`dgemma/`)
 
