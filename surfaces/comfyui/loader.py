@@ -84,15 +84,8 @@ else:
     )
     from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
-# Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
-# until weights actually live under ComfyUI model dirs. See the module
-# docstring for the enable trigger (#15 GGUF graduation / #4 conventional
-# checkpoint placement). When False (the default, current state): the dropdown
-# is omitted from `INPUT_TYPES` entirely — hidden, not merely de-defaulted —
-# and the HF-identifier `repo_id` flow is the sole visible load path. Flip to
-# True on the trigger day; the scan/resolve functions and their tests already
-# ship, so enabling is a one-line change, not a re-implementation.
-_LOCAL_FOLDERS_ENABLED = False
+# DiffusionGemma is an LLM — weights live under text_encoders, not diffusion_models.
+_LOCAL_FOLDERS_ENABLED = True
 
 # `folder_paths` is a ComfyUI-runtime module: real inside a live ComfyUI
 # process (its repo root is on sys.path at startup — `ComfyUI/main.py`), and
@@ -115,7 +108,7 @@ except ImportError:
 # folder. Order matters only for de-duplication below (first hit wins), not
 # for correctness — a name present under both folders resolves to whichever
 # is scanned first.
-_MODEL_FOLDER_KEYS = ("diffusion_models", "text_encoders")
+_MODEL_FOLDER_KEYS = ("text_encoders",)
 
 # transformers/HF checkpoints are a SHARD DIRECTORY (config.json,
 # tokenizer files, one-or-more model-*.safetensors), not a single file, so
