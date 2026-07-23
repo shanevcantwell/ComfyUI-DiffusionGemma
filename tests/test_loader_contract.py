@@ -191,10 +191,11 @@ def test_loader_passes_none_repo_for_autoround_quant(monkeypatch):
     assert captured["quant"] == "autoround"
 
 
-def test_loader_offline_first_succeeds_when_cached(monkeypatch):
-    """When the model is cached locally, `load()` tries offline first and
-    succeeds — no network calls made. This eliminates the HEAD-request
-    latency that previously added ~1 min before actual load."""
+def test_loader_passes_widget_default_false_through(monkeypatch):
+    """Widget default is `local_files_only=False` — the loader passes it
+    through directly, no forced offline-first. The kludge that always tried
+    `True` first then retried on cache miss violated ground physics:
+    the widget IS the ground truth, not a suggestion to override."""
     captured = []
 
     def fake_load_model(repo_id, quant, local_files_only):
@@ -204,31 +205,80 @@ def test_loader_offline_first_succeeds_when_cached(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
+    # No explicit local_files_only — uses widget default (False)
     node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
 
-    # Single call, offline-first — no network needed when cached
-    assert captured == [True]
+    assert captured == [False]
 
 
-def test_loader_falls_back_to_network_on_cache_miss(monkeypatch):
-    """When the model is NOT cached locally, `load()` catches
-    LocalEntryNotFoundError and retries with network access."""
+def test_loader_passes_explicit_true_through_no_retry(monkeypatch):
+    """When user sets `local_files_only=True`, it passes through as-is.
+    No retry machinery — a single call, whatever exception propagates."""
     from huggingface_hub.errors import LocalEntryNotFoundError
     captured = []
 
     def fake_load_model(repo_id, quant, local_files_only):
         captured.append(local_files_only)
-        if local_files_only:
-            raise LocalEntryNotFoundError("not cached")
-        return object()
+        raise LocalEntryNotFoundError("not cached")
 
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+    with pytest.raises(LocalEntryNotFoundError):
+        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
 
-    # First try offline (fails), then retry online
-    assert captured == [True, False]
+    # Single call — no retry, no wrapper unwrapping
+    assert captured == [True]
+
+
+def test_loader_propagates_cache_miss_without_retry_on_default(monkeypatch):
+    """When widget default (False) is used and load_model raises,
+    the exception propagates directly — no silent offline→online retry.
+    The kludge tried True first, caught LocalEntryNotFoundError, then
+    retried with False. That was generating behavior instead of executing
+    intent: the user said False, so call with False once."""
+    from huggingface_hub.errors import LocalEntryNotFoundError
+    captured = []
+
+    def fake_load_model(repo_id, quant, local_files_only):
+        captured.append(local_files_only)
+        raise LocalEntryNotFoundError("not cached")
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    with pytest.raises(LocalEntryNotFoundError):
+        # No explicit local_files_only — uses widget default (False)
+        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+
+    # Single call with False — no retry machinery
+    assert captured == [False]
+
+
+def test_loader_propagates_accelerate_valueerror_without_retry(monkeypatch):
+    """When `local_files_only=True` hits a cache miss and accelerate raises
+    ValueError (meta device without weights), the loader propagates it.
+    The old kludge only caught LocalEntryNotFoundError + RuntimeError wrapper,
+    so accelerate's ValueError fell through as an unhandled node failure.
+    After removal: there is no retry, so any exception from load_model
+    propagates directly — which IS the correct behavior since the user
+    explicitly requested offline."""
+    captured = []
+
+    def fake_load_model(repo_id, quant, local_files_only):
+        captured.append(local_files_only)
+        raise ValueError(
+            "weight is on the meta device, we need a `value` to put in on 0."
+        )
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    with pytest.raises(ValueError, match="meta device"):
+        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+
+    # Single call — no retry machinery to mask the real error
+    assert captured == [True]
 
 
 def test_loader_respects_explicit_local_files_only_true(monkeypatch):

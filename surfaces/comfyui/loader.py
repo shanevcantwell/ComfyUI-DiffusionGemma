@@ -104,8 +104,6 @@ _LOCAL_FOLDERS_ENABLED = False
 # the dual-context gate above (that branches on a deterministic `__package__`
 # signal that is always one of two known values); here the signal is
 # "importable or not" itself, so ImportError is the correct, narrow gate.
-from huggingface_hub.errors import LocalEntryNotFoundError
-
 try:
     import folder_paths
 except ImportError:
@@ -278,26 +276,5 @@ class DGemmaLoader:
                 )
             return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
 
-        # PRIMARY path: HF identifier. Try offline-first (skip all HEAD
-        # requests when cached), fall back to network on cache miss.
-        # The widget's local_files_only toggle is honored — if the user
-        # explicitly set it True, we never retry online; if False (default)
-        # or omitted, we try offline first and only hit the network on miss.
-        try:
-            # repo_id=None lets load_model auto-select the checkpoint matching
-            # the quant mode: DEFAULT_REPO_ID for "none", AUTOROUND_REPO_ID for
-            # "autoround" — see dgemma/model.py load_model() docstring.
-            return (load_model(repo_id=None, quant=quant, local_files_only=True),)
-        except LocalEntryNotFoundError:
-            if local_files_only:
-                raise  # user explicitly requested offline — don't retry
-            return (load_model(repo_id=None, quant=quant, local_files_only=False),)
-        except RuntimeError as exc:
-            # dgemma/model.py wraps OSError (including LocalEntryNotFoundError)
-            # into a RuntimeError with the original as __cause__ — catch that
-            # wrapper so the offline→online fallback still fires on cache miss.
-            if isinstance(exc.__cause__, LocalEntryNotFoundError):
-                if local_files_only:
-                    raise  # user explicitly requested offline — don't retry
-                return (load_model(repo_id=None, quant=quant, local_files_only=False),)
-            raise
+        # PRIMARY path: HF identifier. Pass the widget toggle through directly.
+        return (load_model(repo_id=None, quant=quant, local_files_only=local_files_only),)
