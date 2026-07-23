@@ -1,37 +1,35 @@
 # ComfyUI-DiffusionGemma
 <img width="1774" height="1674" alt="image" src="https://github.com/user-attachments/assets/38871944-af3f-42ba-9422-cc222ec3e4eb" />
 
-A ComfyUI node pack for **DiffusionGemma** — discrete diffusion text generation
-with per-step canvas snapshots, commit heatmaps, and structured trace data. Watch
-meaning crystallize out of noise.
+A Model Context Protocol (MCP) toolkit and ComfyUI node pack for **DiffusionGemma** —
+discrete diffusion text generation. Exposes the full 18-bit uniform-state melt with
+per-step canvas snapshots, commit heatmaps, and structured trace data. Watch meaning
+crystallize out of noise.
 
-> ### ✅ Status: working end-to-end
+> ### ✅ Status: Working End-to-End (Now on 32GB Hardware)
 >
 > Prompt in → text out, every entropy knob on a widget, per-step canvas tracking,
 > flipbooks, and a **trace node** (commit heatmap + summary) to read what happened.
 > Verified on real weights across two GPUs.
 >
-> **VRAM footprint:** ~30 GB with `quant='autoround'` (INT4), ~50 GB bf16 (`quant='none'`).
-> Quantized path lands in [issue #4](../../issues/4).
+> **VRAM barrier broken:** The custom loader now supports `quant='autoround'` (INT4),
+> dropping the footprint to **~30.7 GB** with a 27-second load time. The 50 GB bf16
+> (`quant='none'`) path remains available. Details in [issue #4](../../issues/4).
 
 | Phase | What landed | Evidence |
 |-------|-------------|----------|
 | P0 — recon & spec | ADRs 001–003, build plan | [decisions/](decisions/) |
 | P1 — vertical slice | `DGemmaLoader` + `DGemmaSampler`, prompt→text + validity readout | 3 live PASSes (recorded in-repo) |
-| P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | live PASS + entropy_bound sweep |
+| P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); INT4 quant grounded | live PASS + entropy_bound sweep |
 | P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
 
 ---
 
 ## Quick start
 
-A ComfyUI node pack that runs **DiffusionGemma** (Google's discrete diffusion text
-model) as an instrumentable graph. Unlike autoregressive LLMs, DiffusionGemma
-generates text by *annealing a canvas of noise* — every position starts random and
-crystallizes into coherent output step-by-step. This pack captures the full per-step
-trajectory: schedule position `t`, temperature `T`, entropy, commit fraction — and
-exposes it as heatmaps, flipbooks, and structured trace data you can replay after
-the run.
+Unlike autoregressive LLMs, DiffusionGemma generates text by *annealing a canvas of noise* — every position starts random and crystallizes into coherent output step-by-step.
+
+This repository provides an instrumentable graph to capture the full per-step trajectory (schedule position `t`, temperature `T`, entropy, commit fraction) and exposes it as heatmaps, flipbooks, and structured trace data. **Crucially, the underlying code acts as an MCP toolkit.** The exact same execution logic that drives the ComfyUI nodes can be utilized directly by autonomous agents for multi-agent reasoning and constraint propagation.
 
 **Nodes:** `DGemmaLoader` → `DGemmaSampler` → `DGemmaTrace`
 
@@ -43,21 +41,18 @@ git clone https://github.com/shanevcantwell/ComfyUI-DiffusionGemma
 # restart ComfyUI
 ```
 
-Requires `transformers==5.13.0` (DiffusionGemma support) and
-`diffusers>=0.39.0` (the pipeline + schedulers — see ADR-CDG-004). Weights download
-from [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it)
-on first load.
+Requires `transformers==5.13.0` (DiffusionGemma support) and `diffusers>=0.39.0`. Weights download from [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it) on first load. The loader automatically bypasses the 46GB KV-cache warmup and patches tied-weight finalization when the INT4 path is selected.
 
-### Hardware & memory
+### Hardware & Memory
 
 | Mode | VRAM | Load time | Notes |
 |------|------|-----------|-------|
-| `quant='autoround'` (INT4) | ~30 GB | ~27 s | Pre-quantized checkpoint, working forward pass |
-| `quant='none'` (bf16) | ~50 GB | slower | Full precision, CPU spill via ComfyUI offload |
+| `quant='autoround'` (INT4) | ~30.7 GB | ~27 s | Pre-quantized checkpoint. Accessible on standard 32GB/48GB setups. |
+| `quant='none'` (bf16) | ~50 GB | slower | Full precision, CPU spill via ComfyUI offload. |
 
-- **Disk — ~54 GB free** for bf16 cache; INT4 pulls a smaller pre-quantized checkpoint.
-- **First run is slow** — that's the download, not a hang. Cached after first load; flip `local_files_only` on to skip network checks.
-- **System RAM matters.** Whatever isn't in VRAM lives in system RAM. Thin system memory, not VRAM, is what actually stops a run under heavy offload.
+* **Disk:** ~54 GB free for bf16 cache; INT4 pulls a smaller pre-quantized checkpoint.
+* **First run is slow:** That's the download, not a hang. Cached after first load; flip `local_files_only` on to skip network checks.
+* **System RAM matters:** Whatever isn't in VRAM lives in system RAM. Thin system memory, not VRAM, is what actually stops a run under heavy offload.
 - **Speed — offload costs time:** ~2.3 s/step on 48 GB with CPU spill, faster as VRAM grows.
 
 **Example graphs** ([examples/](examples/)): start with
@@ -85,21 +80,13 @@ The polyglot cascade you see mid-run (Katakana, Bengali, CJK flickering) isn't a
 it's the visual signature of maximum-entropy categorical noise before the model narrows
 its focus.
 
-### The nodes
+### The MCP-Powered Nodes
 
-- **`DGemmaLoader`** — loads `google/diffusiongemma-26B-A4B-it`. Choose `quant='none'`
-  (bf16) or `quant='autoround'` (INT4 pre-quantized checkpoint). Drives via the
-  Diffusers pipeline (ADR-CDG-004).
-- **`DGemmaSampler`** — all knobs as widgets. Defaults from grounded live runs:
-  `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`, `confidence=0.005`,
-  `gen_length=256`, `seed`, and a **`thinking` toggle** (injects `<|think|>` control
-  token). Outputs: `STRING` (clean — thought-channel excised at the id level),
-  `CANVAS_STATE`, `CANVAS_TRACE`, `frames` (per-step text flipbook), and **`images`**
-  (#21) — per-step series as a batched `IMAGE` that plugs into VideoHelperSuite for
-  shareable GIF / MP4 / WEBP.
-- **`DGemmaTrace`** — post-hoc analysis: commit heatmap (`IMAGE`, positions × steps) +
-  text summary. Frames keyed by `(t, temperature, step_idx)` so traces from different
-  runs stay comparable.
+Because these nodes are built on a Model Context Protocol backend, their parameters are strictly typed and verifiable.
+
+- **`DGemmaLoader`** — Loads the weights. The bespoke loader accepts `dtype='auto'`, seamlessly handling the INT4 `autoround` path without forcing massive BF16 allocations.
+- **`DGemmaSampler`** — All knobs as widgets. Defaults: `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`. Features a **`thinking` toggle** (injects `<|think|>` control token). Outputs: `STRING`, `CANVAS_STATE`, `CANVAS_TRACE`, `frames`, and **`images`** (per-step series as a batched `IMAGE` for VideoHelperSuite export).
+- **`DGemmaTrace`** — Post-hoc analysis: commit heatmap (`IMAGE`, positions × steps) + text summary. Frames keyed by `(t, temperature, step_idx)`.
 
 ### Knobs & units
 
