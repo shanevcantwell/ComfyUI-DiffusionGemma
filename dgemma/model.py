@@ -276,7 +276,6 @@ def load_model(
         dtype_label = "bfloat16"
 
     load_kwargs: dict = {
-        "device_map": "auto",
         "dtype": dtype_kwarg,
         "local_files_only": local_files_only,
     }
