@@ -322,6 +322,11 @@ def load_model(
     # Move entire model to GPU — no accelerate dispatch, single .to() call.
     if torch.cuda.is_available():
         model = model.to("cuda")
+    else:
+        raise RuntimeError(
+            "ComfyUI-DiffusionGemma requires a CUDA-capable GPU. "
+            f"No CUDA device found ({device})."
+        )
 
     device = _resolve_device(model)
 
