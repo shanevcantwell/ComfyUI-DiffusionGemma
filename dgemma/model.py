@@ -276,6 +276,7 @@ def load_model(
         dtype_label = "bfloat16"
 
     load_kwargs: dict = {
+        "low_cpu_mem_usage": False,  # force real CPU tensors; meta tensors can't move to CUDA
         "dtype": dtype_kwarg,
         "local_files_only": local_files_only,
     }
