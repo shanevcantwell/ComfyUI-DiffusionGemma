@@ -319,6 +319,10 @@ def load_model(
             f"{likely_cause}. Original error: {exc}"
         ) from exc
 
+    # Move entire model to GPU — no accelerate dispatch, single .to() call.
+    if torch.cuda.is_available():
+        model = model.to("cuda")
+
     device = _resolve_device(model)
 
     print(f"[INFO] ComfyUI-DiffusionGemma — model loaded on {device}")
