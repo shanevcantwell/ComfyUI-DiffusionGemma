@@ -280,6 +280,11 @@ def load_model(
         "local_files_only": local_files_only,
     }
 
+    print(
+        f"[INFO] ComfyUI-DiffusionGemma 0.4.0 — loading from {repo_id!r} "
+        f"({dtype_label}, quant={quant})"
+    )
+
     try:
         model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
         processor = AutoProcessor.from_pretrained(
@@ -315,6 +320,8 @@ def load_model(
         ) from exc
 
     device = _resolve_device(model)
+
+    print(f"[INFO] ComfyUI-DiffusionGemma — model loaded on {device}")
 
     return DGemmaModel(
         model=model,
