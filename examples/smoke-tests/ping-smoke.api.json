@@ -12,6 +12,13 @@
     "inputs": {
       "prompt": "ping",
       "seed": 680870402931309,
+      "num_inference_steps": 48,
+      "t_min": 0.4,
+      "t_max": 0.8,
+      "entropy_bound": 0.1,
+      "confidence": 0.005,
+      "gen_length": 256,
+      "thinking": false,
       "model": [
         "72",
         0

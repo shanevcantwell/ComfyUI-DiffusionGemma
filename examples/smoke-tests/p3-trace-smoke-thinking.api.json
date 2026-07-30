@@ -58,7 +58,9 @@
       "canvas_trace": [
         "73",
         2
-      ]
+      ],
+      "mode": "commit",
+      "cell_px": 6
     },
     "class_type": "DGemmaTrace",
     "_meta": {

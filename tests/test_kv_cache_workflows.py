@@ -48,22 +48,22 @@ def _node_return_names(class_type: str) -> tuple:
     return names if names is not None else tuple(_node_return_types(class_type))
 
 
-def _required_input_names_with_no_default(input_types: dict) -> set:
-    """Required inputs with no declared widget `default` — the ones a
-    `/prompt` POST genuinely cannot omit. A required socket input (a
-    1-tuple spec, e.g. `("DGEMMA_MODEL",)`) has no default and always
-    counts; a required WIDGET (2-tuple, e.g. `("BOOLEAN", {"default":
-    False})`) with a declared default is server-side-fillable and does NOT
-    count — matching the existing shipped-example convention
-    (`ping-smoke.api.json` omits `DGemmaLoader`'s defaulted
-    `local_files_only`; `p3-trace-smoke.api.json` omits `DGemmaTrace`'s
-    defaulted `cell_px`), which this test must not regress against."""
-    names = set()
-    for name, spec in input_types.get("required", {}).items():
-        if isinstance(spec, tuple) and len(spec) > 1 and "default" in spec[1]:
-            continue
-        names.add(name)
-    return names
+def _required_input_names(input_types: dict) -> set:
+    """Every `required`-section input name, full stop — issue #179's
+    grounded correction of this helper's prior `_with_no_default` form, which
+    wrongly treated an `INPUT_TYPES`-declared widget `default` as making a
+    key omittable from a live `/prompt` POST. It was not: `ping-smoke.api.json`
+    and `p3-trace-smoke.api.json` (cited in this docstring's earlier revision
+    as "the convention" to preserve) were themselves the release-blocking
+    404s the #163 smoke re-run caught, since ComfyUI's server-side validator
+    never backfills a default for a raw API-JSON submission — see
+    `tests/test_examples_conformance.py`'s `_required_input_names` docstring
+    for the full grounded citation (`execution.py:898-913`,
+    `/tmp/smoke-050/ComfyUI/execution.py`). Kept as a second copy (not a
+    shared import) because this module predates and is narrower in scope
+    than `test_examples_conformance.py` (KV_CACHE-only glob vs. every
+    shipped `.api.json`); both must apply the same corrected rule."""
+    return set(input_types.get("required", {}))
 
 
 def _all_declared_input_names(input_types: dict) -> set:
@@ -103,13 +103,15 @@ class TestKVCacheWorkflowConformance:
             if class_type not in NODE_CLASS_MAPPINGS:
                 continue
             input_types = _node_input_types(class_type)
-            required = _required_input_names_with_no_default(input_types)
+            required = _required_input_names(input_types)
             given = set(node.get("inputs", {}).keys())
             missing = required - given
             assert not missing, (
                 f"{workflow_path.name} node {node_id} ({class_type}): missing required "
-                f"input(s) {missing} — node signature changed since this workflow was "
-                "authored (shipped-but-rotted graph)"
+                f"input(s) {missing} — a live /prompt POST 400s on ANY required key "
+                "absent from `inputs`, even one with an INPUT_TYPES-declared widget "
+                "default (see execution.py:898-913) — node signature changed since "
+                "this workflow was authored (shipped-but-rotted graph)"
             )
 
     def test_every_wired_link_socket_type_matches(self, workflow_path):

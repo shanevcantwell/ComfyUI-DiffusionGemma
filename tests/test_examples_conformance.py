@@ -50,19 +50,38 @@ def _node_return_types(class_type: str) -> tuple:
     return NODE_CLASS_MAPPINGS[class_type].RETURN_TYPES
 
 
-def _required_input_names_with_no_default(input_types: dict) -> set:
-    """Required inputs with no declared widget `default` — the ones a
-    `/prompt` POST genuinely cannot omit. A required socket input (a
-    1-tuple spec, e.g. `("DGEMMA_MODEL",)`) has no default and always
-    counts; a required WIDGET (2-tuple, e.g. `("BOOLEAN", {"default":
-    False})`) with a declared default is server-side-fillable and does NOT
-    count."""
-    names = set()
-    for name, spec in input_types.get("required", {}).items():
-        if isinstance(spec, tuple) and len(spec) > 1 and "default" in spec[1]:
-            continue
-        names.add(name)
-    return names
+def _required_input_names(input_types: dict) -> set:
+    """Every `required`-section input name, full stop — issue #179's
+    grounded correction of the prior `_required_input_names_with_no_default`
+    helper, which wrongly treated a declared `INPUT_TYPES` widget `default`
+    as making the key omittable from a live `/prompt` POST.
+
+    Grounded against the real ComfyUI validator,
+    `/tmp/smoke-050/ComfyUI/execution.py`'s `validate_inputs`
+    (`execution.py:896-913` in that checkout): `valid_inputs` is the union of
+    `required` ∪ `optional` names (:896); the loop at :898-913 checks, for
+    each name `x`, `if x not in inputs:` (:901) and — ONLY when
+    `input_category == "required"` (:902) — unconditionally appends a
+    `required_input_missing` error (:904-912), with NO fallback anywhere in
+    that branch to an `INPUT_TYPES`-declared `default`. An `optional` key
+    missing from `inputs` just `continue`s (:913) with no error either way.
+    So: every `required` key must be present in the fixture's `inputs` dict
+    or the live POST 400s — regardless of whether `INPUT_TYPES` declares a
+    `default` for it. `INPUT_TYPES` defaults are backfilled only by the
+    frontend graph editor when it builds a graph for POSTing (`.ui.json`
+    authoring), never by the server for a raw `.api.json` submitted
+    directly to `/prompt` — issue #179 (kv-cache-tier1.api.json's `thinking`/
+    `mode`/`cell_px` gap, caught by the #163 smoke re-run) is exactly a
+    fixture that relied on the false assumption this helper used to encode.
+
+    Every workflow this module walks is `.api.json` (glob is
+    `**/*.api.json` — see `_ALL_EXAMPLE_WORKFLOWS` below); there is no
+    `.ui.json` carve-out to preserve here because none is in scope. If a
+    `.ui.json` fixture is ever added to this glob, this strict rule would be
+    the WRONG one for it (the editor does backfill defaults before POSTing
+    a `.ui.json`-sourced graph) — that distinction would need reinstating
+    at that point, keyed off file suffix, not deleted silently."""
+    return set(input_types.get("required", {}))
 
 
 def _all_declared_input_names(input_types: dict) -> set:
@@ -102,13 +121,17 @@ class TestExampleWorkflowConformance:
             if class_type not in NODE_CLASS_MAPPINGS:
                 continue
             input_types = _node_input_types(class_type)
-            required = _required_input_names_with_no_default(input_types)
+            required = _required_input_names(input_types)
             given = set(node.get("inputs", {}).keys())
             missing = required - given
             assert not missing, (
                 f"{workflow_path.name} node {node_id} ({class_type}): missing required "
-                f"input(s) {missing} — node signature changed since this workflow was "
-                "authored (shipped-but-rotted graph)"
+                f"input(s) {missing} — a live /prompt POST 400s on ANY required key "
+                "absent from `inputs`, even one with an INPUT_TYPES-declared widget "
+                "default (ComfyUI never backfills a default server-side for a raw "
+                "API-JSON submission; see execution.py:898-913, cited in "
+                "_required_input_names's docstring) — node signature changed since "
+                "this workflow was authored (shipped-but-rotted graph)"
             )
 
     def test_every_pack_node_input_key_is_declared(self, workflow_path):
