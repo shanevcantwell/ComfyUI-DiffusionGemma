@@ -83,12 +83,12 @@ def _matching_kv_cache(model: DGemmaModel, *, minting_sequence=(1, 2, 3)) -> KVC
     the local twin of `tests/conftest.py`'s `synthetic_kv_cache`, reused
     directly here (same shape) so this module doesn't duplicate the mismatch
     matrix ingress already owns (Phase 1's `test_kv_cache_ingress.py`)."""
-    config = model.model.config
-    cache = FakeDynamicCache(num_layers=config.num_hidden_layers)
+    text_config = model.model.config.get_text_config()
+    cache = FakeDynamicCache(num_layers=text_config.num_hidden_layers)
     geometry = geometry_from_model(model)
     return KVCache(
         cache=cache,
-        cumulative_length=tuple([0] * config.num_hidden_layers),
+        cumulative_length=tuple([0] * text_config.num_hidden_layers),
         geometry=geometry,
         provenance=Provenance(
             minting_sequence=minting_sequence,
@@ -280,7 +280,7 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
         good_cache = _matching_kv_cache(model)
         # Defeat V1 (layer count): drop the last cache layer.
         bad_cache = KVCache(
-            cache=FakeDynamicCache(num_layers=model.model.config.num_hidden_layers - 1),
+            cache=FakeDynamicCache(num_layers=model.model.config.get_text_config().num_hidden_layers - 1),
             cumulative_length=good_cache.cumulative_length[:-1],
             geometry=good_cache.geometry,
             provenance=good_cache.provenance,

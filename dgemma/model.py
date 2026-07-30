@@ -16,10 +16,12 @@ CPU-spill), verified with two integration PASSes on this box.
 
 AutoRound INT4 (`quant="autoround"`) loads pre-quantized W4A16 checkpoints
 (e.g. Intel/diffusiongemma-26B-A4B-it-int4-AutoRound) at ~30GB VRAM vs 53GB
-bf16. Requires `auto-round` (the `[quant]` optional extra). The load path
-patches three transformers/auto-round issues: regex pre-compilation for MoE
-expert matching, KV-cache warmup that pre-allocates bf16-sized buffers,
-and tied-weight finalization on quantized modules.
+bf16. Requires `auto-round`, a base dependency (issue #139 — was the
+`[quant]` optional extra; folded in since it's one of two supported quant
+modes, not a hardware-gated install). The load path patches three
+transformers/auto-round issues: regex pre-compilation for MoE expert
+matching, KV-cache warmup that pre-allocates bf16-sized buffers, and
+tied-weight finalization on quantized modules.
 
 `"nf4"`/`"int8"` are gone, not just de-defaulted (issue #18): bitsandbytes
 can't touch the part of this architecture that dominates its size, so

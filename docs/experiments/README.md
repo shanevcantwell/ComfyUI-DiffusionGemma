@@ -10,3 +10,4 @@ hypothesis is a finding, not a loss.
 | `2026-07-14-dg-gatsby-counts-ar-prior-latch/` | AR-prior-latch H0, generalization overturned by numeral-counts run | superseded 2026-07-15 |
 | `2026-07-15-dg-numeral-counts-update-in-response/` | single-token numeral tally: counts visibly update against the annealing canvas (4: 2→3 slaved to a canvas position resolving) | H0 (no real work) falsified 2026-07-15 |
 | `2026-07-16-dg-ar-kv-field-authorship/` | AR-side authorship arrives as KVs, not tokens — the field-determination hypothesis | H0 falsified same-day (T01-09-06 sweep); two-sweep synthesis recorded |
+| `bf16-fit-mechanism/` | 52.7 GiB bf16 checkpoint fits a 48 GB card via lazy-load (mmap) CPU offload (10.25 GiB), invisible to RAM-based instruments | H0 falsified, alternative confirmed 2026-07-30 |

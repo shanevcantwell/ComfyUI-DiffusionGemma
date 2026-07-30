@@ -32,8 +32,12 @@ dependencies = [
     # import (`surfaces/comfyui/frames_image.py`'s PIL-image -> tensor
     # conversion).
     "numpy",
-    # AutoRound INT4 checkpoint support: Intel/diffusiongemma-26B-A4B-it-int4-AutoRound
-    # loads via transformers' built-in auto-round quantizer. W4A16 (~30GB VRAM vs ~53GB bf16).
+    # AutoRound INT4 checkpoint support (issue #139): one of the two
+    # supported quant modes alongside bf16, not a hardware-gated optional —
+    # was `[project.optional-dependencies].quant`, moved to base so
+    # `quant="autoround"` works out of a plain install. See
+    # Intel/diffusiongemma-26B-A4B-it-int4-AutoRound (W4A16, ~15GB on disk
+    # vs 52GB bf16, MoE-compatible, no bnb kernel panics).
     "auto-round>=0.5",
 ]
 

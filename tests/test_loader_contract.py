@@ -422,8 +422,8 @@ def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):
         return sentinel_image_batch
 
     monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
-    monkeypatch.setattr("surfaces.comfyui.sampler.decode_frames", fake_decode_frames)
-    monkeypatch.setattr("surfaces.comfyui.sampler.render_frames_to_image_batch", fake_render_frames_to_image_batch)
+    monkeypatch.setattr("surfaces.comfyui.emission.decode_frames", fake_decode_frames)
+    monkeypatch.setattr("surfaces.comfyui.emission.render_frames_to_image_batch", fake_render_frames_to_image_batch)
 
     node = DGemmaSampler()
     result = node.sample(
@@ -523,7 +523,7 @@ def test_sampler_frames_image_output_is_a_stacked_batch_tensor_not_a_list(monkey
         return decoded_frames
 
     monkeypatch.setattr("surfaces.comfyui.sampler.run_diffusion", fake_run_diffusion)
-    monkeypatch.setattr("surfaces.comfyui.sampler.decode_frames", fake_decode_frames)
+    monkeypatch.setattr("surfaces.comfyui.emission.decode_frames", fake_decode_frames)
 
     node = DGemmaSampler()
     result = node.sample(

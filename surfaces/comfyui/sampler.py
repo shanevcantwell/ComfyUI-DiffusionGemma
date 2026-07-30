@@ -126,7 +126,6 @@ import logging
 # comment: this module's own absolute package name ("surfaces.comfyui")
 # contains a dot even under bare pytest, so a naive check would misfire.
 if __package__ and __package__.count(".") >= 2:
-    from ...consumers.run_log import RunConfig
     from ...dgemma.loop import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
@@ -135,10 +134,9 @@ if __package__ and __package__.count(".") >= 2:
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
         KNOB_DOCS,
-        decode_frames,
         run_diffusion,
     )
-    from .frames_image import FrameMetadata, render_frames_to_image_batch
+    from .emission import build_sampler_shaped_outputs
     from .socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
@@ -146,7 +144,6 @@ if __package__ and __package__.count(".") >= 2:
         DGEMMA_RUN_CONFIG,
     )
 else:
-    from consumers.run_log import RunConfig
     from dgemma.loop import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
@@ -155,10 +152,9 @@ else:
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
         KNOB_DOCS,
-        decode_frames,
         run_diffusion,
     )
-    from surfaces.comfyui.frames_image import FrameMetadata, render_frames_to_image_batch
+    from surfaces.comfyui.emission import build_sampler_shaped_outputs
     from surfaces.comfyui.socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
@@ -172,45 +168,6 @@ else:
 # collision with another pack's event name would silently cross-wire two
 # unrelated `web/` extensions' `addEventListener` handlers.
 DGEMMA_STEP_EVENT = "dgemma.sampler.step"
-
-# `frames_image` render defaults (issue #21 rework) — fixed, not widgets; see
-# the `frames_image` output's docstring above for why this is a display
-# rendering rather than a sampling parameter.
-FRAMES_IMAGE_WIDTH = 512
-FRAMES_IMAGE_FONT_SIZE = 20
-FRAMES_IMAGE_CAPTION_STEP_INDEX = True
-
-
-def _build_frame_metadata(frames: list) -> list:
-    """Build the per-image `FrameMetadata` key (issue #84, DECISION S-1)
-    from `canvas_trace.frames`, threaded into `render_frames_to_image_batch`
-    the SAME way `canvas_indices` already is (parallel list, one entry per
-    decoded frame, built here rather than inside the render helper — the
-    render helper stays plain-data-in, ADR-CDG-003).
-
-    `mean_entropy` is a scalar reduction of `DiffusionFrame.entropy`
-    (`float32[canvas_len]` or `None`) — cheap (`~1 KB/step` tensor, ADR-CDG-014
-    Decision 3) and the one non-trivial computation in this function; still
-    not denoising-loop logic (rule 2), just an adapter-side reduction of a
-    value the core already computed. `None` propagates as `None` (never a
-    fabricated `0.0`), matching `DiffusionFrame.entropy`'s own "`None` means
-    not captured this run" discipline."""
-    metadata = []
-    for frame in frames:
-        mean_entropy = float(frame.entropy.mean().item()) if frame.entropy is not None else None
-        metadata.append(
-            FrameMetadata(
-                step_idx=frame.step_idx,
-                total_steps=len(frames),
-                t=frame.t,
-                temperature=frame.temperature,
-                committed_fraction=frame.committed_fraction_per_example[0]
-                if len(frame.committed_fraction_per_example) == 1
-                else None,
-                mean_entropy=mean_entropy,
-            )
-        )
-    return metadata
 
 
 def _build_should_cancel():
@@ -458,42 +415,22 @@ class DGemmaSampler:
             on_frame=_build_on_frame(unique_id),
             should_cancel=_build_should_cancel(),
         )
-        frames = decode_frames(model.processor, canvas_trace.frames)
-        # Per-image canvas-index key (ADR-CDG-009 §2, #35 F7): one canvas_idx
-        # per decoded frame, parallel to `frames`, so the flipbook caption is
-        # the N-canvas `canvas k/N · step i/M` form keyed per image rather than
-        # a flat running index reconstructed by a fragile 1:1 zip.
-        canvas_indices = [frame.canvas_idx for frame in canvas_trace.frames]
-        # Per-image metadata key (issue #84, DECISION S-1): threaded the
-        # same way as canvas_indices above — one FrameMetadata per decoded
-        # frame, parallel to `frames`.
-        frame_metadata = _build_frame_metadata(canvas_trace.frames)
-        frames_image = render_frames_to_image_batch(
-            frames,
-            width=FRAMES_IMAGE_WIDTH,
-            font_size=FRAMES_IMAGE_FONT_SIZE,
-            caption_step_index=FRAMES_IMAGE_CAPTION_STEP_INDEX,
-            canvas_indices=canvas_indices,
-            frame_metadata=frame_metadata,
-        )
-        # `run_config` (issue #72, Option A / D-1): a plain unpack of args and
-        # `model` attributes this method already holds — no re-derivation, no
-        # new logic. This is the ONLY position holding seed+knobs+model-id
-        # simultaneously (G-2), so it is assembled here rather than pushed
-        # into `run_diffusion`'s core signature.
-        run_config = RunConfig(
+        # Output construction (RunConfig build, frames decode, images
+        # render, tuple assembly) is the shared emission helper (issue
+        # #166) — `DGemmaDenoise` calls the identical body, byte-identical
+        # outputs to before this extraction.
+        return build_sampler_shaped_outputs(
+            model=model,
             prompt=prompt,
-            model_repo_id=model.repo_id,
             seed=seed,
-            num_inference_steps_requested=num_inference_steps,
-            gen_length=gen_length,
+            num_inference_steps=num_inference_steps,
             t_min=t_min,
             t_max=t_max,
             entropy_bound=entropy_bound,
             confidence=confidence,
+            gen_length=gen_length,
             thinking=thinking,
-            quant=model.quant,
-            device=model.device,
-            dtype=model.dtype,
+            text=text,
+            canvas_state=canvas_state,
+            canvas_trace=canvas_trace,
         )
-        return (text, canvas_state, canvas_trace, frames, frames_image, run_config)

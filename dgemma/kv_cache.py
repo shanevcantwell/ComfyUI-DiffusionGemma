@@ -62,13 +62,22 @@ def geometry_from_model(dgemma_model: Any) -> dict:
     constructs (`tests/conftest.py`'s `synthetic_kv_cache`), so V2 is a
     structural equality check, not a bespoke per-field comparison that could
     silently skip a field neither side updated.
+
+    `DiffusionGemmaConfig` is a **composite** config (issue #162): none of
+    these four fields live top-level — all four live one level down, on the
+    text sub-config. `config.get_text_config()`
+    (`configuration_utils.py:1240`, always populated by the real class's
+    `__post_init__`) resolves that sub-config. No `getattr(..., default)`
+    fallback chain here (PARSE-AT-THE-DOOR) — a config shape missing one of
+    these fields fails loud, rather than silently degrading to a fabricated
+    default.
     """
-    config = dgemma_model.model.config
+    text_config = dgemma_model.model.config.get_text_config()
     return {
-        "num_hidden_layers": config.num_hidden_layers,
-        "layer_types": tuple(config.layer_types),
-        "sliding_window": config.sliding_window,
-        "rope_parameters": dict(config.rope_parameters),
+        "num_hidden_layers": text_config.num_hidden_layers,
+        "layer_types": tuple(text_config.layer_types),
+        "sliding_window": text_config.sliding_window,
+        "rope_parameters": dict(text_config.rope_parameters),
     }
 
 
@@ -110,14 +119,16 @@ def validate_kv_cache_ingress(payload: KVCache, dgemma_model: Any) -> None:
     cold user who mis-wires around the type system is told what is wrong
     and what to do, not handed a bare assertion.
     """
-    model_config = dgemma_model.model.config
+    # Composite config (issue #162): `num_hidden_layers` lives on the text
+    # sub-config, not top-level — see `geometry_from_model`'s docstring.
+    text_config = dgemma_model.model.config.get_text_config()
 
     # V1 — layer count of `cache` == loaded model's decoder-layer count.
     # Failure this prevents: a cache from a differently-sized model
     # attaching with a truncated/over-long layer set — silent wrong-geometry
     # attention (ADR-CDG-012 §D.3).
     cache_layer_count = len(payload.cache.key_cache)
-    expected_layer_count = model_config.num_hidden_layers
+    expected_layer_count = text_config.num_hidden_layers
     if cache_layer_count != expected_layer_count:
         raise ValueError(
             f"KV_CACHE ingress V1 failed: cache has {cache_layer_count} layers, "
