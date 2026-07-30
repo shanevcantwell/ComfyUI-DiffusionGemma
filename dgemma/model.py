@@ -555,13 +555,15 @@ def load_model(
     _assert_no_meta_tensors(model)
 
     # Move entire model to GPU — no accelerate dispatch, single .to() call.
-    if torch.cuda.is_available():
-        model = model.to("cuda")
-    else:
+    if not torch.cuda.is_available():
         raise RuntimeError(
-            "ComfyUI-DiffusionGemma requires a CUDA-capable GPU. "
-            f"No CUDA device found ({device})."
+            "ComfyUI-DiffusionGemma requires a CUDA-capable GPU. No CUDA device "
+            "found (torch.cuda.is_available() is False). There is no supported "
+            "CPU-only path for this pack: DiffusionGemma's ~53GB bf16 / ~30GB "
+            "INT4 footprint and the sampler's CUDA-seeded torch.Generator "
+            "(dgemma/loop.py run_diffusion) both assume an accelerator."
         )
+    model = model.to("cuda")
 
     device = _resolve_device(model)
 

@@ -254,6 +254,18 @@ class TestLoadModel:
         with pytest.raises(ValueError, match="unrelated config bug"):
             load_model(repo_id="fake/repo")
 
+    def test_no_cuda_raises_intentional_runtime_error_not_unbound_local(self, monkeypatch):
+        """issue #143: the no-CUDA else-branch used to reference a `device`
+        variable removed by dd2767c, raising an opaque UnboundLocalError
+        instead of the intended message. Must now raise a house-register
+        RuntimeError naming the missing precondition, with no dead reference."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: False)
+
+        with pytest.raises(RuntimeError, match="CUDA"):
+            load_model(repo_id="fake/repo", quant="none")
+
     def test_meta_resident_tensor_after_load_raises_before_to_cuda(self, monkeypatch):
         """issue #142's enforcement surface: any parameter/buffer still on
         meta after load (and after the autoround re-tie attempt) must raise,
