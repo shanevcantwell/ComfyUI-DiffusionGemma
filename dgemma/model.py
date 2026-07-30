@@ -357,6 +357,76 @@ def _check_quant_checkpoint_match(
         )
 
 
+def _retie_lm_head(model) -> None:
+    """Re-tie `lm_head.weight` to its true-storage sibling when the AutoRound
+    load path leaves it meta-resident (issue #142).
+
+    Root cause (probe v3, issue #142): `_apply_autoround_patches()`'s Patch 3
+    suppresses `PreTrainedModel.tie_weights`'s crash on a quantized
+    `embed_tokens` (no plain `.weight`, only `.qweight`) but does not
+    materialize the tied tensor — `lm_head.weight` is left stranded on
+    `meta`. `DiffusionGemmaForBlockDiffusion._tied_weights_keys` declares
+    the tie explicitly: `{"lm_head.weight": "model.decoder.embed_tokens.weight"}`
+    (`transformers/models/diffusion_gemma/modeling_diffusion_gemma.py`).
+    Mirrors exactly what the library's own (unpatched) `tie_weights` does for
+    this pair — `setattr(parent, name, source_param)`, i.e. point
+    `lm_head.weight` at the *same* `nn.Parameter` object `embed_tokens`
+    already holds real (non-meta) data for — rather than a copy, since a
+    genuine weight tie shares storage.
+
+    No-op if `lm_head.weight` is already real (e.g. the bf16 `quant="none"`
+    path, or a future transformers release that fixes the underlying patch
+    interaction) — this is a targeted repair for the one known-affected
+    tensor, not a general meta-tensor materializer.
+    """
+    lm_head_weight = getattr(getattr(model, "lm_head", None), "weight", None)
+    if lm_head_weight is None or lm_head_weight.device.type != "meta":
+        return
+
+    source = model.get_parameter("model.decoder.embed_tokens.weight")
+    if source.device.type == "meta":
+        # The source itself is meta-resident — re-tying would just point one
+        # meta tensor at another. Leave it; the post-load assertion below
+        # will name both and fail loud rather than silently no-op here.
+        return
+
+    model.lm_head.weight = source
+
+
+def _assert_no_meta_tensors(model) -> None:
+    """FAIL LOUD (issue #142's enforcement surface) if any parameter or
+    buffer is still meta-resident after load + re-tie, BEFORE `.to("cuda")`.
+
+    Without this, a stray meta tensor surfaces later as `.to("cuda")`'s
+    opaque `NotImplementedError: Cannot copy out of meta tensor; no data!`
+    (probe v3) — or worse, silently no-ops under a dispatch path that
+    tolerates meta tensors (accelerate `device_map`, per-submodule `.to()`),
+    deferring the failure to first *use* of that tensor as a much later,
+    harder-to-attribute crash or hang (probe v3's stated risk). Scanning
+    `named_parameters()` + `named_buffers()` here — for every quant path, not
+    just autoround — turns any future instance of this class of bug into an
+    immediate, named, actionable error instead of a downstream hang.
+    """
+    meta_names = [
+        name
+        for name, tensor in (*model.named_parameters(), *model.named_buffers())
+        if tensor.device.type == "meta"
+    ]
+    if meta_names:
+        raise RuntimeError(
+            "ComfyUI-DiffusionGemma: model has meta-resident tensor(s) after "
+            f"load (before .to(\"cuda\")): {meta_names}. A meta tensor holds no "
+            "data and cannot be moved to a real device via .to() — this would "
+            "otherwise surface later as an opaque 'Cannot copy out of meta "
+            "tensor' crash or a silent no-op hang, depending on the dispatch "
+            "path. This is usually a tied-weight that was suppressed but "
+            "never materialized during from_pretrained (see issue #142). "
+            "Remedy: report this repo_id/quant combination — a new tied "
+            "parameter may need its own re-tie handling alongside "
+            "_retie_lm_head."
+        )
+
+
 def _resolve_device(model) -> str:
     """Resolve the model's *execution* device, not its first parameter's.
 
@@ -470,6 +540,19 @@ def load_model(
             f"Could not load DiffusionGemma from repo_id={repo_id!r}: likely cause is "
             f"{likely_cause}. Original error: {exc}"
         ) from exc
+
+    # issue #142: the autoround path's tied lm_head.weight can be left
+    # meta-resident (Patch 3 suppresses the tie crash without materializing
+    # the tensor) — re-tie it to its real-storage sibling before anything
+    # touches .to("cuda"), which cannot move a meta tensor.
+    if quant == "autoround":
+        _retie_lm_head(model)
+
+    # POST-LOAD ASSERTION (all quant paths): fail loud, naming the tensor(s),
+    # if anything is still meta-resident — the enforcement surface that keeps
+    # this class of bug from ever again presenting as a downstream hang or an
+    # opaque .to("cuda") crash (issue #142).
+    _assert_no_meta_tensors(model)
 
     # Move entire model to GPU — no accelerate dispatch, single .to() call.
     if torch.cuda.is_available():

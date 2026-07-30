@@ -33,13 +33,31 @@ from dgemma.model import (
 # Fakes — stand in for transformers' loaded model + processor
 # ---------------------------------------------------------------------------
 
+class _FakeDevice:
+    """Minimal stand-in for `torch.device` — `.type` is what
+    `_assert_no_meta_tensors` inspects; `str()` is what `_resolve_device`
+    compares against."""
+
+    def __init__(self, device_str: str):
+        self._device_str = device_str
+        self.type = device_str.split(":")[0]
+
+    def __str__(self):
+        return self._device_str
+
+
 class _FakeParam:
     def __init__(self, device: str):
-        self.device = device
+        self.device = _FakeDevice(device)
 
 
 class FakeHfModel:
-    """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`."""
+    """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`. `.to()` +
+    `named_parameters()` + `named_buffers()` are what `load_model`'s
+    post-load meta-tensor assertion (issue #142) and the final
+    `.to("cuda")` call touch — no `lm_head` attribute, so `_retie_lm_head`'s
+    autoround re-tie step no-ops on these fakes (getattr(model, "lm_head",
+    None) is None) rather than needing a full tied-weight fake."""
 
     def __init__(self, hf_device_map=None, first_param_device="cpu"):
         if hf_device_map is not None:
@@ -48,6 +66,15 @@ class FakeHfModel:
 
     def parameters(self):
         yield _FakeParam(self._first_param_device)
+
+    def named_parameters(self):
+        yield "fake.weight", _FakeParam(self._first_param_device)
+
+    def named_buffers(self):
+        return iter(())
+
+    def to(self, *args, **kwargs):
+        return self
 
 
 class FakeProcessor:
@@ -153,15 +180,18 @@ class TestAutoroundKwargsShape:
 
         assert captured["kwargs"]["dtype"] == "auto"
 
-    def test_autoround_still_uses_device_map_auto(self, monkeypatch):
-        """device_map="auto" is used for both quant modes — accelerate handles
-        the placement; the difference is in dtype and patch application."""
+    def test_autoround_does_not_use_device_map(self, monkeypatch):
+        """dd2767c dropped device_map="auto" entirely (tied params crash
+        under CPU spill) — both quant modes now load with low_cpu_mem_usage
+        =False and a single explicit .to("cuda") after, not accelerate
+        dispatch. No device_map key is passed to from_pretrained."""
         captured: dict = {}
         _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
 
         load_model(repo_id=None, quant="autoround")
 
-        assert captured["kwargs"]["device_map"] == "auto"
+        assert "device_map" not in captured["kwargs"]
+        assert captured["kwargs"]["low_cpu_mem_usage"] is False
 
     def test_autoround_returns_int4_dtype_label(self, monkeypatch):
         """The returned DGemmaModel has dtype='int4' for autoround loads."""
@@ -351,7 +381,7 @@ class TestAutoroundEndToEnd:
         assert captured["repo_id"] == AUTOROUND_REPO_ID
         # dtype="auto" for transformers to read quantization config
         assert captured["kwargs"]["dtype"] == "auto"
-        assert captured["kwargs"]["device_map"] == "auto"
+        assert "device_map" not in captured["kwargs"]
         # Processor called with same repo
         assert captured["processor_repo_id"] == AUTOROUND_REPO_ID
         # Result has correct dtype label
