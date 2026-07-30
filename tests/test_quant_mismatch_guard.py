@@ -57,9 +57,22 @@ class FakeAutoConfig:
         self.quantization_config = quantization_config
 
 
+class _FakeDevice:
+    """Minimal stand-in for `torch.device` — `.type` is what
+    `_assert_no_meta_tensors` inspects; `str()` is what `_resolve_device`
+    compares against."""
+
+    def __init__(self, device_str: str):
+        self._device_str = device_str
+        self.type = device_str.split(":")[0]
+
+    def __str__(self):
+        return self._device_str
+
+
 class _FakeParam:
     def __init__(self, device: str):
-        self.device = device
+        self.device = _FakeDevice(device)
 
 
 class FakeHfModel:
@@ -68,7 +81,9 @@ class FakeHfModel:
     Adds `.to()` on top of test_autoround_load.py's FakeHfModel (which
     lacks it) so pass-through tests here can exercise load_model() to
     completion on a CUDA-present host without touching the real device
-    block at model.py:317-329 (that region is #142 territory, left as-is)."""
+    block at model.py:317-329 (that region is #142 territory, left as-is).
+    `named_parameters()`/`named_buffers()` back the post-load meta-tensor
+    assertion (issue #142), which now runs on every quant path."""
 
     def __init__(self, hf_device_map=None, first_param_device="cpu"):
         if hf_device_map is not None:
@@ -77,6 +92,12 @@ class FakeHfModel:
 
     def parameters(self):
         yield _FakeParam(self._first_param_device)
+
+    def named_parameters(self):
+        yield "fake.weight", _FakeParam(self._first_param_device)
+
+    def named_buffers(self):
+        return iter(())
 
     def to(self, *args, **kwargs):
         return self
@@ -90,7 +111,14 @@ def _install_load_fakes(monkeypatch, captured: dict, hf_device_map=None):
     """Monkeypatch transformers' from_pretrained calls to capture kwargs,
     for the pass-through (non-raising) guard tests that reach load_model()'s
     actual load. Mirrors test_autoround_load.py's _install_fakes, plus the
-    `.to()` stub on FakeHfModel above."""
+    `.to()` stub on FakeHfModel above.
+
+    Also pins `torch.cuda.is_available()` True (#159 gate finding): these
+    tests drive `load_model()` to its real `.to("cuda")` call, a no-op
+    against `FakeHfModel.to` — but the no-CUDA guard upstream of it (issue
+    #143) is a real host check, so without this pin these tests pass on a
+    CUDA host and fail on CPU-only CI for a reason unrelated to what they're
+    testing."""
 
     def fake_from_pretrained(repo_id, **kwargs):
         captured["repo_id"] = repo_id
@@ -109,6 +137,7 @@ def _install_load_fakes(monkeypatch, captured: dict, hf_device_map=None):
         "dgemma.model.AutoProcessor.from_pretrained",
         fake_processor_from_pretrained,
     )
+    monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
 
 
 def _patch_autoconfig(monkeypatch, *, quantization_config=None, raise_exc=None):

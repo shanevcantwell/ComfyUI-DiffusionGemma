@@ -33,13 +33,31 @@ from dgemma.model import (
 # Fakes — stand in for transformers' loaded model + processor
 # ---------------------------------------------------------------------------
 
+class _FakeDevice:
+    """Minimal stand-in for `torch.device` — `.type` is what
+    `_assert_no_meta_tensors` inspects; `str()` is what `_resolve_device`
+    compares against."""
+
+    def __init__(self, device_str: str):
+        self._device_str = device_str
+        self.type = device_str.split(":")[0]
+
+    def __str__(self):
+        return self._device_str
+
+
 class _FakeParam:
     def __init__(self, device: str):
-        self.device = device
+        self.device = _FakeDevice(device)
 
 
 class FakeHfModel:
-    """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`."""
+    """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`. `.to()` +
+    `named_parameters()` + `named_buffers()` are what `load_model`'s
+    post-load meta-tensor assertion (issue #142) and the final
+    `.to("cuda")` call touch — no `lm_head` attribute, so `_retie_lm_head`'s
+    autoround re-tie step no-ops on these fakes (getattr(model, "lm_head",
+    None) is None) rather than needing a full tied-weight fake."""
 
     def __init__(self, hf_device_map=None, first_param_device="cpu"):
         if hf_device_map is not None:
@@ -48,6 +66,15 @@ class FakeHfModel:
 
     def parameters(self):
         yield _FakeParam(self._first_param_device)
+
+    def named_parameters(self):
+        yield "fake.weight", _FakeParam(self._first_param_device)
+
+    def named_buffers(self):
+        return iter(())
+
+    def to(self, *args, **kwargs):
+        return self
 
 
 class FakeProcessor:
@@ -59,7 +86,16 @@ class FakeProcessor:
 # ---------------------------------------------------------------------------
 
 def _install_fakes(monkeypatch, captured: dict, hf_device_map=None, raise_on=None):
-    """Monkeypatch transformers' from_pretrained calls to capture kwargs."""
+    """Monkeypatch transformers' from_pretrained calls to capture kwargs.
+
+    Also pins `torch.cuda.is_available()` True (#159 gate finding): these
+    fakes drive `load_model()` to its real `.to("cuda")` call, which is a
+    no-op against `FakeHfModel.to` — but the no-CUDA guard upstream of it
+    (issue #143) is a real host check, so without this pin these tests pass
+    on a CUDA host and fail on CPU-only CI for a reason that has nothing to
+    do with what they're testing. Tests that specifically exercise the
+    no-CUDA branch override this back to False after calling this helper —
+    monkeypatch's later-wins semantics keep that override intact."""
 
     def fake_from_pretrained(repo_id, **kwargs):
         if raise_on == "model":
@@ -83,6 +119,7 @@ def _install_fakes(monkeypatch, captured: dict, hf_device_map=None, raise_on=Non
         "dgemma.model.AutoProcessor.from_pretrained",
         fake_processor_from_pretrained,
     )
+    monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
 
 
 # ---------------------------------------------------------------------------
@@ -153,15 +190,18 @@ class TestAutoroundKwargsShape:
 
         assert captured["kwargs"]["dtype"] == "auto"
 
-    def test_autoround_still_uses_device_map_auto(self, monkeypatch):
-        """device_map="auto" is used for both quant modes — accelerate handles
-        the placement; the difference is in dtype and patch application."""
+    def test_autoround_does_not_use_device_map(self, monkeypatch):
+        """dd2767c dropped device_map="auto" entirely (tied params crash
+        under CPU spill) — both quant modes now load with low_cpu_mem_usage
+        =False and a single explicit .to("cuda") after, not accelerate
+        dispatch. No device_map key is passed to from_pretrained."""
         captured: dict = {}
         _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
 
         load_model(repo_id=None, quant="autoround")
 
-        assert captured["kwargs"]["device_map"] == "auto"
+        assert "device_map" not in captured["kwargs"]
+        assert captured["kwargs"]["low_cpu_mem_usage"] is False
 
     def test_autoround_returns_int4_dtype_label(self, monkeypatch):
         """The returned DGemmaModel has dtype='int4' for autoround loads."""
@@ -179,11 +219,10 @@ class TestAutoroundKwargsShape:
 # ---------------------------------------------------------------------------
 
 class TestApplyAutoroundPatches:
-    """Verify the three patches are applied to the correct targets.
-
-    These tests inspect the patched functions directly — they don't need a
-    real model load, just that the monkeypatches land on the right module
-    attributes."""
+    """Verify the three patches are applied to the correct targets, and (H2
+    — issue #142's standing recommendation) that `_apply_autoround_patches`
+    is a scoped context manager: active only inside the `with` block,
+    restored on exit — not a permanent global monkeypatch."""
 
     def test_patches_kv_cache_warmup(self):
         """Patch 2: caching_allocator_warmup is replaced with a no-op to
@@ -192,14 +231,11 @@ class TestApplyAutoroundPatches:
         from transformers import modeling_utils
 
         original = modeling_utils.caching_allocator_warmup
-        _apply_autoround_patches()
-
-        # The patched function should be a lambda/no-op
-        patched = modeling_utils.caching_allocator_warmup
-        assert patched is not original
-        # Calling it should not raise and should return None
-        result = patched()
-        assert result is None
+        with _apply_autoround_patches():
+            patched = modeling_utils.caching_allocator_warmup
+            assert patched is not original
+            # Calling it should not raise and should return None
+            assert patched() is None
 
     def test_patches_mark_tied_weights_as_initialized(self):
         """Patch 3a: mark_tied_weights_as_initialized is wrapped to handle
@@ -207,37 +243,74 @@ class TestApplyAutoroundPatches:
         from transformers import modeling_utils
 
         original = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
-        _apply_autoround_patches()
-
-        patched = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
-        assert patched is not original
+        with _apply_autoround_patches():
+            patched = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
+            assert patched is not original
 
     def test_patches_tie_weights(self):
         """Patch 3b: tie_weights is wrapped to handle quantized modules."""
         from transformers import modeling_utils
 
         original = modeling_utils.PreTrainedModel.tie_weights
-        _apply_autoround_patches()
+        with _apply_autoround_patches():
+            patched = modeling_utils.PreTrainedModel.tie_weights
+            assert patched is not original
 
-        patched = modeling_utils.PreTrainedModel.tie_weights
-        assert patched is not original
-
-    def test_tied_weight_patches_are_idempotent(self):
-        """Calling _apply_autoround_patches multiple times doesn't double-wrap.
-        Each call replaces the same target — the function identity changes each
-        time, but no crash or recursion occurs."""
+    def test_patches_are_restored_on_clean_exit(self):
+        """H2: the patches are load-time-only hooks — they must not survive
+        past the `with` block, so a caller outside the autoround load path
+        is never affected by them."""
         from transformers import modeling_utils
 
-        # Call twice — should not raise
-        _apply_autoround_patches()
-        first_patch = modeling_utils.PreTrainedModel.tie_weights
+        original_warmup = modeling_utils.caching_allocator_warmup
+        original_mark = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
+        original_tie = modeling_utils.PreTrainedModel.tie_weights
 
-        _apply_autoround_patches()
-        second_patch = modeling_utils.PreTrainedModel.tie_weights
+        with _apply_autoround_patches():
+            assert modeling_utils.caching_allocator_warmup is not original_warmup
 
-        # Both are patched (not the original), and no crash occurred
-        assert first_patch is not modeling_utils.PreTrainedModel.tie_weights or True
-        # The key assertion: no exception from double-patching
+        assert modeling_utils.caching_allocator_warmup is original_warmup
+        assert modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized is original_mark
+        assert modeling_utils.PreTrainedModel.tie_weights is original_tie
+
+    def test_patches_are_restored_even_if_body_raises(self):
+        """Restore-on-exit must be exception-safe (try/finally), not just
+        the happy path — a from_pretrained failure inside the with block
+        must not leave transformers permanently patched."""
+        from transformers import modeling_utils
+
+        original_warmup = modeling_utils.caching_allocator_warmup
+
+        with pytest.raises(ValueError):
+            with _apply_autoround_patches():
+                assert modeling_utils.caching_allocator_warmup is not original_warmup
+                raise ValueError("simulated from_pretrained failure")
+
+        assert modeling_utils.caching_allocator_warmup is original_warmup
+
+    def test_nested_application_is_guarded_not_double_wrapped(self):
+        """Reentrancy guard: a nested `with _apply_autoround_patches():`
+        (e.g. a caller wrapping load_model, which also applies the patches)
+        must not double-wrap, and the inner exit must not restore originals
+        that the outer scope still needs active."""
+        from transformers import modeling_utils
+
+        original_warmup = modeling_utils.caching_allocator_warmup
+
+        with _apply_autoround_patches():
+            outer_patched = modeling_utils.caching_allocator_warmup
+            assert outer_patched is not original_warmup
+
+            with _apply_autoround_patches():
+                # Inner scope sees the same patch, not a re-wrap
+                assert modeling_utils.caching_allocator_warmup is outer_patched
+
+            # Inner exit must not have restored the original — outer is
+            # still inside its own `with` block.
+            assert modeling_utils.caching_allocator_warmup is outer_patched
+
+        # Outer exit does restore.
+        assert modeling_utils.caching_allocator_warmup is original_warmup
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +391,7 @@ class TestAutoroundEndToEnd:
         assert captured["repo_id"] == AUTOROUND_REPO_ID
         # dtype="auto" for transformers to read quantization config
         assert captured["kwargs"]["dtype"] == "auto"
-        assert captured["kwargs"]["device_map"] == "auto"
+        assert "device_map" not in captured["kwargs"]
         # Processor called with same repo
         assert captured["processor_repo_id"] == AUTOROUND_REPO_ID
         # Result has correct dtype label
