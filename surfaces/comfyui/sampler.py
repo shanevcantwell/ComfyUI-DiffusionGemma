@@ -97,6 +97,18 @@ Wiring this output costs nothing when unwired (ComfyUI only computes what a
 downstream node actually consumes at the socket level; an unconnected output
 is simply not read) and stays surface-side per Option A's rejection of
 widening the core's `_build_result` signature for a downstream-only value.
+
+**Cancellation wiring (issue #140 sampler half, closes #38's surface gap):**
+`_build_should_cancel` connects `comfy.model_management.processing_interrupted()`
+to `run_diffusion`'s pre-existing `should_cancel` parameter, the same lazy-import
+shape `_build_on_frame` already uses for `PromptServer` — `comfy` is imported
+inside the closure, never at module top, so this module keeps importing (and
+`sample()` keeps running) with zero ComfyUI present. The engine-side seam
+(`dgemma/composite.py`'s `_CancellationParticipant`, `dgemma/loop.py`'s
+`should_cancel` param and `DiffusionCancelled` handling) already existed and
+is already tested (`tests/test_run_diffusion_cancel.py`) — this is only the
+surface connection ADR-CDG-003 reserves for this layer. No new cancellation
+semantics are introduced here.
 """
 from __future__ import annotations
 
@@ -199,6 +211,53 @@ def _build_frame_metadata(frames: list) -> list:
             )
         )
     return metadata
+
+
+def _build_should_cancel():
+    """Build the cancellation predicate handed to `run_diffusion` as
+    `should_cancel` (issue #140 sampler half, closes #38's surface-wiring
+    gap). `dgemma.composite._CancellationParticipant` and `run_diffusion`'s
+    own `should_cancel` seam already exist and are already tested in
+    isolation (`tests/test_run_diffusion_cancel.py`,
+    `tests/test_step_end_composite.py`) — this closure is ONLY the surface
+    connection ADR-CDG-003 reserves for this layer: `dgemma/loop.py` stays
+    ComfyUI-agnostic and never imports `comfy`, exactly like `_build_on_frame`
+    above.
+
+    `comfy.model_management` is imported lazily, inside the returned closure
+    (not at module top, and not even inside this builder) — same rationale
+    as `_build_on_frame`'s lazy `from server import PromptServer`: this
+    module must keep importing with zero ComfyUI present (the normal
+    pytest/headless condition, `tests/test_seam.py`,
+    `tests/test_dual_context_import.py`). Unlike the display-only `on_frame`
+    push, a failure here degrades to "no cancellation wiring" (`False`) —
+    logged, not raised — since a live-push hiccup and an interrupt-check
+    hiccup carry the same non-negotiable rule (display/interrupt plumbing
+    must never kill generation), so the closure never propagates an
+    unexpected exception into `run_diffusion`'s per-step composite.
+
+    Cancellation semantics belong entirely to the engine (`dgemma/composite.py`'s
+    `_CancellationParticipant` raises `DiffusionCancelled`, caught inside
+    `run_diffusion` to return the partial `(text, CanvasState, CanvasTrace)`
+    already captured, per #38's "a cancelled experiment run is still data"
+    clause) — this closure adds no new semantics, it only supplies the
+    predicate.
+    """
+
+    def should_cancel() -> bool:
+        try:
+            import comfy.model_management as model_management
+
+            return bool(model_management.processing_interrupted())
+        except ImportError:
+            return False  # No live ComfyUI process (e.g. pytest) — never cancel.
+        except Exception as exc:  # noqa: BLE001 — deliberate breadth: see docstring.
+            logging.warning(
+                "DGemmaSampler interrupt check failed (treating as not-cancelled): %s", exc
+            )
+            return False
+
+    return should_cancel
 
 
 def _build_on_frame(unique_id):
@@ -397,6 +456,7 @@ class DGemmaSampler:
             confidence=confidence,
             thinking=thinking,
             on_frame=_build_on_frame(unique_id),
+            should_cancel=_build_should_cancel(),
         )
         frames = decode_frames(model.processor, canvas_trace.frames)
         # Per-image canvas-index key (ADR-CDG-009 §2, #35 F7): one canvas_idx
