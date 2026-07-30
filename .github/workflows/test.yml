@@ -18,6 +18,9 @@ on:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    # py-modules=[] means pip install -e . installs an empty wheel (pack loads by directory); repo root must be on sys.path for tests, matching a local dev run.
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +33,14 @@ jobs:
       # GPU. torch/torchvision/numpy/Pillow are CORE_PROVIDED (ComfyUI ships
       # them) and therefore intentionally absent from requirements.txt, so
       # they're installed explicitly here — CPU wheels only, no CUDA image.
+      # torch AND torchvision must come from the SAME index: torchvision is
+      # an unpinned dependency in pyproject.toml, so if it isn't already
+      # satisfied here, the later `pip install -e .[dev,mcp]` step resolves
+      # it from default PyPI — a build whose compiled ops (`nms`) ABI-mismatch
+      # a CPU-only torch build and abort collection at the
+      # diffusers→AutoImageProcessor→torchvision.io import chain (#156).
       - name: Install CPU torch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+        run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
       # `mcp` is its own optional-dependency group (ADR-CDG-008 Phase 2,
       # surfaces/mcp is a peer surface, not core) — separate from `dev`. It
