@@ -18,6 +18,9 @@ on:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    # py-modules=[] means pip install -e . installs an empty wheel (pack loads by directory); repo root must be on sys.path for tests, matching a local dev run.
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
 
