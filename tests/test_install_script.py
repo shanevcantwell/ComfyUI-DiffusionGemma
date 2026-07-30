@@ -341,6 +341,180 @@ class TestRun:
 
 
 # ---------------------------------------------------------------------------
+# Installer resolution — pip-present vs. pip-absent/uv-fallback vs. neither
+# (issue #147 MECHANISM PINNED: StabilityMatrix uv-provisioned venv lacking
+# a `pip` module, and Manager's own uv-driven step failing on a missing
+# venv/uv-build-constraints.txt). All via monkeypatched subprocess.run —
+# nothing here ever spawns a real pip/uv process.
+# ---------------------------------------------------------------------------
+
+
+class TestResolveInstaller:
+    def _patch_probe(self, monkeypatch, *, pip_ok: bool, uv_ok: bool):
+        """Fake `sys.executable -m <module> --version` subprocess results."""
+
+        def _fake_run(argv, **kwargs):
+            module = argv[2] if len(argv) > 2 else None
+            ok = (module == "pip" and pip_ok) or (module == "uv" and uv_ok)
+            return subprocess.CompletedProcess(
+                args=argv, returncode=0 if ok else 1, stdout="", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    def test_pip_present_resolves_to_pip(self, monkeypatch):
+        self._patch_probe(monkeypatch, pip_ok=True, uv_ok=True)
+        assert install_script.resolve_installer() == "pip"
+
+    def test_pip_absent_uv_present_resolves_to_uv(self, monkeypatch):
+        self._patch_probe(monkeypatch, pip_ok=False, uv_ok=True)
+        assert install_script.resolve_installer() == "uv"
+
+    def test_neither_available_resolves_to_none(self, monkeypatch):
+        self._patch_probe(monkeypatch, pip_ok=False, uv_ok=False)
+        assert install_script.resolve_installer() is None
+
+    def test_probe_oserror_is_treated_as_unavailable(self, monkeypatch):
+        """A missing interpreter/launcher raises OSError, not a nonzero
+        returncode — must not propagate out of resolve_installer()."""
+
+        def _raise(*args, **kwargs):
+            raise OSError("simulated: executable not found")
+
+        monkeypatch.setattr(subprocess, "run", _raise)
+        assert install_script.resolve_installer() is None
+
+
+class TestUvInstall:
+    def test_uv_install_argv_shape_has_no_constraints_arg(self, monkeypatch):
+        """The pinned failure was `uv pip install` demanding
+        venv/uv-build-constraints.txt. Our uv invocation must not carry any
+        constraints-file flag (-c / --constraint / --build-constraints) that
+        could reintroduce that lookup."""
+        captured = {}
+
+        def _fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        install_script.uv_install("diffusers>=0.39.0")
+
+        argv = captured["argv"]
+        assert argv == [sys.executable, "-m", "uv", "pip", "install", "diffusers>=0.39.0"]
+        assert not any(
+            "constraint" in str(a).lower() or a in ("-c",) for a in argv
+        )
+
+
+class TestInstallSpecDispatch:
+    def test_pip_installer_dispatches_to_pip_install(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            install_script, "pip_install", lambda spec: calls.append(("pip", spec))
+        )
+        monkeypatch.setattr(
+            install_script, "uv_install", lambda spec: calls.append(("uv", spec))
+        )
+        install_script.install_spec("accelerate", "pip")
+        assert calls == [("pip", "accelerate")]
+
+    def test_uv_installer_dispatches_to_uv_install(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            install_script, "pip_install", lambda spec: calls.append(("pip", spec))
+        )
+        monkeypatch.setattr(
+            install_script, "uv_install", lambda spec: calls.append(("uv", spec))
+        )
+        install_script.install_spec("accelerate", "uv")
+        assert calls == [("uv", "accelerate")]
+
+
+class TestRunInstallerSelection:
+    def _base_run(self, monkeypatch, tmp_path, *, pip_ok: bool, uv_ok: bool):
+        req = tmp_path / "requirements.txt"
+        req.write_text("transformers==5.13.0\n")
+        monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
+        monkeypatch.setattr(install_script, "is_satisfied", lambda spec: (True, "5.13.0"))
+
+        def _fake_probe_run(argv, **kwargs):
+            module = argv[2] if len(argv) > 2 else None
+            ok = (module == "pip" and pip_ok) or (module == "uv" and uv_ok)
+            return subprocess.CompletedProcess(
+                args=argv, returncode=0 if ok else 1, stdout="", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess, "run", _fake_probe_run)
+
+    def test_pip_present_logs_pip_header(self, monkeypatch, tmp_path, capsys):
+        self._base_run(monkeypatch, tmp_path, pip_ok=True, uv_ok=True)
+        exit_code = install_script.run()
+        out = capsys.readouterr().out
+        assert exit_code == 0
+        assert "installer: pip" in out
+
+    def test_pip_absent_logs_uv_header(self, monkeypatch, tmp_path, capsys):
+        self._base_run(monkeypatch, tmp_path, pip_ok=False, uv_ok=True)
+        exit_code = install_script.run()
+        out = capsys.readouterr().out
+        assert exit_code == 0
+        assert "installer: uv (pip module absent)" in out
+
+    def test_missing_requirement_uv_fallback_uses_uv_argv(self, monkeypatch, tmp_path):
+        req = tmp_path / "requirements.txt"
+        req.write_text("diffusers>=0.39.0\n")
+        monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
+        monkeypatch.setattr(install_script, "is_satisfied", lambda spec: (False, None))
+
+        probe_calls = []
+        install_calls = []
+
+        def _fake_run(argv, **kwargs):
+            if "--version" in argv:
+                probe_calls.append(argv)
+                module = argv[2]
+                ok = module == "uv"
+                return subprocess.CompletedProcess(
+                    args=argv, returncode=0 if ok else 1, stdout="", stderr=""
+                )
+            install_calls.append(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+
+        exit_code = install_script.run()
+        assert exit_code == 0
+        assert install_calls == [
+            [sys.executable, "-m", "uv", "pip", "install", "diffusers>=0.39.0"]
+        ]
+        # never inherits a constraints-file argument
+        assert not any(
+            "constraint" in str(a).lower() for argv in install_calls for a in argv
+        )
+
+    def test_neither_pip_nor_uv_fails_loud_naming_both_manual_commands(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        req = tmp_path / "requirements.txt"
+        req.write_text("transformers==5.13.0\n")
+        monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
+
+        def _fake_probe_run(argv, **kwargs):
+            return subprocess.CompletedProcess(args=argv, returncode=1, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_probe_run)
+
+        exit_code = install_script.run()
+        out = capsys.readouterr().out
+
+        assert exit_code == 1
+        assert install_script._manual_fallback_command("pip") in out
+        assert install_script._manual_fallback_command("uv") in out
+        assert "pip" in out.lower() and "uv" in out.lower()
+
+
+# ---------------------------------------------------------------------------
 # Environment report — importlib.metadata only, never imports the packages
 # ---------------------------------------------------------------------------
 
