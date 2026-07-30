@@ -589,7 +589,7 @@ class TestKVCacheInjectionStatelessness:
             )
 
         def _kv_cache_for(model: DGemmaModel) -> KVCache:
-            num_layers = model.model.config.num_hidden_layers
+            num_layers = model.model.config.get_text_config().num_hidden_layers
             return KVCache(
                 cache=FakeDynamicCache(num_layers=num_layers),
                 cumulative_length=tuple([0] * num_layers),
