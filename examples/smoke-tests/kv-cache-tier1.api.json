@@ -1,9 +1,7 @@
 {
   "80": {
     "inputs": {
-      "repo_id": "google/diffusiongemma-26B-A4B-it",
-      "quant": "none",
-      "local_files_only": false
+      "quant": "none"
     },
     "class_type": "DGemmaLoader",
     "_meta": { "title": "DiffusionGemma Loader" }

@@ -1,7 +1,6 @@
 {
   "72": {
     "inputs": {
-      "repo_id": "google/diffusiongemma-26B-A4B-it",
       "quant": "none"
     },
     "class_type": "DGemmaLoader",
