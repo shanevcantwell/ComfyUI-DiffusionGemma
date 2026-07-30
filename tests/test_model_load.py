@@ -59,17 +59,33 @@ class FakeHfModel:
     """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`: `hf_device_map`
     and `parameters()` matter to `_resolve_device`; `.to()` + `named_parameters()`
     + `named_buffers()` are what `load_model`'s post-load meta-tensor assertion
-    (issue #142) and the final `.to("cuda")` call touch."""
+    (issue #142) and the final `.to("cuda")` call touch.
 
-    def __init__(self, hf_device_map=None, first_param_device="cpu"):
+    `named_params` (optional) overrides the single-param default with an explicit
+    `{name: device_str}` map — the seam needed to model accelerate's real
+    `device_map="auto"` spill regime, where offloaded modules' params report
+    device `meta` while on-card modules report `cuda` (probe record
+    `docs/experiments/bf16-fit-mechanism/README.md`, Trap #2). When given, the
+    first `named_params` entry also drives `parameters()`."""
+
+    def __init__(self, hf_device_map=None, first_param_device="cpu", named_params=None):
         if hf_device_map is not None:
             self.hf_device_map = hf_device_map
         self._first_param_device = first_param_device
+        self._named_params = named_params
 
     def parameters(self):
+        if self._named_params is not None:
+            for device in self._named_params.values():
+                yield _FakeParam(device)
+            return
         yield _FakeParam(self._first_param_device)
 
     def named_parameters(self):
+        if self._named_params is not None:
+            for name, device in self._named_params.items():
+                yield name, _FakeParam(device)
+            return
         yield "fake.weight", _FakeParam(self._first_param_device)
 
     def named_buffers(self):
@@ -336,6 +352,129 @@ class TestLoadModel:
         load_model(repo_id="fake/repo", quant="none")
 
         assert calls == []
+
+
+class TestSpillAwareMetaAssertion:
+    """issue #173 / PR #177 rework: `_assert_no_meta_tensors` must be
+    SPILL-AWARE. `device_map="auto"` on a card that cannot hold the full bf16
+    checkpoint legitimately produces meta-device offloaded tensors — the probe
+    record (`docs/experiments/bf16-fit-mechanism/README.md`, Trap #2: offloaded
+    params report device `meta`, not `cpu`, in `named_parameters()`; 13 modules
+    / 10.25 GiB observed). The prior unconditional assert would hard-refuse that
+    legitimate load — a *different* release-blocker, not the OOM fix. The gate
+    must exempt offload-explained meta while still catching a stranded tensor
+    (the #142 tied-lm_head class).
+
+    Fixtures mirror the probe's observed shape: offloaded modules (device_map
+    `cpu`) whose params report `meta`, on-card modules (device_map int) whose
+    params report `cuda`."""
+
+    # The real spill regime the gate was proven blind to: on-card modules on
+    # cuda, overflow modules offloaded to cpu with params reporting `meta`.
+    _SPILL_DEVICE_MAP = {
+        "model.decoder.embed_tokens": 0,
+        "model.decoder.layers.0": 0,
+        "model.decoder.layers.27": "cpu",  # overflow → offloaded
+        "model.decoder.norm": "cpu",
+    }
+    _SPILL_NAMED_PARAMS = {
+        "model.decoder.embed_tokens.weight": "cuda:0",
+        "model.decoder.layers.0.mlp.gate_up_proj.weight": "cuda:0",
+        # owned by model.decoder.layers.27 (cpu) → legitimately meta:
+        "model.decoder.layers.27.mlp.gate_up_proj.weight": "meta",
+        # owned by model.decoder.norm (cpu) → legitimately meta:
+        "model.decoder.norm.weight": "meta",
+    }
+
+    def test_explained_by_offload_longest_prefix_match(self):
+        """Direct unit of the name→module offload check: a meta param under a
+        cpu/disk device-map entry is explained (exempt); one under an
+        accelerator entry (or no entry) is not."""
+        from dgemma.model import _explained_by_device_map_offload
+
+        dm = self._SPILL_DEVICE_MAP
+        assert _explained_by_device_map_offload("model.decoder.layers.27.mlp.gate_up_proj.weight", dm)
+        assert _explained_by_device_map_offload("model.decoder.norm.weight", dm)
+        # on-card module → not an offload
+        assert not _explained_by_device_map_offload("model.decoder.layers.0.mlp.gate_up_proj.weight", dm)
+        # no matching device-map key at all → not explained
+        assert not _explained_by_device_map_offload("lm_head.weight", dm)
+        # disk offload also exempt
+        assert _explained_by_device_map_offload("x.weight", {"x": "disk"})
+        # longest-prefix wins: nested entry overrides an ancestor's placement
+        nested = {"model.decoder": 0, "model.decoder.self_conditioning": "cpu"}
+        assert _explained_by_device_map_offload("model.decoder.self_conditioning.w", nested)
+        assert not _explained_by_device_map_offload("model.decoder.layers.0.w", nested)
+
+    def test_quant_none_spill_regime_loads_through_the_assert(self, monkeypatch):
+        """(a) A quant="none" load whose fixture reproduces the real spill
+        regime (offloaded modules meta, on-card modules cuda) SUCCEEDS through
+        the spill-aware assert — it does not hard-refuse the default load."""
+        captured: dict = {}
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            captured["kwargs"] = kwargs
+            return FakeHfModel(
+                hf_device_map=self._SPILL_DEVICE_MAP,
+                named_params=self._SPILL_NAMED_PARAMS,
+            )
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr(
+            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+        )
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+
+        result = load_model(repo_id="fake/repo", quant="none")
+
+        assert isinstance(result, DGemmaModel)
+        assert result.device == "cuda:0"  # _resolve_device finds the accelerator
+        assert captured["kwargs"]["device_map"] == "auto"  # prior pin still holds
+
+    def test_stranded_meta_not_explained_by_device_map_still_raises(self, monkeypatch):
+        """(b) Mutation-verify the assert stays a real gate: a fabricated
+        stranded-meta case — a meta param on a module the device map places on
+        cuda (a broken retie of the tied lm_head, the #142 class) — is NOT
+        offload-explained, so it still fails by name."""
+        captured: dict = {}
+
+        stranded_device_map = {
+            "model.decoder.embed_tokens": 0,
+            "lm_head": 0,  # placed on the accelerator, NOT offloaded
+            "model.decoder.layers.27": "cpu",
+        }
+        stranded_named_params = {
+            "model.decoder.embed_tokens.weight": "cuda:0",
+            # lm_head is device-mapped to cuda but its param is meta → stranded:
+            "lm_head.weight": "meta",
+            # a genuinely-offloaded param alongside it (must not mask the strand):
+            "model.decoder.layers.27.mlp.gate_up_proj.weight": "meta",
+        }
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            captured["kwargs"] = kwargs
+            return FakeHfModel(
+                hf_device_map=stranded_device_map,
+                named_params=stranded_named_params,
+            )
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr(
+            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+        )
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+
+        with pytest.raises(RuntimeError, match="meta-resident") as excinfo:
+            load_model(repo_id="fake/repo", quant="none")
+
+        # names the stranded tensor, not the legitimately-offloaded one
+        msg = str(excinfo.value)
+        assert "lm_head.weight" in msg
+        assert "model.decoder.layers.27.mlp.gate_up_proj.weight" not in msg
 
 
 class TestCheckInterrupted:

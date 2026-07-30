@@ -416,24 +416,70 @@ def _retie_lm_head(model) -> None:
     model.lm_head.weight = source
 
 
+def _explained_by_device_map_offload(name: str, device_map: dict) -> bool:
+    """True when parameter/buffer `name` is meta *because* accelerate offloaded
+    the module that owns it to `cpu`/`disk` under `device_map="auto"`.
+
+    `hf_device_map` keys are module paths — dotted prefixes of the full
+    parameter name (e.g. key `model.decoder.layers.27` owns param
+    `model.decoder.layers.27.mlp.gate_up_proj.weight`). accelerate places a
+    whole module at one device, so the owning entry is the *longest* device-map
+    key that is a dot-boundary prefix of `name` (longest-prefix match, so a
+    nested submodule with its own entry wins over an ancestor's). That module's
+    device is the offload signal: a value of `"cpu"` or `"disk"` (the same
+    strings `_resolve_device` skips over to find the accelerator) means the
+    meta residency is a legitimate mmap-backed offload, not a stranded tensor.
+    A bare-int / accelerator entry (or no matching entry) is NOT an offload —
+    a meta tensor there is genuinely stranded.
+    """
+    best_key = None
+    for key in device_map:
+        if name == key or name.startswith(key + "."):
+            if best_key is None or len(key) > len(best_key):
+                best_key = key
+    if best_key is None:
+        return False
+    return str(device_map[best_key]) in ("cpu", "disk")
+
+
 def _assert_no_meta_tensors(model) -> None:
     """FAIL LOUD (issue #142's enforcement surface) if any parameter or
-    buffer is still meta-resident after load + re-tie, BEFORE `.to("cuda")`.
+    buffer is still meta-resident after load + re-tie, BEFORE `.to("cuda")` —
+    SPILL-AWARE: a tensor that is meta *because* accelerate offloaded its
+    module to `cpu`/`disk` under `device_map="auto"` is legitimate and exempt.
 
-    Without this, a stray meta tensor surfaces later as `.to("cuda")`'s
-    opaque `NotImplementedError: Cannot copy out of meta tensor; no data!`
-    (probe v3) — or worse, silently no-ops under a dispatch path that
-    tolerates meta tensors (accelerate `device_map`, per-submodule `.to()`),
-    deferring the failure to first *use* of that tensor as a much later,
-    harder-to-attribute crash or hang (probe v3's stated risk). Scanning
-    `named_parameters()` + `named_buffers()` here — for every quant path, not
-    just autoround — turns any future instance of this class of bug into an
-    immediate, named, actionable error instead of a downstream hang.
+    Two meta-residency causes must be told apart (issue #173):
+
+    - **Legitimate offload (exempt).** Under `device_map="auto"` on a card that
+      cannot hold the whole bf16 checkpoint, accelerate places the overflow
+      modules at `cpu`/`disk` and their params report device **`meta`** in
+      `named_parameters()` — the mmap-backed lazy-load regime the probe record
+      quantified (`docs/experiments/bf16-fit-mechanism/README.md`, Trap #2:
+      "Offloaded params report device `meta`, not `cpu`, in
+      `named_parameters()`"; 13 modules / 5.50 B params / 10.25 GiB observed).
+      This meta is expected and correct — the module IS placed, at cpu/disk per
+      `hf_device_map`. Rejecting it would hard-refuse the default load the
+      restore of `device_map="auto"` exists to enable.
+    - **Stranded tensor (still raises).** A meta tensor NOT explained by an
+      offload entry — e.g. a tied `lm_head` suppressed but never materialized
+      during `from_pretrained` (issue #142's #142 class), whose owning module
+      the device map places on an accelerator — holds no data and cannot move
+      via `.to()`. It would otherwise surface later as an opaque 'Cannot copy
+      out of meta tensor' crash or a silent no-op hang. This still raises, by
+      name, with the actionable remedy.
+
+    The offload signal is the same one `_resolve_device` already reads: an
+    `hf_device_map` entry of `cpu`/`disk` for the module owning the tensor. See
+    `_explained_by_device_map_offload` for the (longest-prefix) name→module
+    match. Why the exemption exists is recorded in the probe:
+    `docs/experiments/bf16-fit-mechanism/README.md`.
     """
+    device_map = getattr(model, "hf_device_map", None) or {}
     meta_names = [
         name
         for name, tensor in (*model.named_parameters(), *model.named_buffers())
         if tensor.device.type == "meta"
+        and not _explained_by_device_map_offload(name, device_map)
     ]
     if meta_names:
         raise RuntimeError(
@@ -442,8 +488,11 @@ def _assert_no_meta_tensors(model) -> None:
             "data and cannot be moved to a real device via .to() — this would "
             "otherwise surface later as an opaque 'Cannot copy out of meta "
             "tensor' crash or a silent no-op hang, depending on the dispatch "
-            "path. This is usually a tied-weight that was suppressed but "
-            "never materialized during from_pretrained (see issue #142). "
+            "path. These tensor(s) are NOT explained by a cpu/disk offload "
+            "entry in hf_device_map, so this is not accelerate's legitimate "
+            "device_map=\"auto\" spill (issue #173) — it is usually a tied-"
+            "weight that was suppressed but never materialized during "
+            "from_pretrained (see issue #142). "
             "Remedy: report this repo_id/quant combination — a new tied "
             "parameter may need its own re-tie handling alongside "
             "_retie_lm_head."
