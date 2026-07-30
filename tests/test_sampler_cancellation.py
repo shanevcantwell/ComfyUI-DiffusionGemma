@@ -161,9 +161,14 @@ class TestSamplerNodeWiresShouldCancel:
             return None
 
         monkeypatch.setattr(sampler_module, "run_diffusion", fake_run_diffusion)
-        monkeypatch.setattr(sampler_module, "decode_frames", fake_decode_frames)
+        # Issue #162/#166 (PR #168): decode_frames/render_frames_to_image_batch
+        # calls moved into the shared surfaces.comfyui.emission helper
+        # (build_sampler_shaped_outputs) — patched at their new home, not on
+        # sampler_module (which no longer imports them directly).
+        monkeypatch.setattr("surfaces.comfyui.emission.decode_frames", fake_decode_frames)
         monkeypatch.setattr(
-            sampler_module, "render_frames_to_image_batch", fake_render_frames_to_image_batch
+            "surfaces.comfyui.emission.render_frames_to_image_batch",
+            fake_render_frames_to_image_batch,
         )
 
         node = sampler_module.DGemmaSampler()
