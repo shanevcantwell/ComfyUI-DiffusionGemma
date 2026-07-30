@@ -32,6 +32,13 @@ dependencies = [
     # import (`surfaces/comfyui/frames_image.py`'s PIL-image -> tensor
     # conversion).
     "numpy",
+    # AutoRound INT4 checkpoint support (issue #139): one of the two
+    # supported quant modes alongside bf16, not a hardware-gated optional —
+    # was `[project.optional-dependencies].quant`, moved to base so
+    # `quant="autoround"` works out of a plain install. See
+    # Intel/diffusiongemma-26B-A4B-it-int4-AutoRound (W4A16, ~15GB on disk
+    # vs 52GB bf16, MoE-compatible, no bnb kernel panics).
+    "auto-round>=0.5",
 ]
 
 [project.urls]
@@ -50,11 +57,6 @@ dev = ["pytest", "ruff", "requests", "websocket-client", "coverage"]
 # install (the `dependencies` list above) never needs this extra; only
 # `surfaces/mcp/server.py` (via `python -m surfaces.mcp.server`) requires it.
 mcp = ["mcp>=1.0.0"]
-# AutoRound INT4 checkpoint support: Intel/diffusiongemma-26B-A4B-it-int4-AutoRound
-# loads via transformers' built-in auto-round quantizer, which requires the
-# `auto-round` library at runtime. W4A16 (weights int4, activations fp16) —
-# ~15GB on disk vs 52GB bf16, MoE-compatible, no bnb kernel panics.
-quant = ["auto-round>=0.5"]
 
 # ComfyUI Registry metadata (comfy-cli / registry.comfy.org).
 # PublisherId minted 2026-07-05 (operator, registry.comfy.org — immutable).

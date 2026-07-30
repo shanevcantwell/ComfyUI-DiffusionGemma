@@ -18,3 +18,4 @@
 transformers==5.13.0
 diffusers>=0.39.0
 accelerate
+auto-round>=0.5
