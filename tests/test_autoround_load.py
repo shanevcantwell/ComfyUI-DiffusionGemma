@@ -191,10 +191,14 @@ class TestAutoroundKwargsShape:
         assert captured["kwargs"]["dtype"] == "auto"
 
     def test_autoround_does_not_use_device_map(self, monkeypatch):
-        """dd2767c dropped device_map="auto" entirely (tied params crash
-        under CPU spill) — both quant modes now load with low_cpu_mem_usage
-        =False and a single explicit .to("cuda") after, not accelerate
-        dispatch. No device_map key is passed to from_pretrained."""
+        """The autoround path keeps dd2767c's no-device_map contract: the
+        pre-quantized W4A16 checkpoint (~30GB) fits without CPU spill, so
+        there is nothing for accelerate dispatch to buy it, and
+        low_cpu_mem_usage=False keeps tensors real ahead of the explicit
+        .to("cuda") call. quant="none" restored device_map="auto" separately
+        (issue #173, tests/test_model_load.py::test_load_kwargs_shape) once
+        d0bb93b (#142/#143) fixed the tied-weight crash that motivated
+        dd2767c's original removal."""
         captured: dict = {}
         _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
 
@@ -212,6 +216,37 @@ class TestAutoroundKwargsShape:
 
         assert result.dtype == "int4"
         assert result.quant == "autoround"
+
+    def test_autoround_calls_to_cuda(self, monkeypatch):
+        """The autoround path has no accelerate dispatch (no device_map), so
+        it still needs its own explicit .to("cuda") move — unlike quant="none"
+        (issue #173, restored device_map="auto" there instead). Mutation
+        guard: deleting the `model = model.to("cuda")` call under `if quant
+        == "autoround":` in dgemma/model.py would leave `calls` empty and
+        fail this test by name."""
+        captured: dict = {}
+        calls: list = []
+
+        class _TrackedFakeHfModel(FakeHfModel):
+            def to(self, *args, **kwargs):
+                calls.append(args)
+                return self
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            captured["kwargs"] = kwargs
+            return _TrackedFakeHfModel(hf_device_map={"model.layers.0": 0}, first_param_device="cpu")
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr(
+            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+        )
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+
+        load_model(repo_id=None, quant="autoround")
+
+        assert calls == [("cuda",)]
 
 
 # ---------------------------------------------------------------------------

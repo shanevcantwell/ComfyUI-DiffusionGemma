@@ -12,7 +12,10 @@ quantizes `nn.Linear`/`Conv1D` modules, and DiffusionGemma's ~42.5GiB of
 fused 3D MoE expert params are neither, so NF4 still needs ~46GiB on a
 single card (`loose-ends.md`, 2026-07-05 bnb-MoE entry — issue #4). The
 grounded default is `quant="none"` (full-precision bf16, `device_map="auto"`
-CPU-spill), verified with two integration PASSes on this box.
+CPU-spill), verified with two integration PASSes on this box (most recently
+the 2026-07-30 instrumented probe, `docs/experiments/bf16-fit-mechanism/`:
+42.4GiB GPU + 10.25GiB mmap-backed lazy offload, 2.2 s/step on this 48GB
+card).
 
 AutoRound INT4 (`quant="autoround"`) loads pre-quantized W4A16 checkpoints
 (e.g. Intel/diffusiongemma-26B-A4B-it-int4-AutoRound) at ~30GB VRAM vs 53GB
@@ -413,24 +416,70 @@ def _retie_lm_head(model) -> None:
     model.lm_head.weight = source
 
 
+def _explained_by_device_map_offload(name: str, device_map: dict) -> bool:
+    """True when parameter/buffer `name` is meta *because* accelerate offloaded
+    the module that owns it to `cpu`/`disk` under `device_map="auto"`.
+
+    `hf_device_map` keys are module paths — dotted prefixes of the full
+    parameter name (e.g. key `model.decoder.layers.27` owns param
+    `model.decoder.layers.27.mlp.gate_up_proj.weight`). accelerate places a
+    whole module at one device, so the owning entry is the *longest* device-map
+    key that is a dot-boundary prefix of `name` (longest-prefix match, so a
+    nested submodule with its own entry wins over an ancestor's). That module's
+    device is the offload signal: a value of `"cpu"` or `"disk"` (the same
+    strings `_resolve_device` skips over to find the accelerator) means the
+    meta residency is a legitimate mmap-backed offload, not a stranded tensor.
+    A bare-int / accelerator entry (or no matching entry) is NOT an offload —
+    a meta tensor there is genuinely stranded.
+    """
+    best_key = None
+    for key in device_map:
+        if name == key or name.startswith(key + "."):
+            if best_key is None or len(key) > len(best_key):
+                best_key = key
+    if best_key is None:
+        return False
+    return str(device_map[best_key]) in ("cpu", "disk")
+
+
 def _assert_no_meta_tensors(model) -> None:
     """FAIL LOUD (issue #142's enforcement surface) if any parameter or
-    buffer is still meta-resident after load + re-tie, BEFORE `.to("cuda")`.
+    buffer is still meta-resident after load + re-tie, BEFORE `.to("cuda")` —
+    SPILL-AWARE: a tensor that is meta *because* accelerate offloaded its
+    module to `cpu`/`disk` under `device_map="auto"` is legitimate and exempt.
 
-    Without this, a stray meta tensor surfaces later as `.to("cuda")`'s
-    opaque `NotImplementedError: Cannot copy out of meta tensor; no data!`
-    (probe v3) — or worse, silently no-ops under a dispatch path that
-    tolerates meta tensors (accelerate `device_map`, per-submodule `.to()`),
-    deferring the failure to first *use* of that tensor as a much later,
-    harder-to-attribute crash or hang (probe v3's stated risk). Scanning
-    `named_parameters()` + `named_buffers()` here — for every quant path, not
-    just autoround — turns any future instance of this class of bug into an
-    immediate, named, actionable error instead of a downstream hang.
+    Two meta-residency causes must be told apart (issue #173):
+
+    - **Legitimate offload (exempt).** Under `device_map="auto"` on a card that
+      cannot hold the whole bf16 checkpoint, accelerate places the overflow
+      modules at `cpu`/`disk` and their params report device **`meta`** in
+      `named_parameters()` — the mmap-backed lazy-load regime the probe record
+      quantified (`docs/experiments/bf16-fit-mechanism/README.md`, Trap #2:
+      "Offloaded params report device `meta`, not `cpu`, in
+      `named_parameters()`"; 13 modules / 5.50 B params / 10.25 GiB observed).
+      This meta is expected and correct — the module IS placed, at cpu/disk per
+      `hf_device_map`. Rejecting it would hard-refuse the default load the
+      restore of `device_map="auto"` exists to enable.
+    - **Stranded tensor (still raises).** A meta tensor NOT explained by an
+      offload entry — e.g. a tied `lm_head` suppressed but never materialized
+      during `from_pretrained` (issue #142's #142 class), whose owning module
+      the device map places on an accelerator — holds no data and cannot move
+      via `.to()`. It would otherwise surface later as an opaque 'Cannot copy
+      out of meta tensor' crash or a silent no-op hang. This still raises, by
+      name, with the actionable remedy.
+
+    The offload signal is the same one `_resolve_device` already reads: an
+    `hf_device_map` entry of `cpu`/`disk` for the module owning the tensor. See
+    `_explained_by_device_map_offload` for the (longest-prefix) name→module
+    match. Why the exemption exists is recorded in the probe:
+    `docs/experiments/bf16-fit-mechanism/README.md`.
     """
+    device_map = getattr(model, "hf_device_map", None) or {}
     meta_names = [
         name
         for name, tensor in (*model.named_parameters(), *model.named_buffers())
         if tensor.device.type == "meta"
+        and not _explained_by_device_map_offload(name, device_map)
     ]
     if meta_names:
         raise RuntimeError(
@@ -439,8 +488,11 @@ def _assert_no_meta_tensors(model) -> None:
             "data and cannot be moved to a real device via .to() — this would "
             "otherwise surface later as an opaque 'Cannot copy out of meta "
             "tensor' crash or a silent no-op hang, depending on the dispatch "
-            "path. This is usually a tied-weight that was suppressed but "
-            "never materialized during from_pretrained (see issue #142). "
+            "path. These tensor(s) are NOT explained by a cpu/disk offload "
+            "entry in hf_device_map, so this is not accelerate's legitimate "
+            "device_map=\"auto\" spill (issue #173) — it is usually a tied-"
+            "weight that was suppressed but never materialized during "
+            "from_pretrained (see issue #142). "
             "Remedy: report this repo_id/quant combination — a new tied "
             "parameter may need its own re-tie handling alongside "
             "_retie_lm_head."
@@ -481,8 +533,10 @@ def load_model(
     Pass an explicit path or HF repo ID to override.
 
     `quant` accepts `"none"` (full-precision bf16 load, `device_map="auto"`,
-    CPU-spills the ~42.5GiB of MoE expert params that bitsandbytes could never
-    quantize) or `"autoround"` (pre-quantized W4A16 INT4 checkpoint via auto-round).
+    accelerate-managed GPU+CPU-mmap placement that CPU-spills the ~42.5GiB of
+    MoE expert params that bitsandbytes could never quantize) or `"autoround"`
+    (pre-quantized W4A16 INT4 checkpoint via auto-round, loaded onto CPU then
+    moved to CUDA with a single `.to("cuda")` — no accelerate dispatch).
 
     `local_files_only` forwards unchanged to both `from_pretrained` calls —
     off (default) keeps the normal HF download-and-cache behavior; on,
@@ -527,19 +581,37 @@ def load_model(
     _poll("quant/checkpoint mismatch pre-flight")
     _check_quant_checkpoint_match(repo_id, quant, local_files_only)
 
-    # Autoround INT4 path: patches transformers + auto-round for correct load
+    # Autoround INT4 path: patches transformers + auto-round for correct load.
+    # quant="none" path: accelerate-managed placement (device_map="auto") —
+    # issue #173. dd2767c (2026-07-24) dropped device_map="auto" for both
+    # paths because accelerate's dispatch left the tied lm_head/embed_tokens
+    # pair meta-resident under CPU spill, crashing the (then-unconditional)
+    # .to("cuda"). d0bb93b (#142/#143, 2026-07-29) fixed that root cause
+    # directly — _retie_lm_head() + _assert_no_meta_tensors() materialize and
+    # verify tied weights regardless of quant mode — so device_map="auto" no
+    # longer needs to be avoided on quant="none"'s account. The autoround
+    # path keeps the no-device_map / low_cpu_mem_usage=False / .to("cuda")
+    # contract dd2767c introduced: the pre-quantized W4A16 checkpoint (~30GB)
+    # fits on this box without CPU spill, so there is nothing for accelerate
+    # dispatch to buy it, and low_cpu_mem_usage=False is what lets
+    # _retie_lm_head/_assert_no_meta_tensors reason about real (non-meta)
+    # tensors before the explicit device move.
     if quant == "autoround":
         dtype_kwarg = "auto"  # let transformers read quantization config
         dtype_label = "int4"
+        load_kwargs: dict = {
+            "low_cpu_mem_usage": False,  # force real CPU tensors; meta tensors can't move to CUDA
+            "dtype": dtype_kwarg,
+            "local_files_only": local_files_only,
+        }
     else:
         dtype_kwarg = torch.bfloat16
         dtype_label = "bfloat16"
-
-    load_kwargs: dict = {
-        "low_cpu_mem_usage": False,  # force real CPU tensors; meta tensors can't move to CUDA
-        "dtype": dtype_kwarg,
-        "local_files_only": local_files_only,
-    }
+        load_kwargs = {
+            "device_map": "auto",  # accelerate-managed GPU+CPU-mmap placement
+            "dtype": dtype_kwarg,
+            "local_files_only": local_files_only,
+        }
 
     print(
         f"[INFO] ComfyUI-DiffusionGemma 0.4.0 — loading from {repo_id!r} "
@@ -607,7 +679,6 @@ def load_model(
     # opaque .to("cuda") crash (issue #142).
     _assert_no_meta_tensors(model)
 
-    # Move entire model to GPU — no accelerate dispatch, single .to() call.
     if not torch.cuda.is_available():
         raise RuntimeError(
             "ComfyUI-DiffusionGemma requires a CUDA-capable GPU. No CUDA device "
@@ -616,8 +687,22 @@ def load_model(
             "INT4 footprint and the sampler's CUDA-seeded torch.Generator "
             "(dgemma/loop.py run_diffusion) both assume an accelerator."
         )
+
+    # Phase boundary (issue #140): still polled on both paths, so
+    # check_interrupted's four-boundary contract holds regardless of quant —
+    # a caller polling for cancellation should not have to know which quant
+    # mode skips the actual device move.
     _poll("device move (.to(\"cuda\"))")
-    model = model.to("cuda")
+
+    # quant="none": accelerate already placed every tensor per device_map
+    # during from_pretrained (GPU + CPU-mmap spill) — an unconditional
+    # whole-model .to("cuda") here would pull the CPU-spilled ~10GiB back
+    # onto the card, defeating the spill and OOMing (issue #173). quant=
+    # "autoround": no accelerate dispatch was requested (see load_kwargs
+    # above), so the model is still CPU-resident and needs the explicit
+    # single .to() call.
+    if quant == "autoround":
+        model = model.to("cuda")
 
     device = _resolve_device(model)
 
