@@ -13,27 +13,42 @@ user pick" into a plain local filesystem path; `dgemma.model.load_model`
 still only ever sees a path/repo_id string and a `local_files_only` bool, no
 different than before.
 
-RATIFICATION 2026-07-13 — the folder_paths dropdown ships DISABLED by default
+RATIFICATION 2026-07-13 — the folder_paths dropdown shipped DISABLED by default
 (`_LOCAL_FOLDERS_ENABLED = False`). Rationale (operator ratification feedback):
-the pack's current load path is deliberately un-ComfyUI — weights come via
+the pack's load path was deliberately un-ComfyUI — weights came only via
 `from_pretrained()` out of the HF hub cache (`HF_HOME`), NOT from ComfyUI's
 `models/diffusion_models`/`text_encoders` directories. A folder_paths scan
-against directories the model never inhabits would present an empty (or worse,
-misleadingly populated) selector, so the HF-identifier flow (`repo_id`) stays
-the primary, visible input and the dropdown is scaffolding held behind the flag
-until its ENABLE TRIGGER is met:
+against directories the model never inhabited would present an empty (or worse,
+misleadingly populated) selector, so the HF-identifier flow (`repo_id`) stayed
+the primary, visible input and the dropdown was scaffolding held behind the
+flag until its ENABLE TRIGGER was met:
 
   * #15 — GGUF backend graduation (weights placed as `.gguf` under a ComfyUI
     model dir), and/or
   * #4  — an AWQ/quantized checkpoint placed conventionally under
     `models/diffusion_models` (or `text_encoders`).
 
-Until then the scanning/resolution code + its path-traversal guard are shipped,
-tested, and ready — but not wired into the visible UI. Flip `_LOCAL_FOLDERS_ENABLED`
-to `True` (and remove this note's "until then" clause) on the day weights
-actually live under ComfyUI model dirs. `local_files_only` and the traversal
-guard remain active for the HF-cache flow regardless of the flag — they are
-wanted independent of the dropdown (see `resolve_local_model_dir`'s docstring).
+ENABLE TRIGGER FIRED 2026-07-23 — an AutoRound INT4 checkpoint (#128) was
+placed at `models/text_encoders/diffusiongemma-26B-A4B-it-int4-AutoRound`, a
+real ComfyUI model dir, matching the #4 trigger above. `_LOCAL_FOLDERS_ENABLED`
+was flipped to `True` same-day in commit 69ab019 — but that commit ALSO
+narrowed `_MODEL_FOLDER_KEYS` from the union `("diffusion_models",
+"text_encoders")` to `("text_encoders",)` only, misattributed to issue #136
+(a same-day, unrelated `local_files_only`-widget-removal commit) and argued
+solely from "DiffusionGemma is an LLM — weights live under text_encoders, not
+diffusion_models" — silently dropping the other half of issue #17's original,
+deliberate reasoning: DiffusionGemma is a DiT-peer *by role* (a denoising
+loader analogous to UNETLoader) even though it is Gemma-lineage *by weights*,
+so users may reasonably drop a checkpoint under either ComfyUI models folder.
+No PR, no design note, and no argument against the union rationale accompanies
+the narrowing — see issue #150 (suite-census Cluster B forensic
+reconstruction) for the full timeline. Per records-govern (the un-rebutted
+#17 ratification stands absent a countervailing argument), the union scan is
+restored below; `_LOCAL_FOLDERS_ENABLED = True` stays, since the enable
+trigger's firing is independently confirmed. `local_files_only` and the
+traversal guard remain active for the HF-cache flow regardless of the flag —
+they are wanted independent of the dropdown (see `resolve_local_model_dir`'s
+docstring).
 """
 from __future__ import annotations
 
@@ -84,7 +99,8 @@ else:
     )
     from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
-# DiffusionGemma is an LLM — weights live under text_encoders, not diffusion_models.
+# Enable trigger fired 2026-07-23 (INT4 AutoRound checkpoint under
+# text_encoders/ — see the module docstring and issue #150).
 _LOCAL_FOLDERS_ENABLED = True
 
 # `folder_paths` is a ComfyUI-runtime module: real inside a live ComfyUI
@@ -108,7 +124,7 @@ except ImportError:
 # folder. Order matters only for de-duplication below (first hit wins), not
 # for correctness — a name present under both folders resolves to whichever
 # is scanned first.
-_MODEL_FOLDER_KEYS = ("text_encoders",)
+_MODEL_FOLDER_KEYS = ("diffusion_models", "text_encoders")
 
 # transformers/HF checkpoints are a SHARD DIRECTORY (config.json,
 # tokenizer files, one-or-more model-*.safetensors), not a single file, so
