@@ -30,10 +30,28 @@ to `("none", "autoround")` — see issue #128.
 from __future__ import annotations
 
 import contextlib
+from typing import Callable
 
 import torch
 
 from .types import DGemmaModel
+
+
+class LoadInterrupted(Exception):
+    """Raised by `load_model` when the surface-supplied `check_interrupted`
+    predicate reports `True` at one of the phase boundaries (issue #140
+    loader half).
+
+    Mirrors `dgemma/composite.py`'s `DiffusionCancelled` in shape (a plain,
+    engine-local exception so `dgemma/model.py` stays ComfyUI-agnostic,
+    ADR-CDG-003 — never imports `comfy.model_management` itself) but NOT in
+    partial-return semantics: a load has no partial `(text, CanvasState,
+    CanvasTrace)` to salvage, so this is a hard stop, not a caught-and-return.
+    The surface (`surfaces/comfyui/loader.py`) is the layer that decides what
+    a `LoadInterrupted` means to ComfyUI's own executor (see that module for
+    the translation into `comfy.model_management.InterruptProcessingException`).
+    """
+
 
 DEFAULT_REPO_ID = "google/diffusiongemma-26B-A4B-it"
 # Pre-quantized AutoRound W4A16 checkpoint — ~30GB VRAM vs 53GB bf16.
@@ -451,6 +469,7 @@ def load_model(
     repo_id: str | None = None,
     quant: str = DEFAULT_QUANT,
     local_files_only: bool = False,
+    check_interrupted: Callable[[], bool] | None = None,
 ) -> DGemmaModel:
     """Load `DiffusionGemmaForBlockDiffusion` + its processor onto `DGemmaModel`.
 
@@ -467,12 +486,32 @@ def load_model(
     off (default) keeps the normal HF download-and-cache behavior; on,
     resolution is restricted to whatever is already in the local HF cache.
 
+    `check_interrupted` (issue #140 loader half): an optional zero-argument
+    predicate polled at four phase boundaries — before the quant/checkpoint
+    pre-flight config read, before the model `from_pretrained`, before the
+    processor `from_pretrained`, and before the final `.to("cuda")` device
+    move. When it reports `True`, `load_model` raises `LoadInterrupted`
+    immediately, without starting the next blocking call. `None` (the
+    default, and every non-ComfyUI caller — tests, MCP, direct script use)
+    means "never interrupt", so this parameter is additive: no caller is
+    required to supply it. This narrows the hang window from "the whole
+    load" to "one blocking call" — a stuck `from_pretrained` itself still
+    cannot be interrupted mid-call (issue #140's plan explicitly scopes
+    mid-call interruption to 0.6.x, via thread/subprocess isolation).
+
     Raises `RuntimeError` (not a raw transformers/HF stack trace) when
     `repo_id` cannot be resolved — a typo'd repo, no network, or
-    `local_files_only=True` with nothing cached.
+    `local_files_only=True` with nothing cached. Raises `LoadInterrupted`
+    when `check_interrupted` reports `True` at a phase boundary.
     """
     if quant not in _QUANT_CHOICES:
         raise ValueError(f"quant must be one of {_QUANT_CHOICES}, got {quant!r}.")
+
+    def _poll(phase: str) -> None:
+        if check_interrupted is not None and check_interrupted():
+            raise LoadInterrupted(
+                f"DiffusionGemma load interrupted before phase: {phase}."
+            )
 
     # Auto-select the checkpoint matching the quant mode when no explicit repo
     if repo_id is None:
@@ -480,6 +519,10 @@ def load_model(
 
     # PRE-FLIGHT guard (issue #141): reject a quant=/checkpoint mismatch
     # before the blocking from_pretrained call — see _check_quant_checkpoint_match.
+    # Also a phase boundary in its own right (issue #140): it reads the
+    # checkpoint config via AutoConfig.from_pretrained, itself a network-
+    # capable call when the config isn't already cached.
+    _poll("quant/checkpoint mismatch pre-flight")
     _check_quant_checkpoint_match(repo_id, quant, local_files_only)
 
     # Autoround INT4 path: patches transformers + auto-round for correct load
@@ -506,9 +549,17 @@ def load_model(
     # installed globally for the rest of the process (issue #142 H2).
     patches_cm = _apply_autoround_patches() if quant == "autoround" else contextlib.nullcontext()
 
+    # Phase boundary (issue #140): poll before each blocking from_pretrained
+    # call, not after — an interrupt reported while a call is already
+    # in-flight cannot stop that call (transformers/safetensors expose no
+    # cancellation hook), so the check's only useful position is the gap
+    # between phases, catching the interrupt before it commits to the next
+    # one.
+    _poll("model from_pretrained")
     try:
         with patches_cm:
             model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
+        _poll("processor from_pretrained")
         processor = AutoProcessor.from_pretrained(
             repo_id,
             local_files_only=local_files_only,
@@ -563,6 +614,7 @@ def load_model(
             "INT4 footprint and the sampler's CUDA-seeded torch.Generator "
             "(dgemma/loop.py run_diffusion) both assume an accelerator."
         )
+    _poll("device move (.to(\"cuda\"))")
     model = model.to("cuda")
 
     device = _resolve_device(model)
