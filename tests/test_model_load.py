@@ -150,17 +150,23 @@ class TestLoadModel:
         monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
 
     def test_load_kwargs_shape(self, monkeypatch):
-        """quant="none": dtype=bfloat16, low_cpu_mem_usage=False (forces real
-        CPU tensors so meta tensors can't slip past to .to("cuda") — dd2767c
-        dropped device_map="auto" entirely, so no such key is passed)."""
+        """quant="none": dtype=bfloat16, device_map="auto" — accelerate-managed
+        GPU+CPU-mmap placement (issue #173; restored after dd2767c's removal).
+        dd2767c dropped device_map="auto" because accelerate dispatch could
+        leave the tied lm_head/embed_tokens pair meta-resident under CPU
+        spill; d0bb93b (#142/#143) fixed that directly via _retie_lm_head +
+        _assert_no_meta_tensors, so device_map="auto" no longer needs
+        avoiding here. No low_cpu_mem_usage key: that override exists only to
+        keep the autoround path's tensors real (non-meta) ahead of its own
+        explicit .to("cuda"); it has no purpose under accelerate dispatch."""
         captured: dict = {}
         self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
 
         result = load_model(repo_id="fake/repo", quant="none")
 
         kwargs = captured["kwargs"]
-        assert "device_map" not in kwargs
-        assert kwargs["low_cpu_mem_usage"] is False
+        assert kwargs["device_map"] == "auto"
+        assert "low_cpu_mem_usage" not in kwargs
         assert kwargs["dtype"] == torch.bfloat16
         assert "quantization_config" not in kwargs
         assert isinstance(result, DGemmaModel)
@@ -299,9 +305,14 @@ class TestLoadModel:
         with pytest.raises(RuntimeError, match="meta-resident"):
             load_model(repo_id="fake/repo", quant="none")
 
-    def test_to_cuda_called_when_cuda_available(self, monkeypatch):
-        """The real device-move: model.to("cuda") is invoked (not skipped)
-        once CUDA is available and no meta tensors remain."""
+    def test_to_cuda_not_called_for_quant_none(self, monkeypatch):
+        """issue #173: quant="none" restores device_map="auto" — accelerate
+        already placed every tensor (GPU + CPU-mmap spill) inside
+        from_pretrained, so an unconditional whole-model .to("cuda") here
+        would pull the CPU-spilled slice back onto the card, defeating the
+        spill and reproducing the OOM this issue fixed. Mutation guard: an
+        unconditional `model = model.to("cuda")` reintroduced on this path
+        would make `calls` non-empty and fail this test by name."""
         captured: dict = {}
         calls: list = []
 
@@ -324,7 +335,7 @@ class TestLoadModel:
 
         load_model(repo_id="fake/repo", quant="none")
 
-        assert calls == [("cuda",)]
+        assert calls == []
 
 
 class TestCheckInterrupted:

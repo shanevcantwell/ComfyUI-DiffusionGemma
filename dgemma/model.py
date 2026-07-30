@@ -12,7 +12,10 @@ quantizes `nn.Linear`/`Conv1D` modules, and DiffusionGemma's ~42.5GiB of
 fused 3D MoE expert params are neither, so NF4 still needs ~46GiB on a
 single card (`loose-ends.md`, 2026-07-05 bnb-MoE entry — issue #4). The
 grounded default is `quant="none"` (full-precision bf16, `device_map="auto"`
-CPU-spill), verified with two integration PASSes on this box.
+CPU-spill), verified with two integration PASSes on this box (most recently
+the 2026-07-30 instrumented probe, `docs/experiments/bf16-fit-mechanism/`:
+42.4GiB GPU + 10.25GiB mmap-backed lazy offload, 2.2 s/step on this 48GB
+card).
 
 AutoRound INT4 (`quant="autoround"`) loads pre-quantized W4A16 checkpoints
 (e.g. Intel/diffusiongemma-26B-A4B-it-int4-AutoRound) at ~30GB VRAM vs 53GB
@@ -481,8 +484,10 @@ def load_model(
     Pass an explicit path or HF repo ID to override.
 
     `quant` accepts `"none"` (full-precision bf16 load, `device_map="auto"`,
-    CPU-spills the ~42.5GiB of MoE expert params that bitsandbytes could never
-    quantize) or `"autoround"` (pre-quantized W4A16 INT4 checkpoint via auto-round).
+    accelerate-managed GPU+CPU-mmap placement that CPU-spills the ~42.5GiB of
+    MoE expert params that bitsandbytes could never quantize) or `"autoround"`
+    (pre-quantized W4A16 INT4 checkpoint via auto-round, loaded onto CPU then
+    moved to CUDA with a single `.to("cuda")` — no accelerate dispatch).
 
     `local_files_only` forwards unchanged to both `from_pretrained` calls —
     off (default) keeps the normal HF download-and-cache behavior; on,
@@ -527,19 +532,37 @@ def load_model(
     _poll("quant/checkpoint mismatch pre-flight")
     _check_quant_checkpoint_match(repo_id, quant, local_files_only)
 
-    # Autoround INT4 path: patches transformers + auto-round for correct load
+    # Autoround INT4 path: patches transformers + auto-round for correct load.
+    # quant="none" path: accelerate-managed placement (device_map="auto") —
+    # issue #173. dd2767c (2026-07-24) dropped device_map="auto" for both
+    # paths because accelerate's dispatch left the tied lm_head/embed_tokens
+    # pair meta-resident under CPU spill, crashing the (then-unconditional)
+    # .to("cuda"). d0bb93b (#142/#143, 2026-07-29) fixed that root cause
+    # directly — _retie_lm_head() + _assert_no_meta_tensors() materialize and
+    # verify tied weights regardless of quant mode — so device_map="auto" no
+    # longer needs to be avoided on quant="none"'s account. The autoround
+    # path keeps the no-device_map / low_cpu_mem_usage=False / .to("cuda")
+    # contract dd2767c introduced: the pre-quantized W4A16 checkpoint (~30GB)
+    # fits on this box without CPU spill, so there is nothing for accelerate
+    # dispatch to buy it, and low_cpu_mem_usage=False is what lets
+    # _retie_lm_head/_assert_no_meta_tensors reason about real (non-meta)
+    # tensors before the explicit device move.
     if quant == "autoround":
         dtype_kwarg = "auto"  # let transformers read quantization config
         dtype_label = "int4"
+        load_kwargs: dict = {
+            "low_cpu_mem_usage": False,  # force real CPU tensors; meta tensors can't move to CUDA
+            "dtype": dtype_kwarg,
+            "local_files_only": local_files_only,
+        }
     else:
         dtype_kwarg = torch.bfloat16
         dtype_label = "bfloat16"
-
-    load_kwargs: dict = {
-        "low_cpu_mem_usage": False,  # force real CPU tensors; meta tensors can't move to CUDA
-        "dtype": dtype_kwarg,
-        "local_files_only": local_files_only,
-    }
+        load_kwargs = {
+            "device_map": "auto",  # accelerate-managed GPU+CPU-mmap placement
+            "dtype": dtype_kwarg,
+            "local_files_only": local_files_only,
+        }
 
     print(
         f"[INFO] ComfyUI-DiffusionGemma 0.4.0 — loading from {repo_id!r} "
@@ -607,7 +630,6 @@ def load_model(
     # opaque .to("cuda") crash (issue #142).
     _assert_no_meta_tensors(model)
 
-    # Move entire model to GPU — no accelerate dispatch, single .to() call.
     if not torch.cuda.is_available():
         raise RuntimeError(
             "ComfyUI-DiffusionGemma requires a CUDA-capable GPU. No CUDA device "
@@ -616,8 +638,22 @@ def load_model(
             "INT4 footprint and the sampler's CUDA-seeded torch.Generator "
             "(dgemma/loop.py run_diffusion) both assume an accelerator."
         )
+
+    # Phase boundary (issue #140): still polled on both paths, so
+    # check_interrupted's four-boundary contract holds regardless of quant —
+    # a caller polling for cancellation should not have to know which quant
+    # mode skips the actual device move.
     _poll("device move (.to(\"cuda\"))")
-    model = model.to("cuda")
+
+    # quant="none": accelerate already placed every tensor per device_map
+    # during from_pretrained (GPU + CPU-mmap spill) — an unconditional
+    # whole-model .to("cuda") here would pull the CPU-spilled ~10GiB back
+    # onto the card, defeating the spill and OOMing (issue #173). quant=
+    # "autoround": no accelerate dispatch was requested (see load_kwargs
+    # above), so the model is still CPU-resident and needs the explicit
+    # single .to() call.
+    if quant == "autoround":
+        model = model.to("cuda")
 
     device = _resolve_device(model)
 
