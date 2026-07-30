@@ -29,6 +29,8 @@ to `("none", "autoround")` — see issue #128.
 """
 from __future__ import annotations
 
+import contextlib
+
 import torch
 
 from .types import DGemmaModel
@@ -143,8 +145,14 @@ except ImportError as exc:  # pragma: no cover — broken/partial transformers i
     ) from exc
 
 
-def _apply_autoround_patches() -> None:
-    """Patch transformers + auto-round for INT4 checkpoint loading.
+# Reentrancy guard for _apply_autoround_patches() — see its docstring (H2).
+_apply_autoround_patches_depth = 0
+
+
+@contextlib.contextmanager
+def _apply_autoround_patches():
+    """Context manager: patch transformers + auto-round for INT4 checkpoint
+    loading, active only across the `from_pretrained` call, restored after.
 
     Three patches, all verified on the 48GB RTX-8000 box with Intel's
     diffusiongemma-26B-A4B-it-int4-AutoRound (issue #128):
@@ -159,60 +167,104 @@ def _apply_autoround_patches() -> None:
 
     3. **Tied-weight finalization** — `mark_tied_weights_as_initialized` and
        `tie_weights` crash when lm_head.weight is tied to a quantized
-       embed_tokens that has no `.weight` attribute (only `.qweight`).
+       embed_tokens that has no `.weight` attribute (only `.qweight`). NOTE:
+       Patch 3 only suppresses that crash — it does not materialize the tied
+       tensor. `load_model`'s post-load meta-tensor assertion (issue #142)
+       is what catches the resulting meta-resident `lm_head.weight`; a
+       fresh re-tie there is what actually fixes it.
+
+    Scoped, not global-and-permanent (issue #142 H2 — investigation's
+    standing recommendation): these are load-time-only hooks (allocator
+    warmup, weight-tying), so leaving them installed after `from_pretrained`
+    returns serves no purpose and is a needless global-monkeypatch footprint
+    for the rest of the process lifetime. Original attributes are restored
+    on exit, success or failure.
+
+    Reentrancy-guarded: nested/concurrent `with _apply_autoround_patches():` calls
+    (e.g. a caller wrapping `load_model` while it also applies the patches)
+    only patch on the outermost entry and only restore on the outermost
+    exit, so an inner call never clobbers an outer call's originals.
     """
+    global _apply_autoround_patches_depth
     import re as _re
-
-    # Patch 1: auto-round regex pre-compilation
-    try:
-        from auto_round.inference import convert_model as _ar_convert
-
-        def _patched_skip(model, quant_config, layer_names, extra_config):
-            modules_to_not_convert = []
-            if extra_config:
-                for name in extra_config.keys():
-                    try:
-                        _re.compile(name)
-                        modules_to_not_convert.append(name)
-                    except _re.error:
-                        pass
-            compiled = [
-                _re.compile(n) if n else None for n in modules_to_not_convert
-            ]
-            return extra_config.copy()
-
-        _ar_convert.skip_not_convert_modules = _patched_skip
-    except ImportError:
-        # auto-round not installed — patch is a no-op, will fail at load time
-        pass
-
-    # Patch 2: skip bf16 KV-cache warmup (pre-allocates wrong size for INT4)
     from transformers import modeling_utils as _mu
-    _mu.caching_allocator_warmup = lambda *a, **k: None
 
-    # Patch 3: tied-weight finalization on quantized modules
-    _orig_mark = _mu.PreTrainedModel.mark_tied_weights_as_initialized
-
-    def _patched_mark(self, loading_info):
-        for tied_param in self._tied_weights_keys:
-            try:
-                param = self.get_parameter(tied_param)
-                if hasattr(param, "data"):
-                    loading_info.missing_keys.remove(tied_param)
-            except (AttributeError, KeyError):
-                pass
-
-    _mu.PreTrainedModel.mark_tied_weights_as_initialized = _patched_mark
-
-    _orig_tie = _mu.PreTrainedModel.tie_weights
-
-    def _patched_tie(self, *a, **kw):
+    _apply_autoround_patches_depth += 1
+    if _apply_autoround_patches_depth > 1:
+        # Already patched by an outer scope — no-op, defer restore to it.
         try:
-            return _orig_tie(self, *a, **kw)
-        except (NotImplementedError, AttributeError):
+            yield
+        finally:
+            _apply_autoround_patches_depth -= 1
+        return
+
+    orig_convert_skip = None
+    orig_warmup = _mu.caching_allocator_warmup
+    orig_mark = _mu.PreTrainedModel.mark_tied_weights_as_initialized
+    orig_tie = _mu.PreTrainedModel.tie_weights
+
+    try:
+        # Patch 1: auto-round regex pre-compilation
+        try:
+            from auto_round.inference import convert_model as _ar_convert
+
+            orig_convert_skip = _ar_convert.skip_not_convert_modules
+
+            def _patched_skip(model, quant_config, layer_names, extra_config):
+                modules_to_not_convert = []
+                if extra_config:
+                    for name in extra_config.keys():
+                        try:
+                            _re.compile(name)
+                            modules_to_not_convert.append(name)
+                        except _re.error:
+                            pass
+                compiled = [
+                    _re.compile(n) if n else None for n in modules_to_not_convert
+                ]
+                return extra_config.copy()
+
+            _ar_convert.skip_not_convert_modules = _patched_skip
+        except ImportError:
+            # auto-round not installed — patch is a no-op, will fail at load time
             pass
 
-    _mu.PreTrainedModel.tie_weights = _patched_tie
+        # Patch 2: skip bf16 KV-cache warmup (pre-allocates wrong size for INT4)
+        _mu.caching_allocator_warmup = lambda *a, **k: None
+
+        # Patch 3: tied-weight finalization on quantized modules
+        def _patched_mark(self, loading_info):
+            for tied_param in self._tied_weights_keys:
+                try:
+                    param = self.get_parameter(tied_param)
+                    if hasattr(param, "data"):
+                        loading_info.missing_keys.remove(tied_param)
+                except (AttributeError, KeyError):
+                    pass
+
+        _mu.PreTrainedModel.mark_tied_weights_as_initialized = _patched_mark
+
+        def _patched_tie(self, *a, **kw):
+            try:
+                return orig_tie(self, *a, **kw)
+            except (NotImplementedError, AttributeError):
+                pass
+
+        _mu.PreTrainedModel.tie_weights = _patched_tie
+
+        yield
+    finally:
+        if orig_convert_skip is not None:
+            try:
+                from auto_round.inference import convert_model as _ar_convert
+
+                _ar_convert.skip_not_convert_modules = orig_convert_skip
+            except ImportError:
+                pass
+        _mu.caching_allocator_warmup = orig_warmup
+        _mu.PreTrainedModel.mark_tied_weights_as_initialized = orig_mark
+        _mu.PreTrainedModel.tie_weights = orig_tie
+        _apply_autoround_patches_depth -= 1
 
 
 def _checkpoint_quant_method(repo_id: str, local_files_only: bool) -> tuple[bool, str | None]:
@@ -362,7 +414,6 @@ def load_model(
 
     # Autoround INT4 path: patches transformers + auto-round for correct load
     if quant == "autoround":
-        _apply_autoround_patches()
         dtype_kwarg = "auto"  # let transformers read quantization config
         dtype_label = "int4"
     else:
@@ -380,8 +431,14 @@ def load_model(
         f"({dtype_label}, quant={quant})"
     )
 
+    # The autoround patches are load-time-only hooks (allocator warmup,
+    # weight-tying) — scoped to just the from_pretrained call, not left
+    # installed globally for the rest of the process (issue #142 H2).
+    patches_cm = _apply_autoround_patches() if quant == "autoround" else contextlib.nullcontext()
+
     try:
-        model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
+        with patches_cm:
+            model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
         processor = AutoProcessor.from_pretrained(
             repo_id,
             local_files_only=local_files_only,

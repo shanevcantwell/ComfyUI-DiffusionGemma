@@ -179,11 +179,10 @@ class TestAutoroundKwargsShape:
 # ---------------------------------------------------------------------------
 
 class TestApplyAutoroundPatches:
-    """Verify the three patches are applied to the correct targets.
-
-    These tests inspect the patched functions directly — they don't need a
-    real model load, just that the monkeypatches land on the right module
-    attributes."""
+    """Verify the three patches are applied to the correct targets, and (H2
+    — issue #142's standing recommendation) that `_apply_autoround_patches`
+    is a scoped context manager: active only inside the `with` block,
+    restored on exit — not a permanent global monkeypatch."""
 
     def test_patches_kv_cache_warmup(self):
         """Patch 2: caching_allocator_warmup is replaced with a no-op to
@@ -192,14 +191,11 @@ class TestApplyAutoroundPatches:
         from transformers import modeling_utils
 
         original = modeling_utils.caching_allocator_warmup
-        _apply_autoround_patches()
-
-        # The patched function should be a lambda/no-op
-        patched = modeling_utils.caching_allocator_warmup
-        assert patched is not original
-        # Calling it should not raise and should return None
-        result = patched()
-        assert result is None
+        with _apply_autoround_patches():
+            patched = modeling_utils.caching_allocator_warmup
+            assert patched is not original
+            # Calling it should not raise and should return None
+            assert patched() is None
 
     def test_patches_mark_tied_weights_as_initialized(self):
         """Patch 3a: mark_tied_weights_as_initialized is wrapped to handle
@@ -207,37 +203,74 @@ class TestApplyAutoroundPatches:
         from transformers import modeling_utils
 
         original = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
-        _apply_autoround_patches()
-
-        patched = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
-        assert patched is not original
+        with _apply_autoround_patches():
+            patched = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
+            assert patched is not original
 
     def test_patches_tie_weights(self):
         """Patch 3b: tie_weights is wrapped to handle quantized modules."""
         from transformers import modeling_utils
 
         original = modeling_utils.PreTrainedModel.tie_weights
-        _apply_autoround_patches()
+        with _apply_autoround_patches():
+            patched = modeling_utils.PreTrainedModel.tie_weights
+            assert patched is not original
 
-        patched = modeling_utils.PreTrainedModel.tie_weights
-        assert patched is not original
-
-    def test_tied_weight_patches_are_idempotent(self):
-        """Calling _apply_autoround_patches multiple times doesn't double-wrap.
-        Each call replaces the same target — the function identity changes each
-        time, but no crash or recursion occurs."""
+    def test_patches_are_restored_on_clean_exit(self):
+        """H2: the patches are load-time-only hooks — they must not survive
+        past the `with` block, so a caller outside the autoround load path
+        is never affected by them."""
         from transformers import modeling_utils
 
-        # Call twice — should not raise
-        _apply_autoround_patches()
-        first_patch = modeling_utils.PreTrainedModel.tie_weights
+        original_warmup = modeling_utils.caching_allocator_warmup
+        original_mark = modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized
+        original_tie = modeling_utils.PreTrainedModel.tie_weights
 
-        _apply_autoround_patches()
-        second_patch = modeling_utils.PreTrainedModel.tie_weights
+        with _apply_autoround_patches():
+            assert modeling_utils.caching_allocator_warmup is not original_warmup
 
-        # Both are patched (not the original), and no crash occurred
-        assert first_patch is not modeling_utils.PreTrainedModel.tie_weights or True
-        # The key assertion: no exception from double-patching
+        assert modeling_utils.caching_allocator_warmup is original_warmup
+        assert modeling_utils.PreTrainedModel.mark_tied_weights_as_initialized is original_mark
+        assert modeling_utils.PreTrainedModel.tie_weights is original_tie
+
+    def test_patches_are_restored_even_if_body_raises(self):
+        """Restore-on-exit must be exception-safe (try/finally), not just
+        the happy path — a from_pretrained failure inside the with block
+        must not leave transformers permanently patched."""
+        from transformers import modeling_utils
+
+        original_warmup = modeling_utils.caching_allocator_warmup
+
+        with pytest.raises(ValueError):
+            with _apply_autoround_patches():
+                assert modeling_utils.caching_allocator_warmup is not original_warmup
+                raise ValueError("simulated from_pretrained failure")
+
+        assert modeling_utils.caching_allocator_warmup is original_warmup
+
+    def test_nested_application_is_guarded_not_double_wrapped(self):
+        """Reentrancy guard: a nested `with _apply_autoround_patches():`
+        (e.g. a caller wrapping load_model, which also applies the patches)
+        must not double-wrap, and the inner exit must not restore originals
+        that the outer scope still needs active."""
+        from transformers import modeling_utils
+
+        original_warmup = modeling_utils.caching_allocator_warmup
+
+        with _apply_autoround_patches():
+            outer_patched = modeling_utils.caching_allocator_warmup
+            assert outer_patched is not original_warmup
+
+            with _apply_autoround_patches():
+                # Inner scope sees the same patch, not a re-wrap
+                assert modeling_utils.caching_allocator_warmup is outer_patched
+
+            # Inner exit must not have restored the original — outer is
+            # still inside its own `with` block.
+            assert modeling_utils.caching_allocator_warmup is outer_patched
+
+        # Outer exit does restore.
+        assert modeling_utils.caching_allocator_warmup is original_warmup
 
 
 # ---------------------------------------------------------------------------
