@@ -118,6 +118,16 @@ class FakeProcessor:
 
 class TestLoadModel:
     def _install_fakes(self, monkeypatch, captured: dict, hf_device_map=None, raise_on=None):
+        """Also pins `torch.cuda.is_available()` True (#159 gate finding):
+        these fakes drive `load_model()` to its real `.to("cuda")` call,
+        which is a no-op against `FakeHfModel.to` — but the no-CUDA guard
+        upstream of it (issue #143) is a real host check, so without this
+        pin these tests pass on a CUDA host and fail on CPU-only CI for a
+        reason unrelated to what they're testing.
+        `test_no_cuda_raises_intentional_runtime_error_not_unbound_local`
+        overrides this back to False right after calling this helper —
+        monkeypatch's later-wins semantics keep that override intact."""
+
         def fake_from_pretrained(repo_id, **kwargs):
             if raise_on == "model":
                 raise OSError(f"{repo_id} is not a local folder and is not a valid model identifier")
@@ -136,6 +146,7 @@ class TestLoadModel:
             "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
         )
         monkeypatch.setattr("dgemma.model.AutoProcessor.from_pretrained", fake_processor_from_pretrained)
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
 
     def test_load_kwargs_shape(self, monkeypatch):
         """quant="none": dtype=bfloat16, low_cpu_mem_usage=False (forces real

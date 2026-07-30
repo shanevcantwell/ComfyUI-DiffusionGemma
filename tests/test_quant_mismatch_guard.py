@@ -111,7 +111,14 @@ def _install_load_fakes(monkeypatch, captured: dict, hf_device_map=None):
     """Monkeypatch transformers' from_pretrained calls to capture kwargs,
     for the pass-through (non-raising) guard tests that reach load_model()'s
     actual load. Mirrors test_autoround_load.py's _install_fakes, plus the
-    `.to()` stub on FakeHfModel above."""
+    `.to()` stub on FakeHfModel above.
+
+    Also pins `torch.cuda.is_available()` True (#159 gate finding): these
+    tests drive `load_model()` to its real `.to("cuda")` call, a no-op
+    against `FakeHfModel.to` — but the no-CUDA guard upstream of it (issue
+    #143) is a real host check, so without this pin these tests pass on a
+    CUDA host and fail on CPU-only CI for a reason unrelated to what they're
+    testing."""
 
     def fake_from_pretrained(repo_id, **kwargs):
         captured["repo_id"] = repo_id
@@ -130,6 +137,7 @@ def _install_load_fakes(monkeypatch, captured: dict, hf_device_map=None):
         "dgemma.model.AutoProcessor.from_pretrained",
         fake_processor_from_pretrained,
     )
+    monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
 
 
 def _patch_autoconfig(monkeypatch, *, quantization_config=None, raise_exc=None):
