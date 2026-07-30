@@ -33,9 +33,14 @@ and it is loudly logged (`is_satisfied` catches the mismatch, `run()` prints
 `.../venv/bin/python3 -m uv pip install diffusers>=0.39.0`), `uv pip install`
 demanded a `venv/uv-build-constraints.txt` that does not exist in a
 StabilityMatrix-provisioned venv, and Manager's uv-driven step failed outright
-(`error: File not found`). This script never invokes `uv` with a constraints
-file — see `resolve_installer()` / `uv_install()` below — specifically to
-avoid inheriting that failure mode.
+(`error: File not found`) — with NO constraints flag in that step's argv,
+meaning the demand was injected via config/environment uv discovers on its
+own. This script never invokes `uv` with a constraints-file argv flag AND
+scrubs the constraint-injecting env vars (`UV_BUILD_CONSTRAINT`,
+`UV_CONSTRAINT`, `UV_OVERRIDE`) from its child's environment before spawning
+it — see `resolve_installer()` / `uv_install()` /
+`_uv_env_without_constraint_injection()` below — since argv cleanliness alone
+was proven insufficient on the pinned failure.
 
 Import-safety: this module does no work at import time — everything lives
 under `if __name__ == "__main__":` / functions called from `main()` — so it
@@ -44,6 +49,7 @@ triggering pip subprocesses or network access.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -198,21 +204,61 @@ def pip_install(spec: str) -> subprocess.CompletedProcess:
     )
 
 
+def _uv_env_without_constraint_injection() -> dict[str, str]:
+    """Child env for the uv subprocess: a copy of this process's environment
+    with uv's constraint-injecting variables neutralized (design-gate finding
+    on #147's pinned failure).
+
+    The pinned failure's argv (`... -m uv pip install diffusers>=0.39.0`)
+    carried NO constraints flag — no `--build-constraints`, no `-c`. uv
+    demanded `venv/uv-build-constraints.txt` anyway, which means the demand
+    came from configuration uv discovers on its own, not from anything this
+    script's argv could omit. The most plausible source is `UV_BUILD_CONSTRAINT`
+    / `UV_CONSTRAINT` / `UV_OVERRIDE` in the *inherited* environment (a
+    StabilityMatrix/Manager launcher convention this script's own subprocess
+    would inherit by default via `subprocess.run`'s implicit `env=None`) —
+    a `uv.toml`/`pyproject.toml [tool.uv]` config layer is the other candidate.
+    Argv cleanliness alone is not immunity against either; the environment
+    itself has to be scrubbed.
+
+    Set to `""` rather than deleted: per uv's documented precedence
+    (env vars > project/user/system config files > defaults; CLI flags are
+    the only thing that outranks env vars — docs.astral.sh/uv/reference/environment/,
+    docs.astral.sh/uv/concepts/configuration-files/), an env var uv treats as
+    "present" — even empty — wins over a `uv.toml`/pyproject `[tool.uv]` value
+    for the same key, whereas deleting the var would let a config-file
+    constraint fall back through. UV_BUILD_CONSTRAINT/UV_CONSTRAINT are
+    documented as space-separated file lists, so `""` parses as zero files —
+    the neutral value — not a parse error. This is a documented-precedence
+    assumption, not independently verified against a live uv binary in this
+    environment (none was available to test against directly)."""
+    env = dict(os.environ)
+    for var in ("UV_BUILD_CONSTRAINT", "UV_CONSTRAINT", "UV_OVERRIDE"):
+        env[var] = ""
+    return env
+
+
 def uv_install(spec: str) -> subprocess.CompletedProcess:
     """Install a single requirement spec via `uv pip install`, for venvs
     where `sys.executable -m pip` is unavailable (issue #147: StabilityMatrix
     `uv`-provisioned venv, no `pip` module present).
 
-    Deliberately passes NO constraints-file argument. The pinned failure on
+    Deliberately passes NO constraints-file argument — but argv cleanliness
+    alone was insufficient to fix the pinned failure. The pinned failure on
     the affected box was Manager's own uv-driven step demanding
     `venv/uv-build-constraints.txt` — a file that does not exist in that
-    venv — and aborting with `error: File not found`. This invocation must
-    not reproduce that: no `--build-constraints` / `-c` / config lookup that
-    would pull one in, just `uv pip install <spec>`."""
+    venv — and aborting with `error: File not found`, WITH NO constraints
+    flag in that step's argv either. That means the demand was injected via
+    configuration/environment inheritance uv discovers on its own, which a
+    plain child process (the default `subprocess.run(..., env=None)`
+    behavior) would inherit right along with everything else. The real
+    immunity is scrubbing the child env, not just the argv — see
+    `_uv_env_without_constraint_injection()`."""
     return subprocess.run(
         [sys.executable, "-m", "uv", "pip", "install", spec],
         capture_output=True,
         text=True,
+        env=_uv_env_without_constraint_injection(),
     )
 
 

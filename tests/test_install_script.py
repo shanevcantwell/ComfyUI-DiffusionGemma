@@ -15,6 +15,7 @@ zero work at import time.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -405,6 +406,41 @@ class TestUvInstall:
         assert not any(
             "constraint" in str(a).lower() or a in ("-c",) for a in argv
         )
+
+    def test_uv_install_env_scrubs_constraint_injection_vars(self, monkeypatch):
+        """Design-gate finding on #147's pinned failure: the failing argv
+        carried NO constraints flag, so uv's `venv/uv-build-constraints.txt`
+        demand came from configuration inherited via the environment (or a
+        uv.toml/pyproject config layer env-var precedence would also mask).
+        A child env inherited unmodified (subprocess.run's default env=None)
+        would carry that inheritance right along with everything else.
+        uv_install must pass an explicit `env=` with
+        UV_BUILD_CONSTRAINT / UV_CONSTRAINT / UV_OVERRIDE forced to the
+        empty string — the argv-only fix was insufficient."""
+        captured = {}
+
+        def _fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        monkeypatch.setenv("UV_BUILD_CONSTRAINT", "/some/venv/uv-build-constraints.txt")
+        monkeypatch.setenv("UV_CONSTRAINT", "/some/constraints.txt")
+        monkeypatch.setenv("UV_OVERRIDE", "/some/overrides.txt")
+        monkeypatch.setenv("SOME_UNRELATED_VAR", "keep-me")
+
+        install_script.uv_install("diffusers>=0.39.0")
+
+        assert "env" in captured["kwargs"], "uv_install must pass env= explicitly, not inherit implicitly"
+        child_env = captured["kwargs"]["env"]
+        assert child_env["UV_BUILD_CONSTRAINT"] == ""
+        assert child_env["UV_CONSTRAINT"] == ""
+        assert child_env["UV_OVERRIDE"] == ""
+        # Unrelated env vars must pass through untouched (this is a scrub,
+        # not a fresh/empty environment).
+        assert child_env["SOME_UNRELATED_VAR"] == "keep-me"
+        assert child_env.get("PATH") == os.environ.get("PATH")
 
 
 class TestInstallSpecDispatch:
