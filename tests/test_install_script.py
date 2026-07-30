@@ -16,6 +16,7 @@ zero work at import time.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -351,8 +352,9 @@ class TestRun:
 
 
 class TestResolveInstaller:
-    def _patch_probe(self, monkeypatch, *, pip_ok: bool, uv_ok: bool):
-        """Fake `sys.executable -m <module> --version` subprocess results."""
+    def _patch_probe(self, monkeypatch, *, pip_ok: bool, uv_ok: bool, uv_binary: str | None = None):
+        """Fake `sys.executable -m <module> --version` subprocess results,
+        and `shutil.which("uv")` for the third (binary) tier."""
 
         def _fake_run(argv, **kwargs):
             module = argv[2] if len(argv) > 2 else None
@@ -362,6 +364,9 @@ class TestResolveInstaller:
             )
 
         monkeypatch.setattr(subprocess, "run", _fake_run)
+        monkeypatch.setattr(
+            shutil, "which", lambda name: uv_binary if name == "uv" else None
+        )
 
     def test_pip_present_resolves_to_pip(self, monkeypatch):
         self._patch_probe(monkeypatch, pip_ok=True, uv_ok=True)
@@ -371,8 +376,18 @@ class TestResolveInstaller:
         self._patch_probe(monkeypatch, pip_ok=False, uv_ok=True)
         assert install_script.resolve_installer() == "uv"
 
+    def test_neither_module_available_but_uv_binary_on_path_resolves_to_uv_binary(
+        self, monkeypatch
+    ):
+        """Issue #145/#158 resume spec: PR #158's Tier-1 empirical finding —
+        a standalone/binary-only uv install (StabilityMatrix's shape) has no
+        `uv` Python module in any interpreter, only the CLI binary on PATH.
+        This is the case the third tier exists for."""
+        self._patch_probe(monkeypatch, pip_ok=False, uv_ok=False, uv_binary="/home/user/.local/bin/uv")
+        assert install_script.resolve_installer() == "uv-binary"
+
     def test_neither_available_resolves_to_none(self, monkeypatch):
-        self._patch_probe(monkeypatch, pip_ok=False, uv_ok=False)
+        self._patch_probe(monkeypatch, pip_ok=False, uv_ok=False, uv_binary=None)
         assert install_script.resolve_installer() is None
 
     def test_probe_oserror_is_treated_as_unavailable(self, monkeypatch):
@@ -383,6 +398,7 @@ class TestResolveInstaller:
             raise OSError("simulated: executable not found")
 
         monkeypatch.setattr(subprocess, "run", _raise)
+        monkeypatch.setattr(shutil, "which", lambda name: None)
         assert install_script.resolve_installer() is None
 
 
@@ -443,6 +459,75 @@ class TestUvInstall:
         assert child_env.get("PATH") == os.environ.get("PATH")
 
 
+class TestUvBinaryInstall:
+    """Third resolver tier (issue #145/#158 resume spec): a standalone `uv`
+    binary resolved via PATH, invoked with `--python <target>` instead of
+    `-m uv` — the shape PR #158's Tier-1 rig proved necessary for
+    StabilityMatrix-style binary-only uv installs."""
+
+    def test_uv_binary_install_argv_shape(self, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda name: "/home/user/.local/bin/uv")
+        captured = {}
+
+        def _fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        install_script.uv_binary_install("diffusers>=0.39.0")
+
+        assert captured["argv"] == [
+            "/home/user/.local/bin/uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "diffusers>=0.39.0",
+        ]
+
+    def test_uv_binary_install_argv_has_no_constraints_arg(self, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/uv")
+        captured = {}
+
+        def _fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        install_script.uv_binary_install("accelerate")
+
+        argv = captured["argv"]
+        assert not any(
+            "constraint" in str(a).lower() or a in ("-c",) for a in argv
+        )
+
+    def test_uv_binary_install_env_scrubs_constraint_injection_vars(self, monkeypatch):
+        """Same immunity as the module-based uv_install() — the constraint
+        injection is a property of the uv binary itself (config/environment
+        it discovers on its own), independent of invocation style."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/uv")
+        captured = {}
+
+        def _fake_run(argv, **kwargs):
+            captured["kwargs"] = kwargs
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        monkeypatch.setenv("UV_BUILD_CONSTRAINT", "/some/venv/uv-build-constraints.txt")
+        monkeypatch.setenv("UV_CONSTRAINT", "/some/constraints.txt")
+        monkeypatch.setenv("UV_OVERRIDE", "/some/overrides.txt")
+        monkeypatch.setenv("SOME_UNRELATED_VAR", "keep-me")
+
+        install_script.uv_binary_install("diffusers>=0.39.0")
+
+        assert "env" in captured["kwargs"], "uv_binary_install must pass env= explicitly"
+        child_env = captured["kwargs"]["env"]
+        assert child_env["UV_BUILD_CONSTRAINT"] == ""
+        assert child_env["UV_CONSTRAINT"] == ""
+        assert child_env["UV_OVERRIDE"] == ""
+        assert child_env["SOME_UNRELATED_VAR"] == "keep-me"
+
+
 class TestInstallSpecDispatch:
     def test_pip_installer_dispatches_to_pip_install(self, monkeypatch):
         calls = []
@@ -451,6 +536,11 @@ class TestInstallSpecDispatch:
         )
         monkeypatch.setattr(
             install_script, "uv_install", lambda spec: calls.append(("uv", spec))
+        )
+        monkeypatch.setattr(
+            install_script,
+            "uv_binary_install",
+            lambda spec: calls.append(("uv-binary", spec)),
         )
         install_script.install_spec("accelerate", "pip")
         assert calls == [("pip", "accelerate")]
@@ -463,12 +553,35 @@ class TestInstallSpecDispatch:
         monkeypatch.setattr(
             install_script, "uv_install", lambda spec: calls.append(("uv", spec))
         )
+        monkeypatch.setattr(
+            install_script,
+            "uv_binary_install",
+            lambda spec: calls.append(("uv-binary", spec)),
+        )
         install_script.install_spec("accelerate", "uv")
         assert calls == [("uv", "accelerate")]
 
+    def test_uv_binary_installer_dispatches_to_uv_binary_install(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            install_script, "pip_install", lambda spec: calls.append(("pip", spec))
+        )
+        monkeypatch.setattr(
+            install_script, "uv_install", lambda spec: calls.append(("uv", spec))
+        )
+        monkeypatch.setattr(
+            install_script,
+            "uv_binary_install",
+            lambda spec: calls.append(("uv-binary", spec)),
+        )
+        install_script.install_spec("accelerate", "uv-binary")
+        assert calls == [("uv-binary", "accelerate")]
+
 
 class TestRunInstallerSelection:
-    def _base_run(self, monkeypatch, tmp_path, *, pip_ok: bool, uv_ok: bool):
+    def _base_run(
+        self, monkeypatch, tmp_path, *, pip_ok: bool, uv_ok: bool, uv_binary: str | None = None
+    ):
         req = tmp_path / "requirements.txt"
         req.write_text("transformers==5.13.0\n")
         monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
@@ -482,6 +595,9 @@ class TestRunInstallerSelection:
             )
 
         monkeypatch.setattr(subprocess, "run", _fake_probe_run)
+        monkeypatch.setattr(
+            shutil, "which", lambda name: uv_binary if name == "uv" else None
+        )
 
     def test_pip_present_logs_pip_header(self, monkeypatch, tmp_path, capsys):
         self._base_run(monkeypatch, tmp_path, pip_ok=True, uv_ok=True)
@@ -497,11 +613,25 @@ class TestRunInstallerSelection:
         assert exit_code == 0
         assert "installer: uv (pip module absent)" in out
 
+    def test_neither_module_but_uv_binary_present_logs_uv_binary_header(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Issue #145/#158 resume spec end-to-end: neither pip nor uv module
+        resolves, but a standalone uv binary is on PATH."""
+        self._base_run(
+            monkeypatch, tmp_path, pip_ok=False, uv_ok=False, uv_binary="/home/user/.local/bin/uv"
+        )
+        exit_code = install_script.run()
+        out = capsys.readouterr().out
+        assert exit_code == 0
+        assert "installer: uv binary on PATH (pip and uv modules both absent)" in out
+
     def test_missing_requirement_uv_fallback_uses_uv_argv(self, monkeypatch, tmp_path):
         req = tmp_path / "requirements.txt"
         req.write_text("diffusers>=0.39.0\n")
         monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
         monkeypatch.setattr(install_script, "is_satisfied", lambda spec: (False, None))
+        monkeypatch.setattr(shutil, "which", lambda name: None)
 
         probe_calls = []
         install_calls = []
@@ -529,12 +659,54 @@ class TestRunInstallerSelection:
             "constraint" in str(a).lower() for argv in install_calls for a in argv
         )
 
-    def test_neither_pip_nor_uv_fails_loud_naming_both_manual_commands(
+    def test_missing_requirement_uv_binary_fallback_uses_binary_argv(
+        self, monkeypatch, tmp_path
+    ):
+        """Issue #145/#158 resume spec end-to-end: pip and uv modules both
+        absent, uv binary on PATH — run() must dispatch through
+        uv_binary_install's `--python <target>` argv shape, not `-m uv`."""
+        req = tmp_path / "requirements.txt"
+        req.write_text("diffusers>=0.39.0\n")
+        monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
+        monkeypatch.setattr(install_script, "is_satisfied", lambda spec: (False, None))
+        monkeypatch.setattr(
+            shutil, "which", lambda name: "/home/user/.local/bin/uv" if name == "uv" else None
+        )
+
+        install_calls = []
+
+        def _fake_run(argv, **kwargs):
+            if "--version" in argv:
+                # both module probes must fail for this tier to be reached
+                return subprocess.CompletedProcess(args=argv, returncode=1, stdout="", stderr="")
+            install_calls.append(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+
+        exit_code = install_script.run()
+        assert exit_code == 0
+        assert install_calls == [
+            [
+                "/home/user/.local/bin/uv",
+                "pip",
+                "install",
+                "--python",
+                sys.executable,
+                "diffusers>=0.39.0",
+            ]
+        ]
+        assert not any(
+            "constraint" in str(a).lower() for argv in install_calls for a in argv
+        )
+
+    def test_neither_pip_nor_uv_module_nor_binary_fails_loud_naming_both_manual_commands(
         self, monkeypatch, tmp_path, capsys
     ):
         req = tmp_path / "requirements.txt"
         req.write_text("transformers==5.13.0\n")
         monkeypatch.setattr(install_script, "REQUIREMENTS_PATH", req)
+        monkeypatch.setattr(shutil, "which", lambda name: None)
 
         def _fake_probe_run(argv, **kwargs):
             return subprocess.CompletedProcess(args=argv, returncode=1, stdout="", stderr="")

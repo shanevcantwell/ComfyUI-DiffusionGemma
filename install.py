@@ -42,6 +42,19 @@ it — see `resolve_installer()` / `uv_install()` /
 `_uv_env_without_constraint_injection()` below — since argv cleanliness alone
 was proven insufficient on the pinned failure.
 
+THIRD RESOLVER TIER — binary-only uv (issue #145/#158 resume spec): PR #158's
+Tier-1 empirical verification (rig: pip-less `uv venv`, standalone `uv`
+binary) found `sys.executable -m uv` never resolves for a StabilityMatrix-style
+standalone/binary uv install — no `uv` Python module exists in ANY
+interpreter on such a box, only the `uv` CLI binary (e.g. `~/.local/bin/uv`).
+`resolve_installer()` therefore tries, in order: pip module, uv module,
+then `shutil.which("uv")` — a standalone uv binary on PATH, invoked as
+`[uv_path, "pip", "install", "--python", sys.executable, spec]`
+(`uv_binary_install()`), which reaches the SAME interpreter without requiring
+`uv` to be importable inside it. Same env scrub as the module tier — the
+constraint-injection finding is a property of the `uv` binary itself, not
+of `-m uv` vs. direct invocation.
+
 Import-safety: this module does no work at import time — everything lives
 under `if __name__ == "__main__":` / functions called from `main()` — so it
 is always safe for the test suite (or anything else) to import without
@@ -51,6 +64,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -181,16 +195,40 @@ def _uv_available() -> bool:
     return _module_available("uv")
 
 
+def _uv_binary_path() -> str | None:
+    """Locate a standalone `uv` binary on PATH (issue #145/#158 resume spec:
+    third resolver tier).
+
+    PR #158's Tier-1 empirical verification found `sys.executable -m uv`
+    never resolves for a *standalone/binary* uv install (StabilityMatrix's
+    provisioning shape, e.g. `~/.local/bin/uv`) — that shape has no `uv`
+    Python module in ANY interpreter on the box, only the CLI binary. A venv
+    that is pip-less AND has no importable `uv` module still commonly has a
+    `uv` binary reachable via PATH (it doesn't need to live inside the target
+    venv at all — `uv pip install --python <target>` targets an arbitrary
+    interpreter from outside it). `shutil.which` is the standard, dependency-free
+    way to probe PATH without spawning a process."""
+    return shutil.which("uv")
+
+
 def resolve_installer() -> str | None:
-    """Pick the installer this run will use: 'pip' if `sys.executable -m pip`
-    resolves; else 'uv' if `sys.executable -m uv` resolves (issue #147's
-    pip-absent uv-venv fallback); else None if neither is usable. Cheap and
-    called once per run — logged in the environment-report header so a
-    diagnosing reader knows immediately which path was taken."""
+    """Pick the installer this run will use, cheapest/most-standard first:
+    'pip' if `sys.executable -m pip` resolves; else 'uv' if
+    `sys.executable -m uv` resolves (issue #147's pip-absent uv-venv
+    fallback, uv installed as a module in the target interpreter); else
+    'uv-binary' if a standalone `uv` binary is on PATH (issue #145/#158
+    resume spec: the module tier can't see a StabilityMatrix-style
+    binary-only uv install, so this tier drives that same binary via
+    `uv pip install --python <target>` instead of `-m uv`); else None if
+    none of the three is usable. Cheap and called once per run — logged in
+    the environment-report header so a diagnosing reader knows immediately
+    which path was taken."""
     if _pip_available():
         return "pip"
     if _uv_available():
         return "uv"
+    if _uv_binary_path() is not None:
+        return "uv-binary"
     return None
 
 
@@ -262,22 +300,53 @@ def uv_install(spec: str) -> subprocess.CompletedProcess:
     )
 
 
+def uv_binary_install(spec: str) -> subprocess.CompletedProcess:
+    """Install a single requirement spec via a standalone `uv` binary found
+    on PATH, targeting THIS interpreter with `--python` (issue #145/#158
+    resume spec: third resolver tier, for uv installs where no `uv` module
+    is importable in any interpreter — only the CLI binary exists).
+
+    Invoked as `[uv_path, "pip", "install", "--python", sys.executable, spec]`
+    rather than `-m uv` — this is the whole point of the tier: it doesn't
+    require `uv` to be importable inside the target venv, only present as a
+    binary anywhere on PATH. Uses the same env scrub as the module-based
+    `uv_install()` — the constraint-injection finding that motivated the
+    scrub is a property of the `uv` binary itself (config/environment it
+    discovers on its own), not of how it was invoked, so this tier needs the
+    identical immunity."""
+    uv_path = _uv_binary_path()
+    return subprocess.run(
+        [uv_path, "pip", "install", "--python", sys.executable, spec],
+        capture_output=True,
+        text=True,
+        env=_uv_env_without_constraint_injection(),
+    )
+
+
 def install_spec(spec: str, installer: str) -> subprocess.CompletedProcess:
     """Dispatch a single spec to the resolved installer."""
     if installer == "uv":
         return uv_install(spec)
+    if installer == "uv-binary":
+        return uv_binary_install(spec)
     return pip_install(spec)
 
 
 def _manual_fallback_command(installer: str = "pip") -> str:
     if installer == "uv":
         return f'"{sys.executable}" -m uv pip install -r requirements.txt'
+    if installer == "uv-binary":
+        return f'uv pip install --python "{sys.executable}" -r requirements.txt'
     return f'"{sys.executable}" -m pip install -r requirements.txt'
 
 
 def _both_manual_fallback_commands() -> str:
     """Both manual remedies, for the case where neither installer resolved —
-    the operator's environment is unknown at that point, so name both."""
+    the operator's environment is unknown at that point, so name both.
+    (The uv-binary tier is covered by the `uv` remedy's PATH-based form
+    already named there — see `_manual_fallback_command`'s docstring-adjacent
+    argv; not repeated as a third line here since it targets the same `uv`
+    the operator would reach for.)"""
     return (
         f"  pip:  {_manual_fallback_command('pip')}\n"
         f"  uv:   {_manual_fallback_command('uv')}"
@@ -304,14 +373,16 @@ def print_failure_block(failed_specs: list[str], installer: str = "pip") -> None
 
 
 def print_no_installer_block() -> None:
-    """Neither `pip` nor `uv` resolved in this interpreter — nothing this
-    script can do automatically. Name both attempts and both manual
-    remedies so a reader diagnosing the log has everything in one place."""
+    """None of pip module, uv module, or a standalone uv binary resolved in
+    this interpreter/environment — nothing this script can do automatically.
+    Name every attempt and both manual remedies so a reader diagnosing the
+    log has everything in one place."""
     log()
     log("!" * 70)
     log("INSTALL FAILED: no usable installer found in this interpreter.")
     log(f"  tried: {sys.executable} -m pip --version — not available")
     log(f"  tried: {sys.executable} -m uv --version — not available")
+    log("  tried: uv binary on PATH — not found")
     log()
     log("Manual fix — run ONE of these in ComfyUI's own Python environment:")
     log(_both_manual_fallback_commands())
@@ -337,8 +408,10 @@ def run() -> int:
         log("installer: pip")
     elif installer == "uv":
         log("installer: uv (pip module absent)")
+    elif installer == "uv-binary":
+        log("installer: uv binary on PATH (pip and uv modules both absent)")
     else:
-        log("installer: none (neither pip nor uv module available)")
+        log("installer: none (no pip module, uv module, or uv binary available)")
         print_no_installer_block()
         return 1
 
