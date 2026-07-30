@@ -35,13 +35,46 @@ This repository provides an instrumentable graph to capture the full per-step tr
 
 ### Install
 
+**Via ComfyUI's Extensions button / registry (recommended):** search
+"ComfyUI-DiffusionGemma" and install. Dependencies
+(`transformers==5.13.0`, `diffusers>=0.39.0`, `accelerate`) install
+automatically from this pack's `requirements.txt`, followed by `install.py`
+(belt-and-braces: re-checks each pin against the interpreter ComfyUI is
+actually running and installs anything still missing — see
+[issue #147](../../issues/147) if you land here after a broken install; its
+loud, prefixed log block names the exact fix).
+
+**Manual clone:**
+
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/shanevcantwell/ComfyUI-DiffusionGemma
 # restart ComfyUI
 ```
 
-Requires `transformers==5.13.0` (DiffusionGemma support) and `diffusers>=0.39.0`. Weights download from [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it) on first load. The loader automatically bypasses the 46GB KV-cache warmup and patches tied-weight finalization when the INT4 path is selected.
+A manual clone skips the Extensions flow's automatic dependency install —
+run the requirements install yourself, into the **same Python ComfyUI
+itself runs** (not a system Python or unrelated venv):
+
+```bash
+# ComfyUI portable/embedded (Windows):
+python_embeded\python.exe -s -m pip install -r requirements.txt
+
+# ComfyUI in a plain venv (Linux/macOS/manual venv on Windows):
+path/to/ComfyUI/venv/bin/python -m pip install -r requirements.txt
+```
+
+Weights download from [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it) on first load. The loader automatically bypasses the 46GB KV-cache warmup and patches tied-weight finalization when the INT4 path is selected.
+
+If dependencies still look wrong after either path (a stale `transformers`
+version, `diffusers` absent), run `install.py` yourself the same way
+ComfyUI's Extensions flow does — it diagnoses and self-heals in one pass:
+
+```bash
+python_embeded\python.exe -s install.py   # Windows portable, from the pack's own directory
+# or
+path/to/ComfyUI/venv/bin/python install.py
+```
 
 ### Hardware & Memory
 
