@@ -215,6 +215,96 @@ def _apply_autoround_patches() -> None:
     _mu.PreTrainedModel.tie_weights = _patched_tie
 
 
+def _checkpoint_quant_method(repo_id: str, local_files_only: bool) -> tuple[bool, str | None]:
+    """Best-effort read of the checkpoint's declared
+    `quantization_config.quant_method`, without ever taking the blocking
+    `from_pretrained` path (issue #141).
+
+    Returns `(readable, quant_method)`:
+    - `(True, "auto-round")` — config was read; checkpoint declares that method.
+    - `(True, None)` — config was read; checkpoint declares no `quantization_config`.
+    - `(False, None)` — config could NOT be read (unreachable repo, network
+      trouble, malformed JSON, ...). Callers MUST treat `readable=False` as
+      "unknown" and fall through to the normal load rather than block or
+      raise — this is a pre-flight hint, not a second front door with its
+      own failure mode. `readable=False` is NOT the same as "confirmed
+      unquantized" (`(True, None)`); conflating the two would let an
+      unreadable config masquerade as a confirmed mismatch.
+
+    Reads via `transformers.AutoConfig.from_pretrained`, which resolves both
+    local paths and Hub ids uniformly and respects `local_files_only`.
+    """
+    try:
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(repo_id, local_files_only=local_files_only)
+    except Exception as exc:  # noqa: BLE001 — deliberately broad: best-effort only
+        print(
+            f"[WARN] ComfyUI-DiffusionGemma — could not pre-flight-check "
+            f"quantization_config for repo_id={repo_id!r} ({exc!r}); skipping the "
+            "quant/checkpoint mismatch guard and proceeding to load. If the "
+            "checkpoint's quantization does not match quant=..., the load may hang "
+            "or fail deeper in transformers."
+        )
+        return False, None
+
+    quant_config = getattr(config, "quantization_config", None)
+    if not quant_config:
+        return True, None
+
+    if isinstance(quant_config, dict):
+        return True, quant_config.get("quant_method")
+    return True, getattr(quant_config, "quant_method", None)
+
+
+def _check_quant_checkpoint_match(
+    repo_id: str, quant: str, local_files_only: bool
+) -> None:
+    """PRE-FLIGHT guard (issue #141): reject a `quant=...` / checkpoint
+    mismatch BEFORE the blocking `from_pretrained` call.
+
+    Root cause this prevents: an AutoRound INT4 checkpoint loaded with
+    quant="none" hangs permanently — transformers deserializes INT4 data
+    (`qweight`/`qzeros`) as bf16 tensors with no error surface, just a
+    freeze that requires killing ComfyUI. Symmetric in the other direction
+    too: quant="autoround" against an unquantized checkpoint is also a
+    silent-wrong-load risk, not just the INT4-into-bf16 hang.
+
+    Best-effort by construction: `_checkpoint_quant_method` never blocks or
+    raises on its own account (an unreadable config returns
+    `readable=False`, with a logged warning), so this guard only rejects a
+    *confirmed* mismatch — `readable=False` always falls through, on either
+    side of the direction check.
+
+    Every raise names BOTH the violated precondition AND the actionable
+    remedy in one message (house style, see `dgemma/kv_cache.py` V1-V6).
+    """
+    readable, declared_method = _checkpoint_quant_method(repo_id, local_files_only)
+    if not readable:
+        return
+
+    if declared_method is not None and quant == "none":
+        raise RuntimeError(
+            f"Checkpoint {repo_id!r} declares quantization_config.quant_method="
+            f"{declared_method!r} but quant='none' was passed. Loading a quantized "
+            "checkpoint with quant='none' deserializes quantized weights as bf16 "
+            "with no error surface — a permanent hang, not a crash. "
+            "Remedy: pass quant='autoround' (if the declared method is AutoRound), "
+            "or choose an unquantized checkpoint."
+        )
+
+    if declared_method is None and quant == "autoround":
+        raise RuntimeError(
+            f"quant='autoround' was passed but checkpoint {repo_id!r} has no "
+            "quantization_config (confirmed absent, not just unread). Loading an "
+            "unquantized checkpoint under the autoround path applies patches meant "
+            "for INT4 W4A16 weights to bf16 weights, which is not a supported "
+            "combination. "
+            "Remedy: pass quant='none' for this checkpoint, or point repo_id at a "
+            "pre-quantized AutoRound checkpoint (e.g. AUTOROUND_REPO_ID)."
+        )
+
+
 def _resolve_device(model) -> str:
     """Resolve the model's *execution* device, not its first parameter's.
 
@@ -265,6 +355,10 @@ def load_model(
     # Auto-select the checkpoint matching the quant mode when no explicit repo
     if repo_id is None:
         repo_id = AUTOROUND_REPO_ID if quant == "autoround" else DEFAULT_REPO_ID
+
+    # PRE-FLIGHT guard (issue #141): reject a quant=/checkpoint mismatch
+    # before the blocking from_pretrained call — see _check_quant_checkpoint_match.
+    _check_quant_checkpoint_match(repo_id, quant, local_files_only)
 
     # Autoround INT4 path: patches transformers + auto-round for correct load
     if quant == "autoround":
