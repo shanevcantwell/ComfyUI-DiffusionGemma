@@ -43,6 +43,8 @@ git clone https://github.com/shanevcantwell/ComfyUI-DiffusionGemma
 
 Requires `transformers==5.13.0` (DiffusionGemma support) and `diffusers>=0.39.0`. Weights download from [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it) on first load. The loader automatically bypasses the 46GB KV-cache warmup and patches tied-weight finalization when the INT4 path is selected.
 
+`requirements.txt` is derived from `pyproject.toml`'s `[project]` dependencies (issue #25) — after changing dependencies there, regenerate it with `python scripts/emit_requirements.py`.
+
 ### Hardware & Memory
 
 | Mode | VRAM | Load time | Notes |
