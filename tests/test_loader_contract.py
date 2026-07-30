@@ -151,10 +151,11 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     sentinel = object()
     captured = {}
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured["repo_id"] = repo_id
         captured["quant"] = quant
         captured["local_files_only"] = local_files_only
+        captured["check_interrupted"] = check_interrupted
         return sentinel
 
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
@@ -164,6 +165,11 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     result = node.load(repo_id="any-value", quant="none", local_files_only=True)
 
     assert result == (sentinel,)
+    # Issue #140 loader half: a callable check_interrupted is always forwarded
+    # (unconditionally built by the node), mirroring how the sampler always
+    # forwards on_frame/should_cancel regardless of whether a live ComfyUI
+    # process exists to actually consume it.
+    assert callable(captured.pop("check_interrupted"))
     assert captured == {
         "repo_id": None,
         "quant": "none",
@@ -178,7 +184,7 @@ def test_loader_passes_none_repo_for_autoround_quant(monkeypatch):
     sentinel = object()
     captured = {}
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured["repo_id"] = repo_id
         captured["quant"] = quant
         captured["local_files_only"] = local_files_only
@@ -200,7 +206,7 @@ def test_loader_hardcodes_local_files_only_false(monkeypatch):
     so this is identical to what every other ComfyUI loader does."""
     captured = []
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured.append(local_files_only)
         return object()
 
@@ -218,7 +224,7 @@ def test_loader_propagates_cache_miss_directly(monkeypatch):
     from huggingface_hub.errors import LocalEntryNotFoundError
     captured = []
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured.append(local_files_only)
         raise LocalEntryNotFoundError("not cached")
 
@@ -236,7 +242,7 @@ def test_loader_compat_param_local_files_only_is_ignored(monkeypatch):
     /prompt POST backward compat) but ignored — hardcoded False."""
     captured = []
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured.append(local_files_only)
         return object()
 
@@ -268,7 +274,10 @@ def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch
     )
     monkeypatch.setattr(
         "surfaces.comfyui.loader.load_model",
-        lambda repo_id, quant, local_files_only: captured.update(repo_id=repo_id) or object(),
+        lambda repo_id, quant, local_files_only, check_interrupted=None: captured.update(
+            repo_id=repo_id
+        )
+        or object(),
     )
 
     DGemmaLoader().load(
@@ -297,7 +306,7 @@ def test_loader_enabled_dropdown_resolves_through_guard_and_forces_local(monkeyp
     )
     monkeypatch.setattr(
         "surfaces.comfyui.loader.load_model",
-        lambda repo_id, quant, local_files_only: captured.update(
+        lambda repo_id, quant, local_files_only, check_interrupted=None: captured.update(
             repo_id=repo_id, local_files_only=local_files_only
         )
         or object(),

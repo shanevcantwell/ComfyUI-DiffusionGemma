@@ -27,6 +27,7 @@ from dgemma.model import (
     DEFAULT_QUANT,
     DEFAULT_REPO_ID,
     REQUIRED_TRANSFORMERS_VERSION,
+    LoadInterrupted,
     _check_transformers_version,
     _resolve_device,
     load_model,
@@ -324,6 +325,170 @@ class TestLoadModel:
         load_model(repo_id="fake/repo", quant="none")
 
         assert calls == [("cuda",)]
+
+
+class TestCheckInterrupted:
+    """issue #140 loader half: `load_model`'s optional `check_interrupted`
+    predicate, polled at each phase boundary (quant/checkpoint pre-flight,
+    model `from_pretrained`, processor `from_pretrained`, `.to("cuda")`
+    device move). `dgemma/model.py` stays ComfyUI-agnostic (ADR-CDG-003) —
+    `check_interrupted` is a plain zero-arg callable, never a `comfy`
+    import; the surface-side translation into ComfyUI's own
+    `InterruptProcessingException` lives in `surfaces/comfyui/loader.py`
+    (see `tests/test_loader_interrupt.py`)."""
+
+    def _install_fakes(self, monkeypatch, captured: dict, hf_device_map=None):
+        def fake_from_pretrained(repo_id, **kwargs):
+            captured.setdefault("from_pretrained_calls", []).append(repo_id)
+            return FakeHfModel(hf_device_map=hf_device_map, first_param_device="cpu")
+
+        def fake_processor_from_pretrained(repo_id, **kwargs):
+            captured.setdefault("processor_calls", []).append(repo_id)
+            return FakeProcessor()
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr("dgemma.model.AutoProcessor.from_pretrained", fake_processor_from_pretrained)
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+
+    def test_none_check_interrupted_never_interrupts(self, monkeypatch):
+        """The default (`None`, every non-ComfyUI caller — tests, MCP, direct
+        script use): load proceeds exactly as before this parameter existed."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+
+        result = load_model(repo_id="fake/repo", quant="none", check_interrupted=None)
+
+        assert isinstance(result, DGemmaModel)
+        assert captured["from_pretrained_calls"] == ["fake/repo"]
+        assert captured["processor_calls"] == ["fake/repo"]
+
+    def test_predicate_reporting_false_never_interrupts(self, monkeypatch):
+        """An always-False predicate (polled repeatedly across all four
+        boundaries) must behave identically to `None` — load completes."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        poll_count = {"n": 0}
+
+        def never_interrupt():
+            poll_count["n"] += 1
+            return False
+
+        result = load_model(repo_id="fake/repo", quant="none", check_interrupted=never_interrupt)
+
+        assert isinstance(result, DGemmaModel)
+        # Polled at all four phase boundaries (pre-flight, model, processor, device move).
+        assert poll_count["n"] == 4
+
+    def test_interrupted_on_first_poll_raises_before_any_blocking_call(self, monkeypatch):
+        """A predicate reporting True on its FIRST poll (the quant/checkpoint
+        pre-flight boundary, the earliest phase) must raise `LoadInterrupted`
+        before the blocking model `from_pretrained` call ever starts — the
+        whole point of polling at phase boundaries rather than only at the
+        end."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+
+        with pytest.raises(LoadInterrupted, match="pre-flight"):
+            load_model(repo_id="fake/repo", quant="none", check_interrupted=lambda: True)
+
+        assert "from_pretrained_calls" not in captured
+        assert "processor_calls" not in captured
+
+    def test_interrupted_before_model_from_pretrained_skips_it(self, monkeypatch):
+        """A predicate that passes the pre-flight poll but reports True at
+        the next boundary must stop before the model `from_pretrained` call
+        — the pre-flight guard's own (best-effort, real-network) config read
+        must have already happened, but nothing further."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        calls = {"n": 0}
+
+        def interrupt_on_second_poll():
+            calls["n"] += 1
+            return calls["n"] >= 2  # poll 1: pre-flight (False); poll 2: model (True)
+
+        with pytest.raises(LoadInterrupted, match="model from_pretrained"):
+            load_model(repo_id="fake/repo", quant="none", check_interrupted=interrupt_on_second_poll)
+
+        assert "from_pretrained_calls" not in captured
+        assert "processor_calls" not in captured
+
+    def test_interrupted_between_model_and_processor_load_skips_processor(self, monkeypatch):
+        """A predicate that flips True only after the model `from_pretrained`
+        call has already returned must stop BEFORE the processor
+        `from_pretrained` call — proving the poll is genuinely per-boundary,
+        not just a single check at entry."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        calls = {"n": 0}
+
+        def interrupt_after_first_two_polls():
+            calls["n"] += 1
+            # Poll 1: pre-flight (False). Poll 2: before model from_pretrained
+            # (False, let the model load start). Poll 3: before processor
+            # load (True, stop here).
+            return calls["n"] >= 3
+
+        with pytest.raises(LoadInterrupted, match="processor from_pretrained"):
+            load_model(
+                repo_id="fake/repo", quant="none", check_interrupted=interrupt_after_first_two_polls
+            )
+
+        assert captured["from_pretrained_calls"] == ["fake/repo"]  # model DID load
+        assert "processor_calls" not in captured  # processor load never started
+
+    def test_interrupted_before_device_move_skips_to_cuda(self, monkeypatch):
+        """A predicate that flips True only at the final boundary must stop
+        before `.to("cuda")` — model + processor both already loaded, but the
+        device move itself must never be reached."""
+        captured: dict = {}
+        moved_to_cuda = []
+
+        class _TrackedFakeHfModel(FakeHfModel):
+            def to(self, *args, **kwargs):
+                moved_to_cuda.append(args)
+                return self
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            return _TrackedFakeHfModel(hf_device_map={"model.layers.0": 0}, first_param_device="cpu")
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr(
+            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+        )
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+
+        calls = {"n": 0}
+
+        def interrupt_on_fourth_poll():
+            calls["n"] += 1
+            return calls["n"] >= 4  # pre-flight, model, processor all pass; device move stops
+
+        with pytest.raises(LoadInterrupted):
+            load_model(repo_id="fake/repo", quant="none", check_interrupted=interrupt_on_fourth_poll)
+
+        assert moved_to_cuda == []
+
+    def test_load_interrupted_names_the_device_move_phase(self, monkeypatch):
+        """The raised message names which phase boundary the interrupt was
+        caught at — actionable for anyone reading a log, not just a bare
+        'interrupted'. Exercised at the LAST boundary (`.to("cuda")`) as the
+        distinct case from the first-poll test above, so the message-naming
+        behavior is proven for an interior/final phase too, not only phase 1."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        calls = {"n": 0}
+
+        def interrupt_on_fourth_poll():
+            calls["n"] += 1
+            return calls["n"] >= 4
+
+        with pytest.raises(LoadInterrupted, match=r'device move \(\.to\("cuda"\)\)'):
+            load_model(repo_id="fake/repo", quant="none", check_interrupted=interrupt_on_fourth_poll)
 
 
 class TestTransformersVersionGuard:

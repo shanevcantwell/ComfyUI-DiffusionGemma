@@ -322,7 +322,7 @@ class TestLoaderIntegrationWithFakeFolderPaths:
 
         captured = {}
 
-        def fake_load_model(repo_id, quant, local_files_only):
+        def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
             captured["repo_id"] = repo_id
             captured["quant"] = quant
             captured["local_files_only"] = local_files_only
