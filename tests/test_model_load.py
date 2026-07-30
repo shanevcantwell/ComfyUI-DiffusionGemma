@@ -34,14 +34,31 @@ from dgemma.model import (
 from dgemma.types import DGemmaModel
 
 
+class _FakeDevice:
+    """Minimal stand-in for `torch.device` — `.type` is what
+    `_assert_no_meta_tensors` inspects; `str()` is what `_resolve_device` and
+    the old device-string assertions compare against."""
+
+    def __init__(self, device_str: str):
+        self._device_str = device_str
+        # torch.device("cuda:0").type == "cuda"; torch.device("cpu").type == "cpu";
+        # torch.device("meta").type == "meta" — same split here.
+        self.type = device_str.split(":")[0]
+
+    def __str__(self):
+        return self._device_str
+
+
 class _FakeParam:
     def __init__(self, device: str):
-        self.device = device
+        self.device = _FakeDevice(device)
 
 
 class FakeHfModel:
-    """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`: only
-    `hf_device_map` and `parameters()` matter to `_resolve_device`."""
+    """Stands in for a loaded `DiffusionGemmaForBlockDiffusion`: `hf_device_map`
+    and `parameters()` matter to `_resolve_device`; `.to()` + `named_parameters()`
+    + `named_buffers()` are what `load_model`'s post-load meta-tensor assertion
+    (issue #142) and the final `.to("cuda")` call touch."""
 
     def __init__(self, hf_device_map=None, first_param_device="cpu"):
         if hf_device_map is not None:
@@ -50,6 +67,15 @@ class FakeHfModel:
 
     def parameters(self):
         yield _FakeParam(self._first_param_device)
+
+    def named_parameters(self):
+        yield "fake.weight", _FakeParam(self._first_param_device)
+
+    def named_buffers(self):
+        return iter(())
+
+    def to(self, *args, **kwargs):
+        return self
 
 
 class TestResolveDevice:
@@ -92,6 +118,16 @@ class FakeProcessor:
 
 class TestLoadModel:
     def _install_fakes(self, monkeypatch, captured: dict, hf_device_map=None, raise_on=None):
+        """Also pins `torch.cuda.is_available()` True (#159 gate finding):
+        these fakes drive `load_model()` to its real `.to("cuda")` call,
+        which is a no-op against `FakeHfModel.to` — but the no-CUDA guard
+        upstream of it (issue #143) is a real host check, so without this
+        pin these tests pass on a CUDA host and fail on CPU-only CI for a
+        reason unrelated to what they're testing.
+        `test_no_cuda_raises_intentional_runtime_error_not_unbound_local`
+        overrides this back to False right after calling this helper —
+        monkeypatch's later-wins semantics keep that override intact."""
+
         def fake_from_pretrained(repo_id, **kwargs):
             if raise_on == "model":
                 raise OSError(f"{repo_id} is not a local folder and is not a valid model identifier")
@@ -110,17 +146,20 @@ class TestLoadModel:
             "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
         )
         monkeypatch.setattr("dgemma.model.AutoProcessor.from_pretrained", fake_processor_from_pretrained)
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
 
     def test_load_kwargs_shape(self, monkeypatch):
-        """quant="none" is the only path left: device_map="auto",
-        dtype=bfloat16, no quantization_config."""
+        """quant="none": dtype=bfloat16, low_cpu_mem_usage=False (forces real
+        CPU tensors so meta tensors can't slip past to .to("cuda") — dd2767c
+        dropped device_map="auto" entirely, so no such key is passed)."""
         captured: dict = {}
         self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
 
         result = load_model(repo_id="fake/repo", quant="none")
 
         kwargs = captured["kwargs"]
-        assert kwargs["device_map"] == "auto"
+        assert "device_map" not in kwargs
+        assert kwargs["low_cpu_mem_usage"] is False
         assert kwargs["dtype"] == torch.bfloat16
         assert "quantization_config" not in kwargs
         assert isinstance(result, DGemmaModel)
@@ -225,6 +264,66 @@ class TestLoadModel:
 
         with pytest.raises(ValueError, match="unrelated config bug"):
             load_model(repo_id="fake/repo")
+
+    def test_no_cuda_raises_intentional_runtime_error_not_unbound_local(self, monkeypatch):
+        """issue #143: the no-CUDA else-branch used to reference a `device`
+        variable removed by dd2767c, raising an opaque UnboundLocalError
+        instead of the intended message. Must now raise a house-register
+        RuntimeError naming the missing precondition, with no dead reference."""
+        captured: dict = {}
+        self._install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: False)
+
+        with pytest.raises(RuntimeError, match="CUDA"):
+            load_model(repo_id="fake/repo", quant="none")
+
+    def test_meta_resident_tensor_after_load_raises_before_to_cuda(self, monkeypatch):
+        """issue #142's enforcement surface: any parameter/buffer still on
+        meta after load (and after the autoround re-tie attempt) must raise,
+        naming the tensor, instead of reaching .to("cuda") and surfacing an
+        opaque 'Cannot copy out of meta tensor' error downstream."""
+        captured: dict = {}
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            captured["kwargs"] = kwargs
+            return FakeHfModel(hf_device_map={"model.layers.0": 0}, first_param_device="meta")
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr(
+            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+        )
+
+        with pytest.raises(RuntimeError, match="meta-resident"):
+            load_model(repo_id="fake/repo", quant="none")
+
+    def test_to_cuda_called_when_cuda_available(self, monkeypatch):
+        """The real device-move: model.to("cuda") is invoked (not skipped)
+        once CUDA is available and no meta tensors remain."""
+        captured: dict = {}
+        calls: list = []
+
+        class _TrackedFakeHfModel(FakeHfModel):
+            def to(self, *args, **kwargs):
+                calls.append(args)
+                return self
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            captured["kwargs"] = kwargs
+            return _TrackedFakeHfModel(hf_device_map={"model.layers.0": 0}, first_param_device="cpu")
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+        )
+        monkeypatch.setattr(
+            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+        )
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+
+        load_model(repo_id="fake/repo", quant="none")
+
+        assert calls == [("cuda",)]
 
 
 class TestTransformersVersionGuard:
