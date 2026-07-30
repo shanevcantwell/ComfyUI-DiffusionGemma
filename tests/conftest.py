@@ -530,13 +530,20 @@ class FakeDynamicCache:
             self.value_cache[i] = torch.cat([value, extra.clone()], dim=2)
 
 
-class FakeDGemmaModelConfig:
-    """Exposes the `.config` surface `geometry_from_model`
-    (`dgemma/kv_cache.py`) reads: `num_hidden_layers`, `layer_types` (the
-    N-full/N-sliding pattern, scaled down for the fake), `sliding_window`,
-    `rope_parameters` — grounded against the real installed
-    `DiffusionGemmaTextConfig` field names (`configuration_diffusion_gemma.py`),
-    not invented.
+class FakeDGemmaTextConfig:
+    """Exposes the sub-config surface `geometry_from_model`
+    (`dgemma/kv_cache.py`) reads via `config.get_text_config()`:
+    `num_hidden_layers`, `layer_types` (the N-full/N-sliding pattern, scaled
+    down for the fake), `sliding_window`, `rope_parameters` — grounded
+    against the real installed `DiffusionGemmaTextConfig` field names
+    (`configuration_diffusion_gemma.py`), not invented.
+
+    Issue #162: these four fields live on the TEXT sub-config on the real
+    composite `DiffusionGemmaConfig` — never top-level. This class is that
+    nested sub-config; `FakeDGemmaModelConfig` below holds it under
+    `.text_config` and resolves it via `.get_text_config()`, mirroring the
+    real class's composite shape (`sub_configs = {"text_config",
+    "vision_config"}`) rather than fabricating these fields flat.
     """
 
     def __init__(
@@ -560,6 +567,40 @@ class FakeDGemmaModelConfig:
                 "rope_theta": 1_000_000.0,
             },
         }
+
+
+class FakeDGemmaModelConfig:
+    """The top-level composite config, mirroring the real
+    `DiffusionGemmaConfig` (issue #162): top-level attrs are only
+    `text_config`/`vision_config`/`boi_token_id`/`eoi_token_id`/
+    `image_token_id`/`initializer_range`/`tie_word_embeddings`/
+    `canvas_length` (`canvas_length` IS top-level on the real class) — NOT
+    `num_hidden_layers`/`layer_types`/`sliding_window`/`rope_parameters`,
+    which live one level down on `text_config`. `get_text_config()` mirrors
+    the real `PreTrainedConfig.get_text_config()` (`configuration_utils.py:
+    1240`) resolution for this class: it always returns `self.text_config`,
+    never falls back to `self` — a flat-shaped config (those four fields
+    top-level, no nested `text_config`) is deliberately NOT accepted by this
+    fake, matching the real class's actual shape.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_hidden_layers: int = 6,
+        sliding_window_pattern: int = 6,
+        sliding_window: int = 16,
+        canvas_length: int = 256,
+    ) -> None:
+        self.text_config = FakeDGemmaTextConfig(
+            num_hidden_layers=num_hidden_layers,
+            sliding_window_pattern=sliding_window_pattern,
+            sliding_window=sliding_window,
+        )
+        self.canvas_length = canvas_length
+
+    def get_text_config(self) -> FakeDGemmaTextConfig:
+        return self.text_config
 
 
 @dataclass
@@ -613,7 +654,7 @@ class _FakeDiffusionGemmaModel:
     real `DiffusionGemmaForBlockDiffusion.model.encoder` path."""
 
     def __init__(self, config: FakeDGemmaModelConfig) -> None:
-        self.encoder = _FakeEncoderModel(config.num_hidden_layers)
+        self.encoder = _FakeEncoderModel(config.get_text_config().num_hidden_layers)
 
 
 class _FakeInnerModel:
@@ -705,8 +746,8 @@ def synthetic_kv_cache(
     """
     from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint
 
-    config = dgemma_model.model.config
-    num_layers = config.num_hidden_layers
+    text_config = dgemma_model.model.config.get_text_config()
+    num_layers = text_config.num_hidden_layers
 
     cache_layers = num_layers - 1 if mismatch == "layer_count" else num_layers
     cache = FakeDynamicCache(

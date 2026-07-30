@@ -16,11 +16,21 @@ import sys
 from dgemma.types import KVCache
 from surfaces.comfyui.denoise import DGemmaDenoise
 from surfaces.comfyui.encode import DGemmaEncode
-from surfaces.comfyui.socket_types import DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE, DGEMMA_KV_CACHE, DGEMMA_MODEL
+from surfaces.comfyui.socket_types import (
+    DGEMMA_CANVAS_STATE,
+    DGEMMA_CANVAS_TRACE,
+    DGEMMA_KV_CACHE,
+    DGEMMA_MODEL,
+    DGEMMA_RUN_CONFIG,
+)
 
 
 class _StubModel:
     processor = object()
+    repo_id = "fake/repo"
+    quant = "none"
+    device = "cpu"
+    dtype = "bfloat16"
 
 
 class _StubTrace:
@@ -104,12 +114,30 @@ class TestDGemmaDenoiseContract:
     def test_input_types_shape(self):
         spec = DGemmaDenoise.INPUT_TYPES()
         assert spec["required"]["model"][0] == DGEMMA_MODEL
+        assert "thinking" in spec["required"]
         assert spec["optional"]["kv_cache"][0] == DGEMMA_KV_CACHE
         assert "unique_id" in spec["hidden"]
 
     def test_return_types(self):
-        assert DGemmaDenoise.RETURN_TYPES == ("STRING", DGEMMA_CANVAS_STATE, DGEMMA_CANVAS_TRACE)
-        assert DGemmaDenoise.RETURN_NAMES == ("text", "canvas_state", "canvas_trace")
+        """Issue #166 ratified scope: full connection parity with
+        `DGemmaSampler` — the same six-output socket set."""
+        assert DGemmaDenoise.RETURN_TYPES == (
+            "STRING",
+            DGEMMA_CANVAS_STATE,
+            DGEMMA_CANVAS_TRACE,
+            "STRING",
+            "IMAGE",
+            DGEMMA_RUN_CONFIG,
+        )
+        assert DGemmaDenoise.RETURN_NAMES == (
+            "text",
+            "canvas_state",
+            "canvas_trace",
+            "frames",
+            "images",
+            "run_config",
+        )
+        assert DGemmaDenoise.OUTPUT_IS_LIST == (False, False, False, True, False, False)
         assert DGemmaDenoise.FUNCTION == "denoise"
 
     def test_body_is_a_thin_adapter_no_step_loop(self):
@@ -148,6 +176,7 @@ class TestDGemmaDenoiseThreadsKVCacheThrough:
             entropy_bound=0.1,
             confidence=0.1,
             gen_length=8,
+            thinking=False,
             kv_cache=sentinel_cache,
             unique_id="42",
         )
@@ -174,6 +203,7 @@ class TestDGemmaDenoiseThreadsKVCacheThrough:
             entropy_bound=0.1,
             confidence=0.1,
             gen_length=8,
+            thinking=False,
         )
 
         assert captured["kv_cache"] is None
@@ -196,7 +226,7 @@ class TestDGemmaDenoiseLiveFramePush:
         monkeypatch.setattr("surfaces.comfyui.denoise.run_diffusion", fake_run_diffusion)
 
         node = DGemmaDenoise()
-        text, state, trace = node.denoise(
+        text, state, trace, frames, images, run_config = node.denoise(
             _StubModel(),
             prompt="hi",
             seed=1,
@@ -206,10 +236,13 @@ class TestDGemmaDenoiseLiveFramePush:
             entropy_bound=0.1,
             confidence=0.1,
             gen_length=8,
+            thinking=False,
             unique_id="42",
         )
 
         assert (text, state, trace) == ("text", "state", trace_stub)
+        assert frames == []
+        assert run_config.prompt == "hi"
 
     def test_on_frame_pushes_via_send_sync_when_promptserver_available(self, monkeypatch):
         captured_calls = []
@@ -242,6 +275,7 @@ class TestDGemmaDenoiseLiveFramePush:
             entropy_bound=0.1,
             confidence=0.1,
             gen_length=8,
+            thinking=False,
             unique_id="42",
         )
 
@@ -280,10 +314,11 @@ class TestDGemmaDenoiseLiveFramePush:
             entropy_bound=0.1,
             confidence=0.1,
             gen_length=8,
+            thinking=False,
             unique_id="42",
         )
 
-        assert result == ("text", "state", trace_stub)
+        assert result[:3] == ("text", "state", trace_stub)
 
     def test_send_sync_failure_does_not_kill_the_run(self, monkeypatch, caplog):
         class ExplodingInstance:
@@ -317,8 +352,9 @@ class TestDGemmaDenoiseLiveFramePush:
                 entropy_bound=0.1,
                 confidence=0.1,
                 gen_length=8,
+                thinking=False,
                 unique_id="42",
             )
 
-        assert result == ("text", "state", trace_stub)
+        assert result[:3] == ("text", "state", trace_stub)
         assert any("live push failed" in record.message for record in caplog.records)

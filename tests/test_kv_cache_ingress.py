@@ -50,6 +50,56 @@ class TestGeometryFromModel:
         assert len(geometry["layer_types"]) == 6
         assert "rope_parameters" in geometry
 
+    def test_reads_through_get_text_config_not_top_level(self, dgemma_model_factory):
+        """Issue #162 regression: `DiffusionGemmaConfig` is a composite
+        config — none of the four fields `geometry_from_model` reads live
+        top-level, only on the text sub-config `get_text_config()`
+        resolves. Fixed by resolving through `get_text_config()`
+        (`dgemma/kv_cache.py`); this pins the composite-shaped call path
+        works end to end (fixture -> `.model.config.get_text_config()` ->
+        the four fields)."""
+        model = dgemma_model_factory(num_hidden_layers=6, sliding_window=16)
+        # The fake's top-level config object has NO num_hidden_layers/
+        # layer_types/sliding_window/rope_parameters attribute of its own —
+        # mirroring the real DiffusionGemmaConfig's actual shape.
+        top_level_config = model.model.config
+        assert not hasattr(top_level_config, "num_hidden_layers")
+        assert not hasattr(top_level_config, "layer_types")
+        assert not hasattr(top_level_config, "sliding_window")
+        assert not hasattr(top_level_config, "rope_parameters")
+        # ...yet geometry_from_model succeeds by resolving through
+        # get_text_config() rather than reading the top-level object flat.
+        geometry = geometry_from_model(model)
+        assert geometry["num_hidden_layers"] == 6
+        assert geometry["sliding_window"] == 16
+
+    def test_flat_shaped_config_is_not_silently_accepted(self, dgemma_model_factory):
+        """The other half of the #162 regression: a config shape with the
+        four fields FLAT (no nested `text_config`, no `get_text_config()`)
+        is not a config `geometry_from_model` can read — it must fail loud
+        (AttributeError), not silently degrade. This documents that the
+        pre-#162 fake (which fabricated these fields flat) could pass
+        where the real `DiffusionGemmaConfig` class fails, and that the
+        fixed fixture/production code no longer tolerates that shape."""
+
+        class _FlatConfig:
+            """A deliberately WRONG-shaped config: the four fields live
+            top-level, exactly the shape the pre-#162 `FakeDGemmaModelConfig`
+            fabricated — and exactly the shape the real
+            `DiffusionGemmaConfig` does NOT have."""
+
+            def __init__(self) -> None:
+                self.num_hidden_layers = 6
+                self.layer_types = ["full_attention"] * 6
+                self.sliding_window = 16
+                self.rope_parameters = {}
+
+        model = dgemma_model_factory(num_hidden_layers=6, sliding_window=16)
+        model.model.config = _FlatConfig()
+
+        with pytest.raises(AttributeError):
+            geometry_from_model(model)
+
 
 class TestTokenizerFingerprint:
     def test_combines_repo_id_and_vocab_size(self, dgemma_model_factory):

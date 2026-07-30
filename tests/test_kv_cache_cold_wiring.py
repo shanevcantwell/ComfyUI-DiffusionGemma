@@ -70,7 +70,7 @@ class _FakeEncoderModel:
 
 class _FakeDiffusionGemmaModel:
     def __init__(self, config: FakeDGemmaModelConfig):
-        self.encoder = _FakeEncoderModel(config.num_hidden_layers)
+        self.encoder = _FakeEncoderModel(config.get_text_config().num_hidden_layers)
 
 
 class _FakeInnerModel:
@@ -176,7 +176,7 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
 
         denoise_node = DGemmaDenoise()
         denoise_defaults = _widget_defaults(DGemmaDenoise.INPUT_TYPES())
-        text, canvas_state, canvas_trace = denoise_node.denoise(
+        text, canvas_state, canvas_trace, frames, images, run_config = denoise_node.denoise(
             model,
             prompt="hi",
             seed=denoise_defaults["seed"],
@@ -186,6 +186,7 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
             entropy_bound=DEFAULT_ENTROPY_BOUND,
             confidence=denoise_defaults["confidence"],
             gen_length=denoise_defaults["gen_length"],
+            thinking=denoise_defaults["thinking"],
             kv_cache=kv_cache,
         )
 
@@ -205,7 +206,7 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
 
         denoise_node = DGemmaDenoise()
         denoise_defaults = _widget_defaults(DGemmaDenoise.INPUT_TYPES())
-        text, canvas_state, canvas_trace = denoise_node.denoise(
+        text, canvas_state, canvas_trace, frames, images, run_config = denoise_node.denoise(
             model,
             prompt="hi",
             seed=denoise_defaults["seed"],
@@ -215,6 +216,7 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
             entropy_bound=DEFAULT_ENTROPY_BOUND,
             confidence=denoise_defaults["confidence"],
             gen_length=denoise_defaults["gen_length"],
+            thinking=denoise_defaults["thinking"],
         )
 
         assert text
