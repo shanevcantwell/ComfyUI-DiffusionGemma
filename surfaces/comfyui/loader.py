@@ -52,6 +52,7 @@ docstring).
 """
 from __future__ import annotations
 
+import logging
 import os
 
 # Dual-context import, explicit package-depth gate (same discipline as the
@@ -87,6 +88,7 @@ if __package__ and __package__.count(".") >= 2:
         _QUANT_CHOICES,
         DEFAULT_QUANT,
         DEFAULT_REPO_ID,
+        LoadInterrupted,
         load_model,
     )
     from .socket_types import DGEMMA_MODEL
@@ -95,6 +97,7 @@ else:
         _QUANT_CHOICES,
         DEFAULT_QUANT,
         DEFAULT_REPO_ID,
+        LoadInterrupted,
         load_model,
     )
     from surfaces.comfyui.socket_types import DGEMMA_MODEL
@@ -216,6 +219,42 @@ def resolve_local_model_dir(name: str) -> str | None:
     return None
 
 
+def _build_check_interrupted():
+    """Build the interrupt-poll predicate handed to `load_model` as
+    `check_interrupted` (issue #140 loader half), mirroring
+    `surfaces/comfyui/sampler.py`'s `_build_should_cancel` closure exactly:
+    `comfy.model_management` is imported lazily, INSIDE the returned closure
+    (never at module top, never even inside this builder), so this module
+    keeps importing — and `load()` keeps running — with zero ComfyUI
+    present (the normal pytest/headless condition this whole file's dual-
+    context import discipline already assumes).
+
+    `dgemma/model.py` never imports `comfy` itself (ADR-CDG-003): this
+    closure is the entire surface-side connection the core's
+    `check_interrupted` parameter needs. A failure reading
+    `processing_interrupted()` degrades to "not interrupted" (logged, not
+    raised) — the same non-negotiable rule `_build_should_cancel` states for
+    its own predicate: interrupt-plumbing must never itself crash the load
+    it is only supposed to be able to stop cleanly.
+    """
+
+    def check_interrupted() -> bool:
+        try:
+            import comfy.model_management as model_management
+
+            return bool(model_management.processing_interrupted())
+        except ImportError:
+            return False  # No live ComfyUI process (e.g. pytest) — never interrupt.
+        except Exception as exc:  # noqa: BLE001 — deliberate breadth: see docstring.
+            logging.warning(
+                "DGemmaLoader interrupt check failed (treating as not-interrupted): %s",
+                exc,
+            )
+            return False
+
+    return check_interrupted
+
+
 class DGemmaLoader:
     """Loads a DiffusionGemma model + processor onto the `DGEMMA_MODEL` socket."""
 
@@ -258,6 +297,11 @@ class DGemmaLoader:
         local_files_only: bool = False,
         local_model_dir: str | None = None,
     ):
+        # Interrupt wiring (issue #140 loader half): the same closure serves
+        # every load_model call this method makes, local-folders or HF-
+        # identifier — one predicate, built once per invocation.
+        check_interrupted = _build_check_interrupted()
+
         # Advanced/local-folders path (only reachable when the dropdown is
         # enabled AND a selection was made): resolve the dropdown pick through
         # the path-traversal guard (`resolve_local_model_dir`) and force
@@ -265,20 +309,48 @@ class DGemmaLoader:
         # fetch. The guard stays active here (ratification 2026-07-13) even
         # though the dropdown is scaffolding: a `/prompt` POST can carry a
         # `local_model_dir` string regardless of what the UI renders.
-        if _LOCAL_FOLDERS_ENABLED and local_model_dir:
-            model_path = resolve_local_model_dir(local_model_dir)
-            if model_path is None:
-                raise RuntimeError(
-                    f"DGemmaLoader: could not resolve local_model_dir={local_model_dir!r} "
-                    "to a model directory under the configured 'diffusion_models' or "
-                    "'text_encoders' folders. Place the DiffusionGemma checkpoint "
-                    "(a directory containing config.json) under one of those ComfyUI "
-                    "model folders — the local-folders path never falls back to a "
-                    "network fetch."
+        try:
+            if _LOCAL_FOLDERS_ENABLED and local_model_dir:
+                model_path = resolve_local_model_dir(local_model_dir)
+                if model_path is None:
+                    raise RuntimeError(
+                        f"DGemmaLoader: could not resolve local_model_dir={local_model_dir!r} "
+                        "to a model directory under the configured 'diffusion_models' or "
+                        "'text_encoders' folders. Place the DiffusionGemma checkpoint "
+                        "(a directory containing config.json) under one of those ComfyUI "
+                        "model folders — the local-folders path never falls back to a "
+                        "network fetch."
+                    )
+                return (
+                    load_model(
+                        repo_id=model_path,
+                        quant=quant,
+                        local_files_only=True,
+                        check_interrupted=check_interrupted,
+                    ),
                 )
-            return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
 
-        # PRIMARY path: HF identifier. Always network-available — transformers
-        # checks cache before hitting the network. Issue #136: local_files_only
-        # widget removed; hardcoded False.
-        return (load_model(repo_id=None, quant=quant, local_files_only=False),)
+            # PRIMARY path: HF identifier. Always network-available — transformers
+            # checks cache before hitting the network. Issue #136: local_files_only
+            # widget removed; hardcoded False.
+            return (
+                load_model(
+                    repo_id=None,
+                    quant=quant,
+                    local_files_only=False,
+                    check_interrupted=check_interrupted,
+                ),
+            )
+        except LoadInterrupted as exc:
+            # Translate the engine-neutral LoadInterrupted (dgemma/model.py
+            # stays ComfyUI-agnostic, ADR-CDG-003) into the exact exception
+            # type ComfyUI's own executor special-cases for a clean "Processing
+            # interrupted" outcome (execution.py's PromptExecutor) rather than
+            # the generic error/traceback path every other exception here
+            # takes. Lazy import mirrors _build_check_interrupted's own
+            # zero-comfy-present discipline — this except clause is only ever
+            # reached when check_interrupted() itself returned True, which
+            # already required a live `comfy.model_management` to say so.
+            import comfy.model_management as model_management
+
+            raise model_management.InterruptProcessingException() from exc
