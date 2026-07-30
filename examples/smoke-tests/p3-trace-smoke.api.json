@@ -33,7 +33,7 @@
     "_meta": { "title": "Preview CanvasState" }
   },
   "76": {
-    "inputs": { "canvas_trace": ["73", 2] },
+    "inputs": { "canvas_trace": ["73", 2], "mode": "commit", "cell_px": 6 },
     "class_type": "DGemmaTrace",
     "_meta": { "title": "DiffusionGemma Trace" }
   },
