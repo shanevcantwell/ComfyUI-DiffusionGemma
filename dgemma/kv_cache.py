@@ -127,7 +127,15 @@ def validate_kv_cache_ingress(payload: KVCache, dgemma_model: Any) -> None:
     # Failure this prevents: a cache from a differently-sized model
     # attaching with a truncated/over-long layer set — silent wrong-geometry
     # attention (ADR-CDG-012 §D.3).
-    cache_layer_count = len(payload.cache.key_cache)
+    #
+    # transformers==5.13.0's real `DynamicCache` (grounded live against the
+    # pinned install, issue #178): per-layer state lives on `.layers`, a
+    # list of `DynamicLayer` objects (`cache_utils.py:1499-1603`), NOT on a
+    # `.key_cache`/`.value_cache` list attribute (that shape was removed
+    # upstream). `len(cache)` == `len(cache.layers)`
+    # (`Cache.__len__`, `cache_utils.py:1143-1149`) — used directly here,
+    # single pinned-API code path, no hasattr fallback (PARSE-AT-THE-DOOR).
+    cache_layer_count = len(payload.cache)
     expected_layer_count = text_config.num_hidden_layers
     if cache_layer_count != expected_layer_count:
         raise ValueError(
@@ -199,7 +207,11 @@ def validate_kv_cache_ingress(payload: KVCache, dgemma_model: Any) -> None:
     # a CPU-loaded or fp32 deserialized cache (IN-4) attaching to a
     # bf16-on-GPU model — device/dtype drift that would error deep in
     # attention rather than at the door.
-    cache_tensor = payload.cache.key_cache[0] if cache_layer_count else None
+    #
+    # Real `DynamicLayer.keys` (`cache_utils.py:132-168`) — per-layer key
+    # tensor, populated by `lazy_initialization`/`update`. Same `.layers`
+    # surface as V1 above.
+    cache_tensor = payload.cache.layers[0].keys if cache_layer_count else None
     if cache_tensor is not None:
         cache_dtype = str(cache_tensor.dtype)
         cache_device = str(cache_tensor.device)

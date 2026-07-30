@@ -12,6 +12,7 @@ direct coverage in Phase 1.
 from __future__ import annotations
 
 import pytest
+import torch
 
 from dgemma.kv_cache import (
     encode_sequence,
@@ -31,14 +32,15 @@ class TestHappyPath:
         assert validate_kv_cache_ingress(cache, model) is None
 
     def test_fake_dynamic_cache_get_seq_length_mirrors_real_surface(self, synthetic_kv_cache_factory):
-        """`FakeDynamicCache.get_seq_length()` (`tests/conftest.py`, §L) mirrors
-        `transformers.DynamicCache`'s surface a future phase's `encode_sequence`
-        will read (`cached_len = past_key_values.get_seq_length()`, ADR-CDG-012
-        grounding). Not called by `validate_kv_cache_ingress` today (it reads
-        `key_cache`/`value_cache` directly) — this pins the fixture's own
+        """`cache.cache` (`tests/conftest.py`'s `FakeDynamicCache`, §L, now a
+        REAL `transformers.DynamicCache` subclass — issue #178) exercises
+        `get_seq_length()` against the real class's own `.layers[i].keys`
+        surface `validate_kv_cache_ingress` reads (`len(cache)`,
+        `cache.layers[0].keys`). Not called by `validate_kv_cache_ingress`
+        today (it reads `.layers` directly) — this pins the fixture's own
         self-consistency now, so the method is exercised the moment it exists."""
         _, cache = synthetic_kv_cache_factory()
-        assert cache.cache.get_seq_length() == cache.cache.key_cache[0].shape[2]
+        assert cache.cache.get_seq_length() == cache.cache.layers[0].keys.shape[2]
 
 
 class TestGeometryFromModel:
@@ -107,6 +109,57 @@ class TestTokenizerFingerprint:
         fingerprint = tokenizer_fingerprint(model)
         assert "fake/dgemma-test" in fingerprint
         assert "32" in fingerprint
+
+
+class TestValidateAgainstRealTransformersDynamicCache:
+    """Issue #178 regression: `validate_kv_cache_ingress` crashed live
+    (`AttributeError: 'DynamicCache' object has no attribute 'key_cache'`)
+    against `transformers==5.13.0`'s REAL `DynamicCache`, even though the
+    unit suite passed — every other test in this module runs against
+    `tests/conftest.py`'s `FakeDynamicCache`, which is now a genuine
+    `DynamicCache` subclass (issue #178), but this test deliberately
+    constructs a bare `transformers.DynamicCache()` directly (no subclass,
+    no fixture helper) so a future fixture-only fix can't mask a real
+    regression here again — this is the class the live crash actually
+    named.
+
+    Mutation-verify (ledger #145 step 4): reverting
+    `dgemma/kv_cache.py`'s V1 access from `len(payload.cache)` back to
+    `len(payload.cache.key_cache)` makes this test fail with the exact
+    `AttributeError` issue #178 reported, by name.
+    """
+
+    def test_real_dynamic_cache_passes_ingress(self, dgemma_model_factory):
+        from transformers.cache_utils import DynamicCache
+
+        from dgemma.types import KVCache, Provenance
+
+        model = dgemma_model_factory(num_hidden_layers=6, sliding_window=16)
+        text_config = model.model.config.get_text_config()
+        num_layers = text_config.num_hidden_layers
+
+        cache = DynamicCache()
+        shape = (1, 2, 4, 8)
+        for layer_idx in range(num_layers):
+            key_states = torch.zeros(shape, dtype=torch.bfloat16)
+            value_states = torch.zeros(shape, dtype=torch.bfloat16)
+            cache.update(key_states, value_states, layer_idx)
+
+        payload = KVCache(
+            cache=cache,
+            cumulative_length=tuple([4] * num_layers),
+            geometry=geometry_from_model(model),
+            provenance=Provenance(
+                minting_sequence=(1, 2, 3),
+                edit_script=(),
+                model_repo_id=model.repo_id,
+                tokenizer_fingerprint=tokenizer_fingerprint(model),
+            ),
+        )
+
+        # The exact call that crashed live in #178 (`dgemma/loop.py:1372` ->
+        # `dgemma/kv_cache.py:130`), against the real class it crashed on.
+        assert validate_kv_cache_ingress(payload, model) is None
 
 
 class TestV1LayerCountMismatch:
@@ -190,9 +243,9 @@ class TestV6SkippedOnEmptyLayerCache:
     """The legal degenerate case: a 0-hidden-layer model (`num_hidden_layers=0`)
     paired with a matching 0-layer cache passes V1 (`cache_layer_count ==
     expected_layer_count == 0`), which makes `cache_tensor` (line 191)
-    `None` — `payload.cache.key_cache[0] if cache_layer_count else None`
+    `None` — `payload.cache.layers[0].keys if cache_layer_count else None`
     short-circuits on the falsy `cache_layer_count`, never indexing an empty
-    `key_cache` list. V6's dtype/device block (192->212) is then skipped
+    `.layers` list. V6's dtype/device block (192->212) is then skipped
     entirely rather than raising or erroring, and ingress still completes
     (V5's orphan check still runs and still passes for a non-orphan
     provenance) — this is the documented skip-side behavior for the
@@ -201,7 +254,7 @@ class TestV6SkippedOnEmptyLayerCache:
 
     def test_zero_layer_cache_skips_v6_and_passes(self, synthetic_kv_cache_factory):
         model, cache = synthetic_kv_cache_factory(model_kwargs={"num_hidden_layers": 0})
-        assert len(cache.cache.key_cache) == 0
+        assert len(cache.cache.layers) == 0
         assert validate_kv_cache_ingress(cache, model) is None
 
 
@@ -223,7 +276,7 @@ class TestEncodeSequenceAlreadyBatchedIds:
         # `torch.as_tensor` sees it — `ids_tensor.dim() == 1` is False, so
         # the `unsqueeze(0)` on the next line must NOT fire.
         cache = encode_sequence(model, [[1, 2, 3]], into=None)
-        assert cache.cache.key_cache[0].shape[2] == 3
+        assert cache.cache.layers[0].keys.shape[2] == 3
 
 
 class TestOrderingIsDeterministic:
