@@ -1,4 +1,4 @@
-# ADR-CDG-018 — MCP as contract: topology remediation (primitives layer, directory morph)
+# ADR-CDG-019 — MCP as contract: topology remediation (primitives layer, directory morph)
 
 **Status**: proposed
 **Date**: 2026-07-23
@@ -204,7 +204,7 @@ else:
 ### Phase 6 — Documentation updates
 
 - [ ] **ARCHITECTURE.md**: replace layer diagram with four-layer model (see Decision section above); add import rules table; remove GAP (#137) citations since the gap is now closed by this ADR's implementation
-- [ ] **ADR-CDG-008**: add supersession note at top — "Section 1 framing ('peer surfaces') and directory structure decision (`surfaces/`) superseded by ADR-CDG-018. The core/surface seam rules (rules 1–7) remain in force."
+- [ ] **ADR-CDG-008**: add supersession note at top — "Section 1 framing ('peer surfaces') and directory structure decision (`surfaces/`) superseded by ADR-CDG-019. The core/surface seam rules (rules 1–7) remain in force."
 - [ ] **ROADMAP.md line 60**: replace "ComfyUI is one peer surface among others" with "ComfyUI consumes MCP primitives (the contract layer)"
 - [ ] **AGENTS.md**: update architecture diagram to show `mcp/` at top level, `consumers/comfyui/` under consumers; update Rule 2 reference from "surfaces/mcp/" to "mcp/primitives.py"
 - [ ] Update all docstring references in source files that mention `surfaces/mcp/` or `surfaces/comfyui/` paths (see blast radius below)
