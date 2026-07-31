@@ -4,7 +4,7 @@ This changelog starts at 0.3.0 — no retroactive entries for earlier releases.
 
 All notable user-facing changes to this project are documented here.
 
-## [Unreleased]
+## [0.4.1] - 2026-07-29
 ### Added
 - `install.py` — belt-and-braces post-install script (issue #147). ComfyUI's Extensions flow (Manager merged into core) honors it post-requirements: logs interpreter + installed dependency versions via `importlib.metadata`, re-checks each `requirements.txt` pin, and installs anything still missing into the correct interpreter. Diagnostic insurance for a broken fresh install, not a claimed root-cause fix — root cause on the affected box remains unpinned pending operator data (#147).
 - README install section split into Extensions/registry (automatic) vs. manual clone (explicit `pip install -r requirements.txt` fallback, Windows-portable and venv forms) paths.
