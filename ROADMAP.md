@@ -23,6 +23,51 @@ research rungs** (the liquid-phase program). Same letter, different ledgers.
 
 ---
 
+## Roadmap (recorded 2026-07-31, operator-set)
+
+**Version namespace note.** The "0.5.0 AutoRound INT4 release" attempt died
+unshipped — no version literal, tag, or registry artifact ever bore the name
+(post-mortem: [`docs/postmortems/2026-07-31-0.5.0.md`](docs/postmortems/2026-07-31-0.5.0.md)).
+The name is therefore reused below. 0.4.2 remains available as the stabilization
+tag.
+
+- **0.4.2 — stabilization patch (next ship).** The product-fix batch on the
+  reconciled trunk: #191 (VRAM guard reports the measured condition, not a menu),
+  #187 (encode device pin under whole-fit), #188 (live-view single mint), #169
+  (F0 test baseline), #151 (mcp<2.0 verification), #161 (CI actions bump), #175
+  (node explanations, draft tier), plus the Encode/Denoise visibility disposition
+  (operator call pending — the kv_cache door is inert until the seam bracket).
+  Ship discipline per #195 (gate integrity axis) and #196 (version/tag timing).
+- **0.5.0 — the refactor version.**
+  [ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md): decompose
+  `dgemma/loop.py` (~21.8k tokens) into responsibility modules — plan +
+  ARCHITECTURE-fate amendment on #129, awaiting ratification. Follow-on bracket,
+  separately scoped:
+  [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
+  topology remediation (#138), import-gate consolidation (#57).
+- **The seam (post-refactor).**
+  [ADR-CDG-012](decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md)
+  Phase 4: the Q-2 real-weights de-risk smoke, then the decoder genuinely driven
+  off injected caches (#62). #187 is a precondition; the fixed-seed encoder-text
+  sweep (byte-identical canvases predicted pre-Phase-4) is the liveness gate.
+  Then #47's known-provenance cache-perturbation experiments open.
+- **Research arc.** The capture instrument is complete (Tiers 0–2 + display
+  consumers, [ADR-CDG-014](decisions/adr-cdg-014-frame-capture-discipline.md)).
+  Queued: #186 (bf16-vs-INT4 trace comparison), #28 (flagship global-constraint
+  problems), #3 (mot-juste probe), #7 (commit-front morphology), #118
+  (hidden-state steering door), #115 /
+  [ADR-CDG-017](decisions/adr-cdg-017-neighborhood-remelt-kernel.md)
+  (neighborhood remelt). Gated on #59's E2E live preconditions and card tenancy.
+- **Standing constraint.** DGemma INT4 whole-fit (30 GiB floor) and the resident
+  llauncher chat model (~35 GiB) cannot coexist on the RTX-8000. Every live
+  bracket schedules its llauncher swap explicitly rather than discovering
+  occupancy at load time.
+
+The tracks below are the standing two-track view this near-term roadmap draws
+from; their per-rung status is maintained independently.
+
+---
+
 ## Track A — Engineering (seam work + topology)
 
 The 2026-07-13 Opus-tier architecture review (issue #35) returned
