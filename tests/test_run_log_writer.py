@@ -6,13 +6,16 @@ N+2 lines on a real `b"\\n"`, and (b) no line contains a literal `b"\\n"`
 (the escaped-newline trap `consumers/tally_audit.py`'s `_FRAME_DELIMITER`
 names as a real, observed failure this issue supersedes).
 
-Also covers: the writer's path-set (`debug_log_path` override) vs
-path-unset (`folder_paths` absent, and `folder_paths` present/mocked)
-branches, and `DGemmaRunLogWriter.write`'s `INPUT_IS_LIST=True` unwrap.
+Also covers: the two-widget directory contract (issue #189) —
+`debug_log_path` set (always a directory, `mkdir -p` + timestamped file
+inside) vs unset (`folder_paths` absent, and `folder_paths`
+present/mocked) branches — and `DGemmaRunLogWriter.write`'s
+`INPUT_IS_LIST=True` unwrap.
 """
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import torch
@@ -156,25 +159,36 @@ class TestWriteRunLogByteLevelRoundTrip:
 
 
 class TestResolveOutputPath:
-    """Path-set vs. path-unset branches (coverage requirement, ratified
-    plan §Coverage: "the writer's write routine (path-set vs path-unset)")."""
+    """The two-widget directory contract (issue #189): `debug_log_path` is
+    always a DIRECTORY, `filename_prefix` is always the FILE name. No
+    `is_dir()` disambiguation survives — every non-empty `debug_log_path`
+    is created (`mkdir -p`) and written into, deterministically."""
 
-    def test_debug_log_path_override_wins_outright(self, tmp_path):
-        override = tmp_path / "explicit.jsonl"
-        resolved = _resolve_output_path("ignored_prefix", str(override))
-        assert resolved == override
+    def test_nonexistent_deep_directory_is_created_and_file_lands_inside(self, tmp_path):
+        """A multi-level nonexistent directory is created (parents=True
+        exercised) and the timestamped file resolves inside it."""
+        target_dir = tmp_path / "does" / "not" / "exist" / "yet"
+        assert not target_dir.exists()
 
-    def test_debug_log_path_existing_directory_appends_filename(self, tmp_path):
-        """When debug_log_path points to an existing directory, append
-        {filename_prefix}_{timestamp}.jsonl — timestamped so repeated runs
-        don't collide (matching the ComfyUI fallback path)."""
+        resolved = _resolve_output_path("my_run", str(target_dir))
+
+        assert target_dir.is_dir()
+        assert resolved.parent == target_dir
+        assert resolved.name.startswith("my_run_")
+        assert resolved.suffix == ".jsonl"
+
+    def test_existing_directory_appends_timestamped_filename(self, tmp_path):
+        """#124/#126 regression guard: pointing debug_log_path at an
+        existing directory appends {filename_prefix}_{timestamp}.jsonl
+        inside it — same observable behavior as before this fix."""
         resolved = _resolve_output_path("my_run", str(tmp_path))
         assert resolved.parent == tmp_path
         assert resolved.name.startswith("my_run_")
         assert resolved.suffix == ".jsonl"
 
-    def test_debug_log_path_directory_repeated_runs_produce_unique_files(self, tmp_path):
-        """Two calls with the same directory + prefix produce different paths.
+    def test_existing_directory_repeated_runs_produce_unique_files(self, tmp_path):
+        """Two calls with the same directory + prefix produce different
+        paths (#124/#126 regression guard) — no overwrite across runs.
         Mock time.strftime to simulate distinct seconds."""
         from unittest.mock import patch
         timestamps = iter(["20260722T150000", "20260722T150001"])
@@ -186,26 +200,32 @@ class TestResolveOutputPath:
         assert path_a.name == "my_run_20260722T150000.jsonl"
         assert path_b.name == "my_run_20260722T150001.jsonl"
 
-    def test_debug_log_path_symlink_to_directory_appends_filename(self, tmp_path):
-        """Symlinks to directories are followed by Path.is_dir() — the
-        path keeps the symlink (which resolves at write time) and appends
-        a timestamped filename (same as a real directory)."""
-        dir_target = tmp_path / "real_dir"
-        dir_target.mkdir()
-        symlink = tmp_path / "link_to_dir"
-        symlink.symlink_to(dir_target)
-        resolved = _resolve_output_path("my_run", str(symlink))
-        # The path uses the symlink (not the resolved target) — it resolves
-        # through the symlink when open() is called in write_run_log.
-        assert resolved.name.startswith("my_run_")
-        assert resolved.suffix == ".jsonl"
+    def test_path_that_looks_like_a_file_is_still_treated_as_a_directory(self, tmp_path):
+        """A debug_log_path ending in `.jsonl` is a directory by contract,
+        deterministically — the exact #189 field failure. No is_dir()
+        disambiguation: the "file-looking" path is created as a directory
+        and the real file lands inside it, named from filename_prefix."""
+        file_looking_path = tmp_path / "looks_like_a_file.jsonl"
+        assert not file_looking_path.exists()
 
-    def test_no_override_and_no_folder_paths_raises(self, monkeypatch):
+        resolved = _resolve_output_path("my_run", str(file_looking_path))
+
+        assert file_looking_path.is_dir()
+        assert resolved.parent == file_looking_path
+        assert resolved.name.startswith("my_run_")
+        assert resolved != file_looking_path
+
+    def test_empty_debug_log_path_and_no_folder_paths_raises(self, monkeypatch):
+        """Empty default keeps the ComfyUI output-directory convention
+        branch unchanged: no folder_paths, no override -> loud failure."""
         monkeypatch.setattr("surfaces.comfyui.run_log_writer.folder_paths", None)
         with pytest.raises(RuntimeError, match="no ComfyUI folder_paths available"):
             _resolve_output_path("prefix", "")
 
-    def test_no_override_resolves_via_folder_paths_when_present(self, monkeypatch, tmp_path):
+    def test_empty_debug_log_path_resolves_via_folder_paths_when_present(self, monkeypatch, tmp_path):
+        """Empty default -> convention branch unchanged: resolves through
+        folder_paths.get_save_image_path, untouched by the directory-
+        contract rewrite."""
         class _FakeFolderPaths:
             @staticmethod
             def get_output_directory():
@@ -220,6 +240,37 @@ class TestResolveOutputPath:
         assert resolved.parent == tmp_path
         assert resolved.name.startswith("dgemma_run_log_00005_")
         assert resolved.suffix == ".jsonl"
+
+    def test_uncreatable_directory_fails_loud(self, tmp_path):
+        """An unwritable parent (no permission to create a subdirectory
+        under it) fails loud and actionable — never silently degrades to
+        writing elsewhere."""
+        unwritable_parent = tmp_path / "unwritable_parent"
+        unwritable_parent.mkdir()
+        unwritable_parent.chmod(0o444)
+        target_dir = unwritable_parent / "child_dir"
+
+        try:
+            with pytest.raises(RuntimeError, match="could not be created as a directory"):
+                _resolve_output_path("my_run", str(target_dir))
+        finally:
+            # Restore permissions so pytest's tmp_path cleanup can remove it.
+            unwritable_parent.chmod(0o755)
+
+    def test_uncreatable_directory_error_chains_the_original_oserror(self, tmp_path):
+        """The RuntimeError is actionable AND traceable — it chains the
+        underlying OSError via `raise ... from exc`, not swallowed."""
+        unwritable_parent = tmp_path / "unwritable_parent2"
+        unwritable_parent.mkdir()
+        unwritable_parent.chmod(0o444)
+        target_dir = unwritable_parent / "child_dir"
+
+        try:
+            with pytest.raises(RuntimeError) as exc_info:
+                _resolve_output_path("my_run", str(target_dir))
+            assert isinstance(exc_info.value.__cause__, OSError)
+        finally:
+            unwritable_parent.chmod(0o755)
 
 
 class TestDGemmaRunLogWriterNode:
@@ -242,7 +293,7 @@ class TestDGemmaRunLogWriterNode:
     def test_write_unwraps_list_shaped_inputs_and_writes_the_file(self, tmp_path):
         trace = _trace([_frame(0)])
         node = DGemmaRunLogWriter()
-        override = tmp_path / "node_written.jsonl"
+        override_dir = tmp_path / "node_written_dir"
 
         (returned_path,) = node.write(
             canvas_trace=[trace],
@@ -250,12 +301,14 @@ class TestDGemmaRunLogWriterNode:
             frames=["decoded text"],
             canvas_state=[_state()],
             filename_prefix=["prefix"],
-            debug_log_path=[str(override)],
+            debug_log_path=[str(override_dir)],
         )
 
-        assert returned_path == str(override)
-        assert override.exists()
-        lines = override.read_text().splitlines()
+        returned = Path(returned_path)
+        assert returned.parent == override_dir
+        assert returned.name.startswith("prefix_")
+        assert returned.exists()
+        lines = returned.read_text().splitlines()
         assert len(lines) == 1 + 1 + 1  # header + 1 frame + final
 
     def test_write_defaults_filename_prefix_and_debug_log_path_when_empty_lists(self, monkeypatch, tmp_path):

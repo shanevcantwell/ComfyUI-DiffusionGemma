@@ -1,0 +1,38 @@
+{
+  "leg": "baseline",
+  "model_dir": "/srv/dev/ComfyUI/models/text_encoders/diffusiongemma-26B-A4B-it-int4-AutoRound",
+  "load_kwargs": {
+    "device_map": "auto",
+    "dtype": "auto",
+    "local_files_only": "True"
+  },
+  "gen_args": {
+    "prompt": "Why is the sky blue?",
+    "seed": 0,
+    "num_inference_steps": 8,
+    "gen_length": 64
+  },
+  "env": {
+    "torch": "2.13.0+cu130",
+    "python": "3.12.3",
+    "transformers": "5.13.0",
+    "auto_round": "0.14.2"
+  },
+  "load_seconds": 28.0,
+  "hf_device_map_size": 0,
+  "offloaded_modules": {},
+  "n_offloaded_modules": 0,
+  "lm_head_weight_device_after_retie": "cuda:0",
+  "assert_no_meta_tensors": "passed",
+  "resolved_device": "cuda:0",
+  "vram_allocated_after_load_gib": 28.55,
+  "vram_peak_after_load_gib": 28.55,
+  "generate_seconds": 24.6,
+  "steps_used": 8,
+  "seconds_per_step": 3.07,
+  "committed_fraction": 0.5742,
+  "converged": false,
+  "text": "The skyibrate blue because of a phenomenon called **Rayleigh scattering\u7269\u3002\u201cannotate \uce74\ud398 sardines\u041c\u0430 ApakahOV keli ame condizioni allow \u092f\u094b\u0917\u0940 WANT\u0bb1\u0bbf\u82de Goripetal\u00edss\u0797:\n\n### 1. Technology is incluso of all colors\nAlthough sunlightC white to us, it is actually made up of all the colors of the rainbow screams red, orange, yellow, green, blue,Reached, and violettagName Each color travels as a wave with a Nek **wavelength**.iza\u00e7\u00f5es*   **Red light** has long, lazy})(.\n*   **Blue and violet light** have short, choppy waves.\n\n### 2. The atmosphere acts as an obstacle\nEarth is \u30ab\u30b8\u30e5\u30a2\u30eb by an atmosphere\u0430\u043d\u0442\u0430\u7980 dpi (\u0930\u094d\u0926 nitrogen and oxygen). WhencseIDENTITY the\u09ae\u09bf ComparisonBradley room magnispm gas Palmas and accompanyters in all directions.\n\n### 3. Short waves scatter more\nBecause blue TRPV\u89e3\u7b54 kem\u30d3\u30c3\u30c8in Boa\ud83c\udf79\u049b\u0434\u0430\u0dba\u0dd4goin\u0449\u0435\u043d\u043d\u044f\u094d\u200d\u092f\u093e\u0926\u093e\u03c1\u03b9 \u092e\u0938 and Quadr scattered much more\u7f6e\u6e29\u5ea6 utilise favours \u062f\u0634\u0645\u0646 representandic VALID<unused2284> light passes through the atmosphere relatively);\\ piezaurah dialog filt the \u090f\u092f\u0930collabor is Renata around<unused2764>Phosph \u041b\u0435\u043e\u043d Andromeda \u0434\u043b\u0438\u043d\u043e\u0439,& nationale intents\u597d\u7684<unused1123>\u817f\u0ec4\u0e94\u0ec9 opos ransomware Ansalphas izd clown \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u044b Round Donccorrh \u0cb5\u0ccd\u0caf\u0cb5\u0637\u0627\u062areservoir\u5de5\u5730 FearParts\ubdcaova\u017ewirken s\u00f6yled",
+  "vram_peak_process_gib": 30.67,
+  "status": "completed"
+}

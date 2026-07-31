@@ -1,0 +1,25 @@
+{
+  "leg": "forced-split",
+  "model_dir": "/srv/dev/ComfyUI/models/text_encoders/diffusiongemma-26B-A4B-it-int4-AutoRound",
+  "load_kwargs": {
+    "device_map": "auto",
+    "dtype": "auto",
+    "local_files_only": "True",
+    "max_memory": "{0: '24GiB', 'cpu': '40GiB'}"
+  },
+  "gen_args": {
+    "prompt": "Why is the sky blue?",
+    "seed": 0,
+    "num_inference_steps": 8,
+    "gen_length": 64
+  },
+  "env": {
+    "torch": "2.13.0+cu130",
+    "python": "3.12.3",
+    "transformers": "5.13.0",
+    "auto_round": "0.14.2"
+  },
+  "error": "ValueError: weight is on the meta device, we need a `value` to put in on 0.",
+  "traceback": "Traceback (most recent call last):\n  File \"/tmp/wt-183/docs/experiments/2026-07-30-autoround-unified-path-split-check/probe_split_check.py\", line 151, in main\n    model = DiffusionGemmaForBlockDiffusion.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/transformers/modeling_utils.py\", line 4388, in from_pretrained\n    accelerate_dispatch(model, hf_quantizer, device_map, offload_folder, disk_offload_index, offload_buffers)\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/transformers/integrations/accelerate.py\", line 404, in accelerate_dispatch\n    dispatch_model(model, **device_map_kwargs)\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/accelerate/big_modeling.py\", line 432, in dispatch_model\n    attach_align_device_hook_on_blocks(\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/accelerate/hooks.py\", line 707, in attach_align_device_hook_on_blocks\n    attach_align_device_hook_on_blocks(\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/accelerate/hooks.py\", line 665, in attach_align_device_hook_on_blocks\n    add_hook_to_module(module, hook)\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/accelerate/hooks.py\", line 183, in add_hook_to_module\n    module = hook.init_hook(module)\n             ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/accelerate/hooks.py\", line 305, in init_hook\n    set_module_tensor_to_device(module, name, self.execution_device, tied_params_map=self.tied_params_map)\n  File \"/tmp/smoke-050/venv/lib/python3.12/site-packages/accelerate/utils/modeling.py\", line 299, in set_module_tensor_to_device\n    raise ValueError(f\"{tensor_name} is on the meta device, we need a `value` to put in on {device}.\")\nValueError: weight is on the meta device, we need a `value` to put in on 0.\n",
+  "status": "errored"
+}

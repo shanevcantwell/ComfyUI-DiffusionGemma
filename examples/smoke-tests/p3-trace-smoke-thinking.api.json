@@ -1,7 +1,6 @@
 {
   "72": {
     "inputs": {
-      "repo_id": "google/diffusiongemma-26B-A4B-it",
       "quant": "none"
     },
     "class_type": "DGemmaLoader",
@@ -59,7 +58,9 @@
       "canvas_trace": [
         "73",
         2
-      ]
+      ],
+      "mode": "commit",
+      "cell_px": 6
     },
     "class_type": "DGemmaTrace",
     "_meta": {
