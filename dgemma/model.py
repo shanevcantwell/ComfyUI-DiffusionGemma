@@ -35,6 +35,8 @@ to `("none", "autoround")` — see issue #128.
 from __future__ import annotations
 
 import contextlib
+import os
+from dataclasses import dataclass
 from typing import Callable
 
 import torch
@@ -510,6 +512,86 @@ def _assert_no_meta_tensors(model) -> None:
 AUTOROUND_MIN_FREE_VRAM_BYTES = 30 * 1024**3
 
 
+@dataclass(frozen=True)
+class GpuMemoryHolder:
+    """One process NVML reports as holding GPU memory on the current device —
+    the measured unit issue #191's guard message is built from. `is_self` is
+    this process's own pid (`os.getpid()`), so a prior in-process DGemma load
+    is identified distinctly from a foreign tenant, per the issue's acceptance
+    criteria."""
+
+    pid: int
+    name: str
+    used_mib: float
+    is_self: bool
+
+
+def _gpu_memory_holders(device_index: int) -> tuple[list[GpuMemoryHolder], str | None]:
+    """Return `(holders, unavailable_reason)` for `device_index` via NVML.
+
+    `holders` lists every process NVML's `nvmlDeviceGetComputeRunningProcesses`
+    reports for the device (pid, process name, MiB used, self-vs-foreign),
+    empty when NVML enumerates but finds no compute processes. When
+    enumeration cannot be performed at all, `holders` is `[]` and
+    `unavailable_reason` names why (no NVML binding installed, driver not
+    loaded, or any other NVML-surfaced error) — the caller's job is to say so
+    honestly rather than fall back to speculative cause-prose (issue #191).
+
+    Uses `pynvml` (the binding module `torch.cuda.list_gpu_processes` itself
+    depends on — `nvidia-ml-py`'s installed package also imports under this
+    name) directly rather than adding a new pack dependency: this guard reads
+    exactly what's already on the machine to drive `torch.cuda`'s own
+    process-listing helper, and degrades honestly when it is absent.
+    """
+    try:
+        import pynvml
+    except ImportError as exc:
+        return [], f"pynvml not installed ({exc})"
+
+    try:
+        pynvml.nvmlInit()
+    except Exception as exc:  # noqa: BLE001 - any NVML init failure is unavailability
+        return [], f"NVML init failed ({exc})"
+
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+        procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    except Exception as exc:  # noqa: BLE001 - any NVML query failure is unavailability
+        return [], f"NVML process enumeration failed ({exc})"
+    finally:
+        with contextlib.suppress(Exception):
+            pynvml.nvmlShutdown()
+
+    self_pid = os.getpid()
+    holders = []
+    for proc in procs:
+        try:
+            proc_name = pynvml.nvmlSystemGetProcessName(proc.pid)
+            if isinstance(proc_name, bytes):
+                proc_name = proc_name.decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 - a name lookup failure still reports the pid/MiB
+            proc_name = "<name unavailable>"
+        used_mib = (proc.usedGpuMemory or 0) / (1024 * 1024)
+        holders.append(
+            GpuMemoryHolder(pid=proc.pid, name=proc_name, used_mib=used_mib, is_self=proc.pid == self_pid)
+        )
+    return holders, None
+
+
+def _format_gpu_memory_holders(holders: list[GpuMemoryHolder], unavailable_reason: str | None) -> str:
+    """Render the measured-holder report line the guard message includes —
+    the enumeration itself, never a hypothesis about it."""
+    if unavailable_reason is not None:
+        return f"occupants unmeasurable: {unavailable_reason}"
+    if not holders:
+        return "no per-process GPU memory holders reported"
+    lines = []
+    for holder in holders:
+        tag = "this process" if holder.is_self else "foreign process"
+        lines.append(f"pid {holder.pid} ({holder.name}, {tag}): {holder.used_mib:.0f} MiB")
+    return "; ".join(lines)
+
+
 def _assert_autoround_vram_precondition() -> None:
     """FAIL LOUD, pre-load, when the card cannot hold the AutoRound INT4
     checkpoint whole (issue #183 — the split-fails probe outcome).
@@ -527,21 +609,31 @@ def _assert_autoround_vram_precondition() -> None:
 
     Skips silently when CUDA is unavailable — `load_model`'s existing
     post-load CUDA check owns that refusal with its own canonical message.
+
+    Issue #191: the message states the ONE measured condition — required
+    floor, measured free, and the measured per-process holder list (NVML,
+    self vs. foreign) — with at most one remedy line derived from that
+    measured state. No speculative cause-prose, no remedy menu; when NVML
+    can't enumerate holders the message says so rather than guessing.
     """
     if not torch.cuda.is_available():
         return
     free_bytes, _total_bytes = torch.cuda.mem_get_info()
     if free_bytes < AUTOROUND_MIN_FREE_VRAM_BYTES:
+        device_index = torch.cuda.current_device()
+        holders, unavailable_reason = _gpu_memory_holders(device_index)
+        holder_report = _format_gpu_memory_holders(holders, unavailable_reason)
+        remedy = (
+            "unload the foreign process(es) named above and retry"
+            if any(not h.is_self for h in holders)
+            else "free VRAM and retry"
+        )
         raise RuntimeError(
-            f"quant='autoround' needs the whole INT4 checkpoint resident on one "
+            "quant='autoround' needs the whole INT4 checkpoint resident on one "
             f"GPU: {AUTOROUND_MIN_FREE_VRAM_BYTES / 1024**3:.1f} GiB free VRAM "
-            f"required, {free_bytes / 1024**3:.1f} GiB free now. A CPU/GPU split "
-            "of the AutoRound INT4 checkpoint cannot load (accelerate dispatch "
-            "crashes on the quantized weights — see issue #183 and "
-            "docs/experiments/2026-07-30-autoround-unified-path-split-check/). "
-            "Remedy: free VRAM (unload other GPU tenants) and retry, or use "
-            "quant='none' — the bf16 path's CPU spill is supported and "
-            "field-proven."
+            f"required, {free_bytes / 1024**3:.1f} GiB free now. "
+            f"Measured GPU memory holders (device {device_index}): {holder_report}. "
+            f"Remedy: {remedy}."
         )
 
 

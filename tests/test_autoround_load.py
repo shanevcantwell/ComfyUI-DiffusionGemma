@@ -16,6 +16,7 @@ Cross-references:
 """
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -81,6 +82,79 @@ class FakeProcessor:
     """Stands in for `AutoProcessor.from_pretrained`'s return value."""
 
 
+class _FakeNvmlProcess:
+    """Stands in for the per-process struct
+    `nvmlDeviceGetComputeRunningProcesses` returns: `.pid` + `.usedGpuMemory`
+    (bytes) are the two fields `_gpu_memory_holders` (dgemma/model.py,
+    issue #191) reads off each entry."""
+
+    def __init__(self, pid: int, used_gpu_memory: int):
+        self.pid = pid
+        self.usedGpuMemory = used_gpu_memory
+
+
+class FakePynvmlModule:
+    """A faked `pynvml` module (issue #191's "faked NVML layer" test
+    requirement) — installed into `sys.modules["pynvml"]` so
+    `_gpu_memory_holders`'s local `import pynvml` resolves to this fake
+    instead of touching real hardware. `procs`: the list of `_FakeNvmlProcess`
+    `nvmlDeviceGetComputeRunningProcesses` should report; `names`: a
+    `{pid: name}` map `nvmlSystemGetProcessName` looks up.
+    """
+
+    def __init__(self, procs: "list[_FakeNvmlProcess]", names: "dict[int, str]"):
+        self._procs = procs
+        self._names = names
+        self.init_called = False
+        self.shutdown_called = False
+
+    def nvmlInit(self):
+        self.init_called = True
+
+    def nvmlShutdown(self):
+        self.shutdown_called = True
+
+    def nvmlDeviceGetHandleByIndex(self, index: int):
+        return index
+
+    def nvmlDeviceGetComputeRunningProcesses(self, handle):
+        return self._procs
+
+    def nvmlSystemGetProcessName(self, pid: int):
+        return self._names[pid]
+
+
+class RaisingFakePynvmlModule:
+    """A faked `pynvml` module whose `nvmlInit`/enumeration calls raise —
+    stands in for a real driver-not-loaded/enumeration failure so the guard's
+    honest-degradation path (issue #191: "occupants unmeasurable: <reason>")
+    is exercised without needing an actual broken driver."""
+
+    def __init__(self, raise_at: str, error: Exception):
+        self._raise_at = raise_at
+        self._error = error
+
+    def nvmlInit(self):
+        if self._raise_at == "init":
+            raise self._error
+
+    def nvmlShutdown(self):
+        pass
+
+    def nvmlDeviceGetHandleByIndex(self, index: int):
+        if self._raise_at == "handle":
+            raise self._error
+        return index
+
+    def nvmlDeviceGetComputeRunningProcesses(self, handle):
+        if self._raise_at == "enumerate":
+            raise self._error
+        return []
+
+    def nvmlSystemGetProcessName(self, pid: int):
+        return "unused"
+
+
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
@@ -101,7 +175,12 @@ def _install_fakes(monkeypatch, captured: dict, hf_device_map=None, raise_on=Non
     outcome) reads it on CUDA-available hosts, and on CPU-only CI the
     `is_available` pin above would otherwise send the precondition into a
     real `mem_get_info` call that raises. Tests that specifically exercise
-    the precondition override this pin with their own values."""
+    the precondition override this pin with their own values.
+
+    Also pins `torch.cuda.current_device` to `0` (issue #191): the
+    precondition's failure path reads this to pick which NVML device index
+    to enumerate holders for; a real CUDA host's actual index doesn't matter
+    to any test here, only that the call doesn't hit real hardware state."""
 
     def fake_from_pretrained(repo_id, **kwargs):
         if raise_on == "model":
@@ -130,6 +209,7 @@ def _install_fakes(monkeypatch, captured: dict, hf_device_map=None, raise_on=Non
         "dgemma.model.torch.cuda.mem_get_info",
         lambda *a, **k: (48 * 1024**3, 48 * 1024**3),
     )
+    monkeypatch.setattr("dgemma.model.torch.cuda.current_device", lambda: 0)
 
 
 # ---------------------------------------------------------------------------
@@ -328,12 +408,18 @@ class TestAutoroundVramPrecondition:
     fail-loud pre-load VRAM check for quant='autoround' (issue #183 —
     shipped because the forced-split probe proved a CPU/GPU split of the
     INT4 checkpoint crashes inside from_pretrained; see docs/experiments/
-    2026-07-30-autoround-unified-path-split-check/)."""
+    2026-07-30-autoround-unified-path-split-check/).
+
+    Issue #191: the failure message reports the ONE measured condition
+    (required floor, measured free, measured per-process holder list) with
+    at most one remedy line derived from that measured state — never a
+    menu of hypothetical causes/remedies. These tests fake the NVML layer
+    (`sys.modules["pynvml"]`) rather than touching real hardware."""
 
     def test_autoround_precheck_rejects_insufficient_vram(self, monkeypatch):
         """With too little free VRAM, quant='autoround' raises RuntimeError
         BEFORE from_pretrained (never dispatches the split that cannot
-        load), naming required and available bytes and the remedy."""
+        load), naming required and available bytes."""
         from dgemma.model import AUTOROUND_MIN_FREE_VRAM_BYTES
 
         captured: dict = {}
@@ -343,6 +429,8 @@ class TestAutoroundVramPrecondition:
             "dgemma.model.torch.cuda.mem_get_info",
             lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
         )
+        fake_pynvml = FakePynvmlModule(procs=[], names={})
+        monkeypatch.setitem(sys.modules, "pynvml", fake_pynvml)
 
         with pytest.raises(RuntimeError) as excinfo:
             load_model(repo_id=None, quant="autoround")
@@ -353,8 +441,118 @@ class TestAutoroundVramPrecondition:
         # Names both numbers...
         assert f"{AUTOROUND_MIN_FREE_VRAM_BYTES / 1024**3:.1f}" in message
         assert "8.0" in message
-        # ...and the remedy.
-        assert "quant='none'" in message
+        # ...and exactly one remedy line, not a menu of hypothetical fixes.
+        assert message.count("Remedy:") == 1
+        assert "no per-process GPU memory holders reported" in message
+        # No speculative cause-prose survives (the pre-#191 message named a
+        # CPU/GPU split crash and issue #183 by number as a *possible*
+        # cause; the new message states only the measured condition).
+        assert "docs/experiments" not in message
+        assert "#183" not in message
+
+    def test_autoround_precheck_reports_measured_state(self, monkeypatch):
+        """The message states the measured floor/free numbers and the
+        measured holder report — built from the faked NVML layer's actual
+        return values, not prose."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
+        )
+        fake_pynvml = FakePynvmlModule(
+            procs=[_FakeNvmlProcess(pid=4242, used_gpu_memory=1402 * 1024 * 1024)],
+            names={4242: "/usr/bin/llama-server"},
+        )
+        monkeypatch.setitem(sys.modules, "pynvml", fake_pynvml)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            load_model(repo_id=None, quant="autoround")
+
+        message = str(excinfo.value)
+        assert fake_pynvml.init_called
+        assert fake_pynvml.shutdown_called
+        assert "4242" in message
+        assert "llama-server" in message
+        assert "1402" in message
+
+    def test_autoround_precheck_identifies_self_vs_foreign(self, monkeypatch):
+        """A holder whose pid matches this process's own (`os.getpid()`) is
+        reported as this process; a different pid is reported as foreign —
+        the guard's own prior in-process load is distinguished from a
+        foreign tenant, per the issue's acceptance criteria."""
+        import os
+
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
+        )
+        own_pid = os.getpid()
+        foreign_pid = own_pid + 1
+        fake_pynvml = FakePynvmlModule(
+            procs=[
+                _FakeNvmlProcess(pid=own_pid, used_gpu_memory=5 * 1024 * 1024 * 1024),
+                _FakeNvmlProcess(pid=foreign_pid, used_gpu_memory=2 * 1024 * 1024 * 1024),
+            ],
+            names={own_pid: "python3", foreign_pid: "some-other-process"},
+        )
+        monkeypatch.setitem(sys.modules, "pynvml", fake_pynvml)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            load_model(repo_id=None, quant="autoround")
+
+        message = str(excinfo.value)
+        assert f"pid {own_pid}" in message
+        assert "this process" in message
+        assert f"pid {foreign_pid}" in message
+        assert "foreign process" in message
+        # A foreign tenant is present: the derived remedy names unloading it,
+        # not the generic "free VRAM" line.
+        assert "unload the foreign process" in message
+
+    def test_autoround_precheck_degrades_honestly_without_nvml(self, monkeypatch):
+        """When `pynvml` is not importable, the message says occupants are
+        unmeasurable and names why — it does not fall back to the old
+        hypothetical cause/remedy prose."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
+        )
+        monkeypatch.setitem(sys.modules, "pynvml", None)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            load_model(repo_id=None, quant="autoround")
+
+        message = str(excinfo.value)
+        assert "occupants unmeasurable" in message
+        assert "docs/experiments" not in message
+        assert "CPU/GPU split" not in message
+
+    def test_autoround_precheck_degrades_honestly_on_nvml_init_failure(self, monkeypatch):
+        """A `pynvml` that imports but fails during `nvmlInit` (e.g. driver
+        not loaded) also reports unmeasurable-with-reason, not a crash and
+        not a fallback to hypothetical prose."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
+        )
+        fake_pynvml = RaisingFakePynvmlModule(
+            raise_at="init", error=RuntimeError("driver not loaded")
+        )
+        monkeypatch.setitem(sys.modules, "pynvml", fake_pynvml)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            load_model(repo_id=None, quant="autoround")
+
+        message = str(excinfo.value)
+        assert "occupants unmeasurable" in message
+        assert "driver not loaded" in message
 
     def test_autoround_precheck_passes_with_sufficient_vram(self, monkeypatch):
         """With enough free VRAM the precondition is silent and the load
