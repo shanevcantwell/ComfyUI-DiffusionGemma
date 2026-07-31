@@ -20,15 +20,15 @@ order (the in-graph "flipbook": noise -> coherent text). Decoding is
 `dgemma.loop.decode_frames` over `canvas_trace.frames`, called here rather
 than inside `run_diffusion` (ADR-CDG-003: the engine's 3-tuple return stays
 unchanged; this is a node-boundary derivation from a value `run_diffusion`
-already returns). `sample()` builds a closure over
-`PromptServer.instance.send_sync` and hands it to `run_diffusion` as
-`on_frame` — the ADR-CDG-003-respecting way to let a live view exist without
-`dgemma/loop.py` ever importing ComfyUI. `PromptServer` is imported lazily,
-inside `sample()`, guarded so its absence (the normal pytest/headless
-condition — this pack has no `comfy`/`server` dependency, see
-`tests/test_seam.py`) degrades to a no-op live push rather than crashing the
-sampler; everything else (`text`, `canvas_state`, `canvas_trace`) proceeds
-unchanged either way.
+already returns). `sample()` hands `live_view.build_on_frame(unique_id)`
+(issue #188 ONE-MINT fix — previously a closure built inline here) to
+`run_diffusion` as `on_frame` — the ADR-CDG-003-respecting way to let a live
+view exist without `dgemma/loop.py` ever importing ComfyUI. `PromptServer`
+is imported lazily, inside that shared closure, guarded so its absence (the
+normal pytest/headless condition — this pack has no `comfy`/`server`
+dependency, see `tests/test_seam.py`) degrades to a no-op live push rather
+than crashing the sampler; everything else (`text`, `canvas_state`,
+`canvas_trace`) proceeds unchanged either way.
 
 A fifth output, `frames_image` (issue #21, reworked from a standalone
 `DGemmaFlipbook` node into a second sampler output): the same decoded
@@ -72,8 +72,10 @@ ADR-CDG-001). This node already holds `model.processor` and already decodes
 `DGEMMA_MODEL` / `DGEMMA_CANVAS_STATE` / `DGEMMA_CANVAS_TRACE` socket-type
 strings come from the `socket_types` mint module (#35 R2, ADR-CDG-008 Phase
 1) — no inline `DGEMMA_*` literal at this site; see
-`surfaces/comfyui/socket_types.py`. `DGEMMA_STEP_EVENT` below is NOT part of
-that mint — it's a WebSocket event name, not a ComfyUI socket type.
+`surfaces/comfyui/socket_types.py`. The live-view event name and the hidden-
+input capability sentinel come from `surfaces/comfyui/live_view.py` (issue
+#188 ONE-MINT fix) — the event name is not a ComfyUI socket type either, so
+it stays out of the `socket_types` mint, same as before this fix.
 
 **Named trap (plan.md Risks): this MUST NOT touch `comfy.utils.ProgressBar`'s
 `preview=` slot.** That path is structurally image-typed downstream
@@ -101,7 +103,7 @@ widening the core's `_build_result` signature for a downstream-only value.
 **Cancellation wiring (issue #140 sampler half, closes #38's surface gap):**
 `_build_should_cancel` connects `comfy.model_management.processing_interrupted()`
 to `run_diffusion`'s pre-existing `should_cancel` parameter, the same lazy-import
-shape `_build_on_frame` already uses for `PromptServer` — `comfy` is imported
+shape `live_view.build_on_frame` already uses for `PromptServer` — `comfy` is imported
 inside the closure, never at module top, so this module keeps importing (and
 `sample()` keeps running) with zero ComfyUI present. The engine-side seam
 (`dgemma/composite.py`'s `_CancellationParticipant`, `dgemma/loop.py`'s
@@ -137,6 +139,7 @@ if __package__ and __package__.count(".") >= 2:
         run_diffusion,
     )
     from .emission import build_sampler_shaped_outputs
+    from .live_view import LIVE_VIEW_HIDDEN_INPUT, build_on_frame
     from .socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
@@ -155,20 +158,13 @@ else:
         run_diffusion,
     )
     from surfaces.comfyui.emission import build_sampler_shaped_outputs
+    from surfaces.comfyui.live_view import LIVE_VIEW_HIDDEN_INPUT, build_on_frame
     from surfaces.comfyui.socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
         DGEMMA_MODEL,
         DGEMMA_RUN_CONFIG,
     )
-
-# Event name for the live per-step push (plan.md Phase 3 (a)). Namespaced
-# under the pack's own prefix — `send_sync`'s receiving side has no
-# event-name whitelist (`loose-ends.md`), so any string works, but a
-# collision with another pack's event name would silently cross-wire two
-# unrelated `web/` extensions' `addEventListener` handlers.
-DGEMMA_STEP_EVENT = "dgemma.sampler.step"
-
 
 def _build_should_cancel():
     """Build the cancellation predicate handed to `run_diffusion` as
@@ -178,13 +174,13 @@ def _build_should_cancel():
     isolation (`tests/test_run_diffusion_cancel.py`,
     `tests/test_step_end_composite.py`) — this closure is ONLY the surface
     connection ADR-CDG-003 reserves for this layer: `dgemma/loop.py` stays
-    ComfyUI-agnostic and never imports `comfy`, exactly like `_build_on_frame`
-    above.
+    ComfyUI-agnostic and never imports `comfy`, exactly like
+    `live_view.build_on_frame` (imported above).
 
     `comfy.model_management` is imported lazily, inside the returned closure
     (not at module top, and not even inside this builder) — same rationale
-    as `_build_on_frame`'s lazy `from server import PromptServer`: this
-    module must keep importing with zero ComfyUI present (the normal
+    as `live_view.build_on_frame`'s lazy `from server import PromptServer`:
+    this module must keep importing with zero ComfyUI present (the normal
     pytest/headless condition, `tests/test_seam.py`,
     `tests/test_dual_context_import.py`). Unlike the display-only `on_frame`
     push, a failure here degrades to "no cancellation wiring" (`False`) —
@@ -215,56 +211,6 @@ def _build_should_cancel():
             return False
 
     return should_cancel
-
-
-def _build_on_frame(unique_id):
-    """Build the live-push closure handed to `run_diffusion` as `on_frame`.
-
-    Lives here, not in `dgemma/loop.py` (ADR-CDG-003): this is the one place
-    in the pack allowed to import ComfyUI server infrastructure. `PromptServer`
-    is imported lazily inside the closure (not at module top) so this module
-    stays importable — and the sampler still runs — with no ComfyUI process
-    alive (the normal pytest condition); a real live session is the only
-    context where the import succeeds and the push actually fires.
-
-    Display must never kill generation (review finding, 2026-07-05): the
-    whole push — import, instance lookup, `send_sync` — is guarded, and any
-    failure (no server, serialization error, dropped websocket) is logged
-    and swallowed rather than propagated. The guard lives HERE, not in
-    `dgemma/loop.py`'s hook site, deliberately: the engine's `on_frame`
-    contract propagates callback exceptions (see `_FrameCollector`'s
-    docstring — an engine that silently ate a user's analysis-callback
-    error would be its own dishonesty), so the display-only closure guards
-    itself at the layer that owns the display concern. A `send_sync` hiccup
-    must not abort a multi-step 26B generation run.
-    """
-
-    def on_frame(frame) -> None:
-        try:
-            from server import PromptServer
-
-            instance = PromptServer.instance
-            if instance is None:
-                return
-            instance.send_sync(
-                DGEMMA_STEP_EVENT,
-                {
-                    "node": unique_id,
-                    "canvas_idx": frame.canvas_idx,
-                    "step_idx": frame.step_idx,
-                    "t": frame.t,
-                    "temperature": frame.temperature,
-                    "committed_fraction": frame.committed_fraction,
-                },
-            )
-        except ImportError:
-            return  # No live ComfyUI process (e.g. pytest) — skip the push, not an error.
-        except Exception as exc:  # noqa: BLE001 — deliberate breadth: display-only, see docstring.
-            logging.warning(
-                "DGemmaSampler live push failed (display only, generation continues): %s", exc
-            )
-
-    return on_frame
 
 
 class DGemmaSampler:
@@ -374,6 +320,13 @@ class DGemmaSampler:
                 # per-step live push (P3 (a)) can be routed to the right
                 # node's widget rather than broadcast anonymously.
                 "unique_id": "UNIQUE_ID",
+                # Live-view capability sentinel (issue #188 ONE-MINT fix):
+                # merged from `live_view.LIVE_VIEW_HIDDEN_INPUT` rather than
+                # inlined, so this node's presence in ComfyUI's
+                # `/object_info` payload (`nodeData.input.hidden`) is what
+                # `web/live_view.js` keys its decoration/listen logic off of
+                # — no hardcoded node-type list on the JS side.
+                **LIVE_VIEW_HIDDEN_INPUT,
             },
         }
 
@@ -412,7 +365,7 @@ class DGemmaSampler:
             t_max=t_max,
             confidence=confidence,
             thinking=thinking,
-            on_frame=_build_on_frame(unique_id),
+            on_frame=build_on_frame(unique_id),
             should_cancel=_build_should_cancel(),
         )
         # Output construction (RunConfig build, frames decode, images

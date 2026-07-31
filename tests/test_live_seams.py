@@ -115,9 +115,9 @@ def test_sampler_node_frames_real(live_model):
 
     `unique_id=None` with no real `PromptServer`/ComfyUI process is not a
     reduced assertion — it is the exact headless path every other test in
-    this suite already runs under: `_build_on_frame`'s live-push closure
-    catches the `server` package's `ImportError` and no-ops
-    (`nodes/sampler.py:119-120`; confirmed absent in this venv,
+    this suite already runs under: `live_view.build_on_frame`'s live-push
+    closure catches the `server` package's `ImportError` and no-ops
+    (`surfaces/comfyui/live_view.py`; confirmed absent in this venv,
     `tests/test_seam.py`), so `sample()` runs to completion unchanged and
     this asserts the real 6-tuple / `OUTPUT_IS_LIST` shape it returns —
     including `frames_image` (issue #21 rework) rendered from a REAL decoded

@@ -38,8 +38,10 @@ _MINTED = {
 
 # Scoped to string literals whose VALUE looks like a minted socket type
 # (upper-snake, DGEMMA_ prefixed) — this deliberately does not match
-# DGEMMA_STEP_EVENT's value ("dgemma.sampler.step", lowercase-dotted), which
-# is a WebSocket event name, not a socket type, and stays inline by design.
+# `live_view.DGEMMA_STEP_EVENT`'s value ("dgemma.step", lowercase-dotted),
+# which is a WebSocket event name, not a socket type, and stays inline by
+# design (minted once in `surfaces/comfyui/live_view.py` instead — see
+# `tests/test_live_view_mint.py`).
 _INLINE_LITERAL_RE = re.compile(r'["\'](DGEMMA_[A-Z_]+)["\']')
 
 _SURFACE_DIR = Path(socket_types.__file__).parent
@@ -85,9 +87,12 @@ def test_mint_exposes_the_kv_cache_socket_type():
 
 
 def test_step_event_name_is_not_in_the_mint():
-    """DGEMMA_STEP_EVENT is a runtime WebSocket event name, not a ComfyUI
-    socket type (#52 §2) — it must never be picked up by the mint."""
-    assert "dgemma.sampler.step" not in _MINTED
+    """`live_view.DGEMMA_STEP_EVENT` is a runtime WebSocket event name, not a
+    ComfyUI socket type (#52 §2, unified under issue #188's live-view mint)
+    — it must never be picked up by the socket-type mint."""
+    from surfaces.comfyui.live_view import DGEMMA_STEP_EVENT
+
+    assert DGEMMA_STEP_EVENT not in _MINTED
     assert not any(v.islower() for v in _MINTED)  # minted values are all upper-snake
 
 

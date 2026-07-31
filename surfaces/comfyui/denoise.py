@@ -4,8 +4,20 @@ ADR-CDG-012 (issue #62 Phase 3): the `KV_CACHE` seam's consumer node — IN-2,
 "inject a known-provenance cache." Unpacks widget inputs, calls one
 `dgemma.*` function (`dgemma.loop.run_diffusion`, threading `kv_cache=`
 through unchanged), wraps the result. Mirrors `DGemmaSampler`'s knob surface
-and body shape exactly (same widgets, same `on_frame` live-push wiring) with
-one addition: an optional `kv_cache` (`DGEMMA_KV_CACHE`) input.
+and body shape exactly (same widgets, same `on_frame` live-push wiring —
+literally the same shared function since issue #188's ONE-MINT fix, not a
+lookalike copy) with one addition: an optional `kv_cache` (`DGEMMA_KV_CACHE`)
+input.
+
+**Live-view fix (issue #188):** before this fix, this node built its OWN
+`on_frame` closure under its own event name (`"dgemma.denoise.step"`), which
+worked correctly on the python side but which `web/live_view.js` never
+listened for (it hardcoded `"dgemma.sampler.step"` and only decorated
+`DGemmaSampler`). Both nodes now call the single shared
+`surfaces.comfyui.live_view.build_on_frame` and merge
+`live_view.LIVE_VIEW_HIDDEN_INPUT` into their `hidden` inputs — the JS side
+derives its decoration/listen logic from that shared mint (see
+`live_view.py` and `web/live_view.js` for the full mechanism).
 
 **Full connection parity with `DGemmaSampler` (issue #166 ratified scope,
 operator scope decision 2026-07-30):** this node's output signature is
@@ -41,8 +53,6 @@ other.
 """
 from __future__ import annotations
 
-import logging
-
 # Dual-context import, explicit package-depth gate — see
 # surfaces/comfyui/loader.py for the full rationale. Gate is
 # `__package__.count(".") >= 2` — see loader.py's "GATE CORRECTION" comment.
@@ -60,6 +70,7 @@ if __package__ and __package__.count(".") >= 2:
         run_diffusion,
     )
     from .emission import build_sampler_shaped_outputs
+    from .live_view import LIVE_VIEW_HIDDEN_INPUT, build_on_frame
     from .socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
@@ -79,6 +90,7 @@ else:
         run_diffusion,
     )
     from surfaces.comfyui.emission import build_sampler_shaped_outputs
+    from surfaces.comfyui.live_view import LIVE_VIEW_HIDDEN_INPUT, build_on_frame
     from surfaces.comfyui.socket_types import (
         DGEMMA_CANVAS_STATE,
         DGEMMA_CANVAS_TRACE,
@@ -86,48 +98,6 @@ else:
         DGEMMA_MODEL,
         DGEMMA_RUN_CONFIG,
     )
-
-# Event name for the live per-step push — same mechanism as
-# `surfaces/comfyui/sampler.py`'s `DGEMMA_STEP_EVENT`, namespaced separately
-# so a UI listening to one node type doesn't also catch the other's pushes.
-DGEMMA_DENOISE_STEP_EVENT = "dgemma.denoise.step"
-
-
-def _build_on_frame(unique_id):
-    """Live-push closure — identical shape/guarding to
-    `surfaces/comfyui/sampler.py`'s `_build_on_frame` (see that module's
-    docstring for the full display-must-never-kill-generation rationale);
-    duplicated rather than shared because the two nodes are independent
-    thin adapters (ADR-CDG-003) and this closure is the one piece of
-    ComfyUI-server-touching code each owns for its own event name."""
-
-    def on_frame(frame) -> None:
-        try:
-            from server import PromptServer
-
-            instance = PromptServer.instance
-            if instance is None:
-                return
-            instance.send_sync(
-                DGEMMA_DENOISE_STEP_EVENT,
-                {
-                    "node": unique_id,
-                    "canvas_idx": frame.canvas_idx,
-                    "step_idx": frame.step_idx,
-                    "t": frame.t,
-                    "temperature": frame.temperature,
-                    "committed_fraction": frame.committed_fraction,
-                },
-            )
-        except ImportError:
-            return  # No live ComfyUI process (e.g. pytest) — skip the push, not an error.
-        except Exception as exc:  # noqa: BLE001 — deliberate breadth: display-only, see docstring.
-            logging.warning(
-                "DGemmaDenoise live push failed (display only, generation continues): %s", exc
-            )
-
-    return on_frame
-
 
 class DGemmaDenoise:
     """Drives the denoising loop for one prompt, optionally consuming a
@@ -174,6 +144,14 @@ class DGemmaDenoise:
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
+                # Live-view capability sentinel (issue #188 ONE-MINT fix) —
+                # see `surfaces/comfyui/sampler.py`'s matching entry / this
+                # value's own home, `live_view.LIVE_VIEW_HIDDEN_INPUT`, for
+                # the full rationale. This is the fix itself: before this
+                # issue, DGemmaDenoise pushed live frames under its own
+                # event name that nothing listened for, and was never in
+                # the JS extension's hardcoded decoration list.
+                **LIVE_VIEW_HIDDEN_INPUT,
             },
         }
 
@@ -214,7 +192,7 @@ class DGemmaDenoise:
             confidence=confidence,
             thinking=thinking,
             kv_cache=kv_cache,
-            on_frame=_build_on_frame(unique_id),
+            on_frame=build_on_frame(unique_id),
         )
         # Output construction (RunConfig build, frames decode, images
         # render, tuple assembly) is the shared emission helper (issue

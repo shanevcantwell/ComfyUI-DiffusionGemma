@@ -16,6 +16,7 @@ import sys
 from dgemma.types import KVCache
 from surfaces.comfyui.denoise import DGemmaDenoise
 from surfaces.comfyui.encode import DGemmaEncode
+from surfaces.comfyui.live_view import DGEMMA_STEP_EVENT
 from surfaces.comfyui.socket_types import (
     DGEMMA_CANVAS_STATE,
     DGEMMA_CANVAS_TRACE,
@@ -281,7 +282,7 @@ class TestDGemmaDenoiseLiveFramePush:
 
         assert len(captured_calls) == 1
         event, data, sid = captured_calls[0]
-        assert event == "dgemma.denoise.step"
+        assert event == DGEMMA_STEP_EVENT
         assert data["node"] == "42"
         assert data["canvas_idx"] == 0
         assert data["step_idx"] == 3
