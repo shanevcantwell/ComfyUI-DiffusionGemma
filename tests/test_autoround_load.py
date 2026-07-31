@@ -88,14 +88,20 @@ class FakeProcessor:
 def _install_fakes(monkeypatch, captured: dict, hf_device_map=None, raise_on=None):
     """Monkeypatch transformers' from_pretrained calls to capture kwargs.
 
-    Also pins `torch.cuda.is_available()` True (#159 gate finding): these
-    fakes drive `load_model()` to its real `.to("cuda")` call, which is a
-    no-op against `FakeHfModel.to` — but the no-CUDA guard upstream of it
-    (issue #143) is a real host check, so without this pin these tests pass
-    on a CUDA host and fail on CPU-only CI for a reason that has nothing to
-    do with what they're testing. Tests that specifically exercise the
-    no-CUDA branch override this back to False after calling this helper —
-    monkeypatch's later-wins semantics keep that override intact."""
+    Also pins `torch.cuda.is_available()` True (#159 gate finding): the
+    no-CUDA guard in `load_model` (issue #143) is a real host check, so
+    without this pin these tests pass on a CUDA host and fail on CPU-only
+    CI for a reason that has nothing to do with what they're testing. Tests
+    that specifically exercise the no-CUDA branch override this back to
+    False after calling this helper — monkeypatch's later-wins semantics
+    keep that override intact.
+
+    Also pins `torch.cuda.mem_get_info` to a roomy fake (48 GiB free): the
+    autoround pre-load VRAM precondition (issue #183, split-fails probe
+    outcome) reads it on CUDA-available hosts, and on CPU-only CI the
+    `is_available` pin above would otherwise send the precondition into a
+    real `mem_get_info` call that raises. Tests that specifically exercise
+    the precondition override this pin with their own values."""
 
     def fake_from_pretrained(repo_id, **kwargs):
         if raise_on == "model":
@@ -120,6 +126,10 @@ def _install_fakes(monkeypatch, captured: dict, hf_device_map=None, raise_on=Non
         fake_processor_from_pretrained,
     )
     monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr(
+        "dgemma.model.torch.cuda.mem_get_info",
+        lambda *a, **k: (48 * 1024**3, 48 * 1024**3),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -190,23 +200,6 @@ class TestAutoroundKwargsShape:
 
         assert captured["kwargs"]["dtype"] == "auto"
 
-    def test_autoround_does_not_use_device_map(self, monkeypatch):
-        """The autoround path keeps dd2767c's no-device_map contract: the
-        pre-quantized W4A16 checkpoint (~30GB) fits without CPU spill, so
-        there is nothing for accelerate dispatch to buy it, and
-        low_cpu_mem_usage=False keeps tensors real ahead of the explicit
-        .to("cuda") call. quant="none" restored device_map="auto" separately
-        (issue #173, tests/test_model_load.py::test_load_kwargs_shape) once
-        d0bb93b (#142/#143) fixed the tied-weight crash that motivated
-        dd2767c's original removal."""
-        captured: dict = {}
-        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
-
-        load_model(repo_id=None, quant="autoround")
-
-        assert "device_map" not in captured["kwargs"]
-        assert captured["kwargs"]["low_cpu_mem_usage"] is False
-
     def test_autoround_returns_int4_dtype_label(self, monkeypatch):
         """The returned DGemmaModel has dtype='int4' for autoround loads."""
         captured: dict = {}
@@ -217,14 +210,84 @@ class TestAutoroundKwargsShape:
         assert result.dtype == "int4"
         assert result.quant == "autoround"
 
-    def test_autoround_calls_to_cuda(self, monkeypatch):
-        """The autoround path has no accelerate dispatch (no device_map), so
-        it still needs its own explicit .to("cuda") move — unlike quant="none"
-        (issue #173, restored device_map="auto" there instead). Mutation
-        guard: deleting the `model = model.to("cuda")` call under `if quant
-        == "autoround":` in dgemma/model.py would leave `calls` empty and
-        fail this test by name."""
+
+# ---------------------------------------------------------------------------
+# Test: placement UNIFORMITY across quant modes (issue #183)
+# ---------------------------------------------------------------------------
+
+class TestPlacementUniformity:
+    """UNIFORMITY mutation guards (issue #183) — the retargeted successors of
+    the per-quant guards `test_autoround_does_not_use_device_map` and
+    `test_autoround_calls_to_cuda` (which pinned the divergent placement
+    branch #183's field report falsified).
+
+    There is ONE load path: `load_kwargs` for every quant mode is identical
+    except `dtype` (checkpoint identity), and NO quant mode calls
+    `.to("cuda")` — accelerate places everything during `from_pretrained`.
+
+    Mutation-verified by construction: both quant values run through the
+    SAME parametrized assertion body, and the exact-key-set assertion means
+    reintroducing ANY quant-conditional placement kwarg (for these quants or
+    a future third one wired through this parametrize list) reddens
+    `test_placement_kwargs_uniform` by name; re-adding a `.to("cuda")` for
+    either quant reddens `test_neither_quant_calls_to_cuda` by name."""
+
+    # The one legitimate per-quant residue: dtype, a checkpoint-identity
+    # fact ("auto" reads the INT4 checkpoint's own quantization_config).
+    EXPECTED_DTYPE = {"autoround": "auto", "none": None}  # None → torch.bfloat16
+
+    @pytest.mark.parametrize("quant", ["autoround", "none"])
+    def test_placement_kwargs_uniform(self, monkeypatch, quant):
+        """SAME assertion body for both quants: `device_map="auto"`, no
+        `low_cpu_mem_usage`, `local_files_only` threaded — and NOTHING
+        else besides `dtype`. The exact-key-set assertion is the strong
+        pin: a quant-special kwarg cannot be added for either mode (or a
+        future third) without failing here."""
+        import torch
+
         captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+
+        load_model(repo_id=None, quant=quant)
+
+        kwargs = captured["kwargs"]
+        assert kwargs["device_map"] == "auto"
+        assert "low_cpu_mem_usage" not in kwargs
+        assert kwargs["local_files_only"] is False
+        assert set(kwargs) == {"device_map", "dtype", "local_files_only"}
+        expected_dtype = self.EXPECTED_DTYPE[quant] or torch.bfloat16
+        assert kwargs["dtype"] == expected_dtype
+
+    def test_autoround_and_none_receive_identical_placement_kwargs(
+        self, monkeypatch
+    ):
+        """Direct pairwise pin: capture both quants' load_kwargs and assert
+        they are EQUAL once `dtype` (the one checkpoint-identity residue) is
+        set aside — placement never varies by quant."""
+        captured_autoround: dict = {}
+        captured_none: dict = {}
+        _install_fakes(
+            monkeypatch, captured_autoround, hf_device_map={"model.layers.0": 0}
+        )
+        load_model(repo_id=None, quant="autoround")
+        _install_fakes(
+            monkeypatch, captured_none, hf_device_map={"model.layers.0": 0}
+        )
+        load_model(repo_id=None, quant="none")
+
+        kwargs_autoround = dict(captured_autoround["kwargs"])
+        kwargs_none = dict(captured_none["kwargs"])
+        assert kwargs_autoround.pop("dtype") != kwargs_none.pop("dtype")
+        assert kwargs_autoround == kwargs_none
+
+    @pytest.mark.parametrize("quant", ["autoround", "none"])
+    def test_neither_quant_calls_to_cuda(self, monkeypatch, quant):
+        """NO quant mode calls `.to("cuda")` (issue #183): accelerate has
+        already placed every tensor under `device_map="auto"`; a whole-model
+        `.to("cuda")` would pull CPU-spilled weights back onto the card
+        (the OOM mechanism PR #177 fixed, issue #173). Mutation guard:
+        re-adding `model.to("cuda")` for EITHER quant leaves `calls`
+        non-empty and fails this test by name."""
         calls: list = []
 
         class _TrackedFakeHfModel(FakeHfModel):
@@ -233,20 +296,92 @@ class TestAutoroundKwargsShape:
                 return self
 
         def fake_from_pretrained(repo_id, **kwargs):
-            captured["kwargs"] = kwargs
-            return _TrackedFakeHfModel(hf_device_map={"model.layers.0": 0}, first_param_device="cpu")
+            return _TrackedFakeHfModel(
+                hf_device_map={"model.layers.0": 0}, first_param_device="cpu"
+            )
 
         monkeypatch.setattr(
-            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained", fake_from_pretrained
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained",
+            fake_from_pretrained,
         )
         monkeypatch.setattr(
-            "dgemma.model.AutoProcessor.from_pretrained", lambda repo_id, **kw: FakeProcessor()
+            "dgemma.model.AutoProcessor.from_pretrained",
+            lambda repo_id, **kw: FakeProcessor(),
         )
         monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (48 * 1024**3, 48 * 1024**3),
+        )
 
-        load_model(repo_id=None, quant="autoround")
+        load_model(repo_id=None, quant=quant)
 
-        assert calls == [("cuda",)]
+        assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Test: autoround pre-load VRAM precondition (issue #183, split-fails arm)
+# ---------------------------------------------------------------------------
+
+class TestAutoroundVramPrecondition:
+    """The ONE legitimate remaining quant-conditional besides dtype: the
+    fail-loud pre-load VRAM check for quant='autoround' (issue #183 —
+    shipped because the forced-split probe proved a CPU/GPU split of the
+    INT4 checkpoint crashes inside from_pretrained; see docs/experiments/
+    2026-07-30-autoround-unified-path-split-check/)."""
+
+    def test_autoround_precheck_rejects_insufficient_vram(self, monkeypatch):
+        """With too little free VRAM, quant='autoround' raises RuntimeError
+        BEFORE from_pretrained (never dispatches the split that cannot
+        load), naming required and available bytes and the remedy."""
+        from dgemma.model import AUTOROUND_MIN_FREE_VRAM_BYTES
+
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        # Override the roomy default pin: 8 GiB free < the ~30 GiB floor.
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
+        )
+
+        with pytest.raises(RuntimeError) as excinfo:
+            load_model(repo_id=None, quant="autoround")
+
+        message = str(excinfo.value)
+        # Raised BEFORE from_pretrained: the fake never captured a call.
+        assert "kwargs" not in captured
+        # Names both numbers...
+        assert f"{AUTOROUND_MIN_FREE_VRAM_BYTES / 1024**3:.1f}" in message
+        assert "8.0" in message
+        # ...and the remedy.
+        assert "quant='none'" in message
+
+    def test_autoround_precheck_passes_with_sufficient_vram(self, monkeypatch):
+        """With enough free VRAM the precondition is silent and the load
+        proceeds normally."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+
+        result = load_model(repo_id=None, quant="autoround")
+
+        assert captured["kwargs"]["device_map"] == "auto"
+        assert result.quant == "autoround"
+
+    def test_quant_none_has_no_vram_precondition(self, monkeypatch):
+        """bf16 (quant='none') loads regardless of free VRAM — its CPU-spill
+        path is field-proven (docs/experiments/bf16-fit-mechanism/), so the
+        precondition must never gate it."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"model.layers.0": 0})
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (8 * 1024**3, 48 * 1024**3),
+        )
+
+        result = load_model(repo_id=None, quant="none")
+
+        assert captured["kwargs"]["device_map"] == "auto"
+        assert result.quant == "none"
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +561,8 @@ class TestAutoroundEndToEnd:
         assert captured["repo_id"] == AUTOROUND_REPO_ID
         # dtype="auto" for transformers to read quantization config
         assert captured["kwargs"]["dtype"] == "auto"
-        assert "device_map" not in captured["kwargs"]
+        # Unified placement (issue #183): same device_map="auto" as bf16
+        assert captured["kwargs"]["device_map"] == "auto"
         # Processor called with same repo
         assert captured["processor_repo_id"] == AUTOROUND_REPO_ID
         # Result has correct dtype label
@@ -443,3 +579,148 @@ class TestAutoroundEndToEnd:
 
         assert captured["kwargs"]["local_files_only"] is True
         assert captured["processor_kwargs"]["local_files_only"] is True
+
+
+# ---------------------------------------------------------------------------
+# Test: INT4 tied-weight retie + spill exemption under the unified path
+# (issue #183 steps 6-7 — #119's corruption CLASS on the INT4 path, distinct
+# from #119's own unrelated sampler-side shape bug; NOT a #119 closure claim)
+# ---------------------------------------------------------------------------
+
+class _FakeTensorParam:
+    """A parameter-like fake with `.device` — identity-comparable so the
+    retie test can assert lm_head and embed_tokens share the SAME object."""
+
+    def __init__(self, device: str):
+        self.device = _FakeDevice(device)
+
+
+class _FakeLmHead:
+    def __init__(self, weight):
+        self.weight = weight
+
+
+class FakeTiedModel:
+    """Fake with a real tied-weight surface: `lm_head.weight` (possibly
+    meta) + `get_parameter('model.decoder.embed_tokens.weight')` — the
+    exact pair `_retie_lm_head` repairs (issue #142), now exercised on its
+    real branch (the prior FakeHfModel had no lm_head, so retie always
+    no-opped — the untested-branch gap all three plan passes named)."""
+
+    def __init__(self, lm_head_device="meta", embed_device="cpu", hf_device_map=None):
+        self._embed_param = _FakeTensorParam(embed_device)
+        self.lm_head = _FakeLmHead(_FakeTensorParam(lm_head_device))
+        if hf_device_map is not None:
+            self.hf_device_map = hf_device_map
+
+    def get_parameter(self, name):
+        assert name == "model.decoder.embed_tokens.weight"
+        return self._embed_param
+
+    def named_parameters(self):
+        yield "lm_head.weight", self.lm_head.weight
+        yield "model.decoder.embed_tokens.weight", self._embed_param
+
+    def named_buffers(self):
+        return iter(())
+
+
+class TestRetieUnderUnifiedPlacement:
+    """`_retie_lm_head` + `_assert_no_meta_tensors` on the INT4 path under
+    the unified device_map="auto" placement (issue #183 step 6). Covers the
+    offload-exempt case regardless of whether natural spill or a forced
+    split triggers it in practice."""
+
+    def test_retie_points_meta_lm_head_at_real_embed_tokens(self):
+        """meta lm_head.weight + real embed_tokens.weight → after retie,
+        both names resolve to the SAME object (a genuine tie shares
+        storage, never a copy)."""
+        from dgemma.model import _retie_lm_head
+
+        model = FakeTiedModel(lm_head_device="meta", embed_device="cpu")
+        assert model.lm_head.weight is not model._embed_param
+
+        _retie_lm_head(model)
+
+        assert model.lm_head.weight is model._embed_param
+
+    def test_retie_noop_when_lm_head_already_real(self):
+        """A real (non-meta) lm_head.weight is left untouched — retie is a
+        targeted repair, not a general rebinder."""
+        from dgemma.model import _retie_lm_head
+
+        model = FakeTiedModel(lm_head_device="cuda:0", embed_device="cuda:0")
+        original = model.lm_head.weight
+
+        _retie_lm_head(model)
+
+        assert model.lm_head.weight is original
+
+    def test_retie_leaves_meta_when_source_also_meta(self):
+        """Both sides meta → retie declines (pointing one meta tensor at
+        another fixes nothing); `_assert_no_meta_tensors` then raises, by
+        name, as the enforcement surface."""
+        from dgemma.model import _assert_no_meta_tensors, _retie_lm_head
+
+        model = FakeTiedModel(lm_head_device="meta", embed_device="meta")
+
+        _retie_lm_head(model)
+
+        assert model.lm_head.weight is not model._embed_param
+        with pytest.raises(RuntimeError, match="lm_head.weight"):
+            _assert_no_meta_tensors(model)
+
+    def test_offload_exempt_meta_lm_head_does_not_raise(self):
+        """A meta lm_head whose owning module hf_device_map places on 'cpu'
+        is accelerate's legitimate mmap spill (PR #177's exemption) — no
+        raise, proven to extend to the INT4 path (issue #183 step 7)."""
+        from dgemma.model import _assert_no_meta_tensors
+
+        model = FakeTiedModel(
+            lm_head_device="meta",
+            embed_device="meta",
+            hf_device_map={"lm_head": "cpu", "model.decoder.embed_tokens": "cpu"},
+        )
+
+        _assert_no_meta_tensors(model)  # must not raise
+
+    def test_stranded_meta_still_raises_for_autoround_load(self, monkeypatch):
+        """Through the full load_model(quant='autoround') flow: a meta param
+        whose device-map entry is an ACCELERATOR (not cpu/disk) is stranded,
+        not spill — still raises (issue #183 step 7's still-raises half)."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured, hf_device_map={"fake": 0})
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            return FakeHfModel(hf_device_map={"fake": 0}, first_param_device="meta")
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained",
+            fake_from_pretrained,
+        )
+
+        with pytest.raises(RuntimeError, match="meta-resident"):
+            load_model(repo_id=None, quant="autoround")
+
+    def test_offload_meta_exempt_through_autoround_load(self, monkeypatch):
+        """Through the full load_model(quant='autoround') flow: a meta param
+        whose owning module the device map sends to 'cpu' is exempt — the
+        load succeeds (the same exemption bf16 already gets via PR #177,
+        inherited by autoround now that both share device_map='auto')."""
+        captured: dict = {}
+        _install_fakes(monkeypatch, captured)
+
+        def fake_from_pretrained(repo_id, **kwargs):
+            return FakeHfModel(
+                hf_device_map={"fake": "cpu", "other": 0}, first_param_device="meta"
+            )
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained",
+            fake_from_pretrained,
+        )
+
+        result = load_model(repo_id=None, quant="autoround")
+
+        assert result.quant == "autoround"
+        assert result.device == "cuda:0"
