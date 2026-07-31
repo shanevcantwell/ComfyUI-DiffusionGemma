@@ -444,7 +444,8 @@ def _explained_by_device_map_offload(name: str, device_map: dict) -> bool:
 
 def _assert_no_meta_tensors(model) -> None:
     """FAIL LOUD (issue #142's enforcement surface) if any parameter or
-    buffer is still meta-resident after load + re-tie, BEFORE `.to("cuda")` —
+    buffer is still meta-resident after load + re-tie, before the model is
+    returned to any caller (issue #183: no `.to("cuda")` follows anymore) —
     SPILL-AWARE: a tensor that is meta *because* accelerate offloaded its
     module to `cpu`/`disk` under `device_map="auto"` is legitimate and exempt.
 
@@ -484,7 +485,7 @@ def _assert_no_meta_tensors(model) -> None:
     if meta_names:
         raise RuntimeError(
             "ComfyUI-DiffusionGemma: model has meta-resident tensor(s) after "
-            f"load (before .to(\"cuda\")): {meta_names}. A meta tensor holds no "
+            f"load: {meta_names}. A meta tensor holds no "
             "data and cannot be moved to a real device via .to() — this would "
             "otherwise surface later as an opaque 'Cannot copy out of meta "
             "tensor' crash or a silent no-op hang, depending on the dispatch "
@@ -496,6 +497,51 @@ def _assert_no_meta_tensors(model) -> None:
             "Remedy: report this repo_id/quant combination — a new tied "
             "parameter may need its own re-tie handling alongside "
             "_retie_lm_head."
+        )
+
+
+# Whole-fit floor for the AutoRound INT4 checkpoint, in bytes. Grounded by
+# the 2026-07-30 forced-split probe (docs/experiments/
+# 2026-07-30-autoround-unified-path-split-check/): weights measure 28.55 GiB
+# resident after load; the floor adds margin for accelerate's dispatch
+# reserve so a card that passes the check genuinely places the model whole.
+# (Activation peak — 30.67 GiB process-wide in the 8-step probe — is a
+# run-time concern, not what the load-time dispatch crash gates on.)
+AUTOROUND_MIN_FREE_VRAM_BYTES = 30 * 1024**3
+
+
+def _assert_autoround_vram_precondition() -> None:
+    """FAIL LOUD, pre-load, when the card cannot hold the AutoRound INT4
+    checkpoint whole (issue #183 — the split-fails probe outcome).
+
+    Why refuse instead of split: under `device_map="auto"`, a card that
+    cannot fit the INT4 checkpoint whole makes accelerate attempt a CPU/GPU
+    split, and that split CANNOT LOAD — dispatch crashes inside
+    `from_pretrained` (`ValueError: weight is on the meta device...`,
+    forced-split probe leg, docs/experiments/
+    2026-07-30-autoround-unified-path-split-check/). This is unlike the bf16
+    path, whose CPU-mmap spill is field-proven. So the honest pre-load
+    behavior on a small card is a refusal naming both numbers and the
+    remedy, never a silent attempt at a split that is proven to crash.
+    Split-capable INT4 (block-wise onload) is banked as future work.
+
+    Skips silently when CUDA is unavailable — `load_model`'s existing
+    post-load CUDA check owns that refusal with its own canonical message.
+    """
+    if not torch.cuda.is_available():
+        return
+    free_bytes, _total_bytes = torch.cuda.mem_get_info()
+    if free_bytes < AUTOROUND_MIN_FREE_VRAM_BYTES:
+        raise RuntimeError(
+            f"quant='autoround' needs the whole INT4 checkpoint resident on one "
+            f"GPU: {AUTOROUND_MIN_FREE_VRAM_BYTES / 1024**3:.1f} GiB free VRAM "
+            f"required, {free_bytes / 1024**3:.1f} GiB free now. A CPU/GPU split "
+            "of the AutoRound INT4 checkpoint cannot load (accelerate dispatch "
+            "crashes on the quantized weights — see issue #183 and "
+            "docs/experiments/2026-07-30-autoround-unified-path-split-check/). "
+            "Remedy: free VRAM (unload other GPU tenants) and retry, or use "
+            "quant='none' — the bf16 path's CPU spill is supported and "
+            "field-proven."
         )
 
 
@@ -532,11 +578,15 @@ def load_model(
     - `quant="autoround"` → `AUTOROUND_REPO_ID` (Intel INT4 W4A16, ~30GB VRAM)
     Pass an explicit path or HF repo ID to override.
 
-    `quant` accepts `"none"` (full-precision bf16 load, `device_map="auto"`,
-    accelerate-managed GPU+CPU-mmap placement that CPU-spills the ~42.5GiB of
-    MoE expert params that bitsandbytes could never quantize) or `"autoround"`
-    (pre-quantized W4A16 INT4 checkpoint via auto-round, loaded onto CPU then
-    moved to CUDA with a single `.to("cuda")` — no accelerate dispatch).
+    `quant` accepts `"none"` (full-precision bf16) or `"autoround"`
+    (pre-quantized W4A16 INT4 checkpoint via auto-round). Placement is
+    UNIFORM across quant modes (issue #183): both load under
+    `device_map="auto"` — accelerate-managed GPU+CPU-mmap placement that
+    spills overflow modules to CPU where the card cannot hold the
+    checkpoint whole (the bf16 26B path on a 48GB card CPU-spills the
+    ~10GiB of overflow; the ~30GB INT4 checkpoint fits whole there). The
+    only per-quant difference is `dtype` — a checkpoint-identity fact, not
+    a placement decision.
 
     `local_files_only` forwards unchanged to both `from_pretrained` calls —
     off (default) keeps the normal HF download-and-cache behavior; on,
@@ -545,8 +595,11 @@ def load_model(
     `check_interrupted` (issue #140 loader half): an optional zero-argument
     predicate polled at four phase boundaries — before the quant/checkpoint
     pre-flight config read, before the model `from_pretrained`, before the
-    processor `from_pretrained`, and before the final `.to("cuda")` device
-    move. When it reports `True`, `load_model` raises `LoadInterrupted`
+    processor `from_pretrained`, and at the (historical) device-move
+    boundary — kept as a poll point even though no `.to("cuda")` happens
+    for any quant mode anymore (issue #183: accelerate places everything
+    during `from_pretrained`). When it reports `True`, `load_model` raises
+    `LoadInterrupted`
     immediately, without starting the next blocking call. `None` (the
     default, and every non-ComfyUI caller — tests, MCP, direct script use)
     means "never interrupt", so this parameter is additive: no caller is
@@ -581,37 +634,47 @@ def load_model(
     _poll("quant/checkpoint mismatch pre-flight")
     _check_quant_checkpoint_match(repo_id, quant, local_files_only)
 
-    # Autoround INT4 path: patches transformers + auto-round for correct load.
-    # quant="none" path: accelerate-managed placement (device_map="auto") —
-    # issue #173. dd2767c (2026-07-24) dropped device_map="auto" for both
-    # paths because accelerate's dispatch left the tied lm_head/embed_tokens
-    # pair meta-resident under CPU spill, crashing the (then-unconditional)
-    # .to("cuda"). d0bb93b (#142/#143, 2026-07-29) fixed that root cause
-    # directly — _retie_lm_head() + _assert_no_meta_tensors() materialize and
-    # verify tied weights regardless of quant mode — so device_map="auto" no
-    # longer needs to be avoided on quant="none"'s account. The autoround
-    # path keeps the no-device_map / low_cpu_mem_usage=False / .to("cuda")
-    # contract dd2767c introduced: the pre-quantized W4A16 checkpoint (~30GB)
-    # fits on this box without CPU spill, so there is nothing for accelerate
-    # dispatch to buy it, and low_cpu_mem_usage=False is what lets
-    # _retie_lm_head/_assert_no_meta_tensors reason about real (non-meta)
-    # tensors before the explicit device move.
+    # ONE load path — placement is UNIFORM across quant modes (issue #183).
+    # `device_map="auto"` (accelerate-managed GPU+CPU-mmap placement) for
+    # BOTH quants; the ONLY per-quant residue is `dtype`, a checkpoint-
+    # identity fact (`"auto"` lets transformers read the INT4 checkpoint's
+    # own quantization_config; bf16 is stated explicitly), never a placement
+    # decision.
+    #
+    # device_map="auto" was fought for, not assumed — keep the history:
+    # dd2767c (2026-07-24) dropped it for both paths because accelerate's
+    # dispatch left the tied lm_head/embed_tokens pair meta-resident under
+    # CPU spill, crashing the (then-unconditional) .to("cuda"). d0bb93b
+    # (#142/#143, 2026-07-29) fixed that root cause directly —
+    # _retie_lm_head() + _assert_no_meta_tensors() materialize and verify
+    # tied weights regardless of quant mode — and PR #177 (#173) restored
+    # device_map="auto" for quant="none", where it is field-proven
+    # (docs/experiments/bf16-fit-mechanism/: 42.4GiB GPU + 10.25GiB
+    # mmap-backed spill, 2.2s/step). The autoround branch briefly kept
+    # dd2767c's no-device_map / low_cpu_mem_usage=False / .to("cuda")
+    # contract on a bare-process "~30GB fits whole" observation; #183's
+    # field report falsified that as placement policy, and the divergent
+    # branch was deleted (docs/experiments/
+    # 2026-07-30-autoround-unified-path-split-check/).
     if quant == "autoround":
-        dtype_kwarg = "auto"  # let transformers read quantization config
+        dtype_kwarg: object = "auto"  # checkpoint identity: read its quantization_config
         dtype_label = "int4"
-        load_kwargs: dict = {
-            "low_cpu_mem_usage": False,  # force real CPU tensors; meta tensors can't move to CUDA
-            "dtype": dtype_kwarg,
-            "local_files_only": local_files_only,
-        }
     else:
         dtype_kwarg = torch.bfloat16
         dtype_label = "bfloat16"
-        load_kwargs = {
-            "device_map": "auto",  # accelerate-managed GPU+CPU-mmap placement
-            "dtype": dtype_kwarg,
-            "local_files_only": local_files_only,
-        }
+    load_kwargs: dict = {
+        "device_map": "auto",  # accelerate-managed GPU+CPU-mmap placement
+        "dtype": dtype_kwarg,
+        "local_files_only": local_files_only,
+    }
+
+    # PRE-LOAD VRAM precondition — the ONE quant-conditional besides dtype
+    # (issue #183, split-fails probe outcome): an INT4 checkpoint that cannot
+    # fit whole makes accelerate attempt a split that crashes inside
+    # from_pretrained, so refuse loudly BEFORE the blocking call. bf16 has no
+    # precondition — its spill path is field-proven.
+    if quant == "autoround":
+        _assert_autoround_vram_precondition()
 
     print(
         f"[INFO] ComfyUI-DiffusionGemma 0.4.0 — loading from {repo_id!r} "
@@ -669,7 +732,8 @@ def load_model(
     # issue #142: the autoround path's tied lm_head.weight can be left
     # meta-resident (Patch 3 suppresses the tie crash without materializing
     # the tensor) — re-tie it to its real-storage sibling before anything
-    # touches .to("cuda"), which cannot move a meta tensor.
+    # dispatches through it (a stranded meta tensor holds no data; issue
+    # #142's field failure was an opaque crash/hang downstream).
     if quant == "autoround":
         _retie_lm_head(model)
 
@@ -689,20 +753,15 @@ def load_model(
         )
 
     # Phase boundary (issue #140): still polled on both paths, so
-    # check_interrupted's four-boundary contract holds regardless of quant —
-    # a caller polling for cancellation should not have to know which quant
-    # mode skips the actual device move.
+    # check_interrupted's four-boundary contract holds regardless of quant.
+    # NO device move happens here for EITHER quant mode (issue #183):
+    # accelerate already placed every tensor per device_map="auto" during
+    # from_pretrained (GPU + CPU-mmap spill where needed) — a whole-model
+    # .to("cuda") after that would pull any CPU-spilled weights back onto
+    # the card, defeating the spill and OOMing (issue #173, the exact
+    # mechanism PR #177 fixed for quant="none"). The boundary is kept as a
+    # poll point so the four-boundary cancellation contract stays stable.
     _poll("device move (.to(\"cuda\"))")
-
-    # quant="none": accelerate already placed every tensor per device_map
-    # during from_pretrained (GPU + CPU-mmap spill) — an unconditional
-    # whole-model .to("cuda") here would pull the CPU-spilled ~10GiB back
-    # onto the card, defeating the spill and OOMing (issue #173). quant=
-    # "autoround": no accelerate dispatch was requested (see load_kwargs
-    # above), so the model is still CPU-resident and needs the explicit
-    # single .to() call.
-    if quant == "autoround":
-        model = model.to("cuda")
 
     device = _resolve_device(model)
 
