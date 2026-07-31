@@ -20,10 +20,17 @@ ComfyUI `SaveImage` idiom (`folder_paths.get_output_directory()` +
 `folder_paths.get_save_image_path()`, the same functions
 `surfaces/comfyui/loader.py` already treats as "real inside ComfyUI,
 genuinely absent under pytest/standalone" — same guarded-import
-discipline, not a new one). An optional `debug_log_path` `STRING` widget
-overrides the destination entirely (an absolute/relative path written to
-directly) — useful for a bare-script/pytest run with no ComfyUI process
-alive, matching the writer's own test suite.
+discipline, not a new one).
+
+**Two-widget directory contract (issue #189, supersedes the earlier
+ad-hoc dual-mode):** `debug_log_path` is always a DIRECTORY and
+`filename_prefix` is always the FILE name — there is no code path where
+`debug_log_path` is treated as a file path, even when its value happens to
+end in `.jsonl`. Non-empty `debug_log_path` means "write inside this
+directory" unconditionally: the directory is created (`mkdir -p`) if it
+doesn't exist, and the file `{filename_prefix}_{timestamp}.jsonl` is
+written inside it. Empty `debug_log_path` (the widget default) falls back
+to the ComfyUI output-directory convention, unchanged.
 
 This node is the ONLY file-writing surface in `surfaces/` (G-6 — `grep
 -rln "open(|.write(|Path(" surfaces/` returned only `web/live_view.js`
@@ -63,21 +70,36 @@ DEFAULT_FILENAME_PREFIX = "dgemma_run_log"
 
 
 def _resolve_output_path(filename_prefix: str, debug_log_path: str) -> Path:
-    """Where to write: `debug_log_path` (non-empty) wins outright — an
-    explicit override for a headless/bare-script run with no ComfyUI
-    process alive (this node's own test suite included). Otherwise fall
-    back to the `SaveImage` convention: `folder_paths.get_save_image_path`
-    against the configured output directory, timestamped so repeated runs
-    never collide (unlike an image batch, there is no natural "batch
-    counter" input here to disambiguate on)."""
+    """Where to write, per the two-widget directory contract (issue #189):
+    `debug_log_path` names a DIRECTORY, `filename_prefix` names the FILE.
+    Non-empty `debug_log_path` is unconditionally a directory — even a
+    value that "looks like a file" (e.g. ends in `.jsonl`) is still a
+    directory by contract, deterministically, no `is_dir()` disambiguation.
+    The directory is created (`mkdir -p`) if it doesn't exist, and the
+    returned path is `{filename_prefix}_{timestamp}.jsonl` inside it,
+    timestamped so repeated runs never collide (unlike an image batch,
+    there is no natural "batch counter" input here to disambiguate on).
+    Directory creation failures are raised loud (`OSError` subclasses,
+    e.g. `PermissionError` for an unwritable parent) — this function never
+    falls back to writing elsewhere.
+
+    Empty `debug_log_path` (the widget default) falls back to the
+    `SaveImage` convention: `folder_paths.get_save_image_path` against the
+    configured output directory."""
     if debug_log_path:
-        output_path = Path(debug_log_path)
-        # User may provide an existing directory — append a timestamped filename
-        # so repeated runs don't collide (matching the ComfyUI fallback path).
-        if output_path.is_dir():
-            timestamp = time.strftime("%Y%m%dT%H%M%S")
-            return output_path / f"{filename_prefix}_{timestamp}.jsonl"
-        return output_path
+        directory = Path(debug_log_path)
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"DGemmaRunLogWriter: debug_log_path {str(directory)!r} could "
+                f"not be created as a directory ({exc}). debug_log_path is "
+                "always a directory (filename_prefix names the file) — pass "
+                "a writable directory path, or leave debug_log_path empty to "
+                "use the ComfyUI output-directory convention."
+            ) from exc
+        timestamp = time.strftime("%Y%m%dT%H%M%S")
+        return directory / f"{filename_prefix}_{timestamp}.jsonl"
 
     if folder_paths is None:
         raise RuntimeError(
@@ -142,10 +164,12 @@ class DGemmaRunLogWriter:
                 "filename_prefix": ("STRING", {"default": DEFAULT_FILENAME_PREFIX}),
             },
             "optional": {
-                # Explicit override — writes directly to this path instead
-                # of resolving through folder_paths/SaveImage's counter
-                # convention. Empty string (the default) means "use the
-                # ComfyUI output-directory convention."
+                # A DIRECTORY (issue #189) — filename_prefix names the
+                # file, not this widget. Non-empty: written inside this
+                # directory (created if missing), unconditionally, even if
+                # the value looks like a file path (e.g. ends `.jsonl`).
+                # Empty string (the default) means "use the ComfyUI
+                # output-directory convention."
                 "debug_log_path": ("STRING", {"default": ""}),
             },
         }

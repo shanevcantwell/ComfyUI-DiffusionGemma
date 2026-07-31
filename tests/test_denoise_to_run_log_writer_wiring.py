@@ -24,6 +24,7 @@ for denoise per this issue's explicit ask.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import torch
 
@@ -122,19 +123,23 @@ def test_denoise_outputs_feed_run_log_writer_and_a_valid_log_is_written(monkeypa
 
     # The join: DGemmaDenoise's real outputs feed DGemmaRunLogWriter,
     # INPUT_IS_LIST-wrapped exactly the way ComfyUI wires a producer node's
-    # single values into a INPUT_IS_LIST=True consumer.
+    # single values into a INPUT_IS_LIST=True consumer. debug_log_path is a
+    # DIRECTORY per the two-widget contract (issue #189) — filename_prefix
+    # names the file.
     writer_node = DGemmaRunLogWriter()
-    log_path = tmp_path / "denoise_wiring_run.jsonl"
+    log_dir = tmp_path / "denoise_wiring_logs"
     (returned_path,) = writer_node.write(
         canvas_trace=[canvas_trace],
         run_config=[run_config],
         frames=frames,
         canvas_state=[canvas_state],
         filename_prefix=["denoise_wiring"],
-        debug_log_path=[str(log_path)],
+        debug_log_path=[str(log_dir)],
     )
 
-    assert returned_path == str(log_path)
+    log_path = Path(returned_path)
+    assert log_path.parent == log_dir
+    assert log_path.name.startswith("denoise_wiring_")
     assert log_path.exists()
 
     lines = log_path.read_text().splitlines()
