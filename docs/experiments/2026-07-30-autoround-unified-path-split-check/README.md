@@ -102,3 +102,49 @@ Re-run `snapshot_download('Intel/diffusiongemma-26B-A4B-it-int4-AutoRound')`
 with network access (outside `local_files_only`) to complete the snapshot
 (shards 1-5 + the 14 other missing files: `.gitattributes`, `README.md`,
 `chat_template.jinja`, tokenizer files, etc.), then re-run this probe.
+
+## Measurement discipline for the re-run (banked ahead of the unblock, per
+operator/orchestrator addendum 2026-07-31 — not yet exercised, no data below
+is fabricated)
+
+The bf16 instrument-trap record (`docs/experiments/bf16-fit-mechanism/README.md`,
+"Three instrument traps recorded") is binding on this probe's re-run and on
+step 9's in-rig leg. Read it before instrumenting either. Specifically:
+
+1. **Load-end `nvidia-smi` is NOT the capacity datapoint.** This load path is
+   lazy: `device_map="auto"` implies meta-device skeleton construction plus
+   direct-to-placement streaming; peak VRAM appears during the forward pass /
+   denoise steps, not at `from_pretrained` return. Use
+   `torch.cuda.max_memory_allocated()` (reset via
+   `torch.cuda.reset_peak_memory_stats()` before the run) plus `nvidia-smi`
+   sampled continuously across the live steps, not just at load-end. Report
+   both numbers.
+2. **The mmap-backed CPU/disk spill is RSS-invisible.** The bf16 probe found
+   only a ~0.6 GiB `MemAvailable` dip for a 10.25 GiB spill — offloaded params
+   report device `meta`, not `cpu`, in `named_parameters()`, and are paged in
+   per-forward-pass against the safetensors file rather than materialized as
+   anonymous RAM. Do NOT use RSS/`MemAvailable` to infer spill size for the
+   INT4 checkpoint either. Read `hf_device_map` / offload accounting directly
+   and bank the device_map JSON verbatim, exactly as
+   `docs/experiments/bf16-fit-mechanism/runs/device_map.json` did.
+3. **The forced-split leg's `max_memory` cap governs WEIGHT placement only,
+   not activations/onload buffers.** The bf16 record shows peak allocation
+   (44.43 GiB) *exceeding* the `max_memory` GPU cap (44 GiB) it was run
+   under. This probe's split verdict (H0 confirmed/falsified) must therefore
+   come from observing whether the cross-device forward pass completes
+   correctly or errors/diverges — never from "peak stayed under the cap,"
+   which the bf16 record already shows is not a safe inference.
+4. **A successful load with no forward pass proves nothing.** This is the
+   exact gap in the 2026-07-23 record this plan exists to close — see
+   `docs/handoffs/2026-07-23-int4-autoround-loaded.md`: that record documents
+   "load + single forward pass verified" on what was then a complete
+   checkpoint, never an in-rig/multi-step generation run, and the checkpoint
+   it was run against is not the one present in cache today (see "Outcome"
+   above — current cache is missing shards 1-5). Every green claim in this
+   experiment's eventual re-run entry must name the forward-pass evidence
+   (shape, step count, coherence check) behind it, not load success alone.
+
+The orchestrator/operator seat may independently poll `nvidia-smi` at its own
+cadence during the re-run for observability; that poll is not this probe's
+instrument of record — the in-process `torch.cuda.max_memory_allocated()` +
+continuous in-run sampling above is primary, per point 1.
