@@ -29,6 +29,7 @@ import pytest
 import torch
 
 import surfaces.comfyui.loader as loader_module
+from surfaces.comfyui.live_view import DGEMMA_STEP_EVENT
 from surfaces.comfyui.loader import DGemmaLoader
 from surfaces.comfyui.sampler import DGemmaSampler
 
@@ -380,7 +381,10 @@ def test_sampler_input_types_declares_all_p2_widgets():
     }
     # P3: `unique_id` is a hidden input (standard ComfyUI idiom), not a widget —
     # routes the live per-step push (plan.md Phase 3 (a)) to the right node.
-    assert spec["hidden"] == {"unique_id": "UNIQUE_ID"}
+    # `dgemma_live_view` (issue #188 ONE-MINT fix) is the live-view capability
+    # sentinel merged from `live_view.LIVE_VIEW_HIDDEN_INPUT` — see
+    # `tests/test_live_view_mint.py` for the dedicated enforcement surface.
+    assert spec["hidden"] == {"unique_id": "UNIQUE_ID", "dgemma_live_view": "DGEMMA_LIVE_VIEW"}
     assert spec["required"]["model"] == ("DGEMMA_MODEL",)
     # Issue #22 honesty finding: `thinking` carries an on-widget (hover)
     # tooltip marking it experimental — the injected-message path is
@@ -688,7 +692,7 @@ class TestLiveFramePush:
 
         assert len(captured_calls) == 1
         event, data, sid = captured_calls[0]
-        assert event == "dgemma.sampler.step"
+        assert event == DGEMMA_STEP_EVENT
         assert data["node"] == "42"
         assert data["canvas_idx"] == 0
         assert data["step_idx"] == 3

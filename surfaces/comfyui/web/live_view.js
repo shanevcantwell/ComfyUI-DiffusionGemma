@@ -1,13 +1,34 @@
 // web/live_view.js — DiffusionGemma live per-step view (plan.md Phase 3 (a)).
 //
-// `DGemmaSampler`'s own node body pushes one custom event per denoising step
-// via `PromptServer.instance.send_sync` (nodes/sampler.py, event name
-// `DGEMMA_STEP_EVENT = "dgemma.sampler.step"`) — ComfyUI gives a node's
-// outputs to downstream sockets only once its FUNCTION returns, so there is
-// no mechanism for a node to stream per-step state through a socket while
-// its own loop is still running. The live view is therefore a feature of the
-// sampling node itself, not a downstream consumer node (plan.md Phase 3, the
-// (a)/(b) split rationale; (b) is `DGemmaTrace`, unaffected by this file).
+// Any live-view-capable node's own node body pushes one custom event per
+// denoising step via `PromptServer.instance.send_sync`
+// (`surfaces/comfyui/live_view.py`'s shared `build_on_frame`, event name
+// `DGEMMA_STEP_EVENT = "dgemma.step"`) — ComfyUI gives a node's outputs to
+// downstream sockets only once its FUNCTION returns, so there is no
+// mechanism for a node to stream per-step state through a socket while its
+// own loop is still running. The live view is therefore a feature of the
+// sampling/denoising node itself, not a downstream consumer node (plan.md
+// Phase 3, the (a)/(b) split rationale; (b) is `DGemmaTrace`, unaffected by
+// this file).
+//
+// ONE-MINT fix (issue #188): this extension used to hardcode BOTH the single
+// event name it listened for (`"dgemma.sampler.step"`) AND the single node
+// type it decorated (`"DGemmaSampler"`) — so `DGemmaDenoise`, which landed
+// later (issue #62 Phase 3) with its own working python-side push under its
+// own event name, was invisible here: never decorated with the live widget,
+// never listened for. The fix is a single mint,
+// `surfaces/comfyui/live_view.py`, read from BOTH sides: one event name
+// (below), and a hidden-input sentinel (`LIVE_VIEW_HIDDEN_INPUT`,
+// `{"dgemma_live_view": "DGEMMA_LIVE_VIEW"}`) any live-view-capable node
+// merges into its own `INPUT_TYPES()["hidden"]`. ComfyUI serializes a node's
+// entire `INPUT_TYPES()` return value verbatim into `/object_info`
+// (`server.py`'s `node_info`: `info['input'] = obj_class.INPUT_TYPES()`),
+// which the frontend attaches to `node.constructor.nodeData.input` — so
+// `isLiveViewCapable` below reads `nodeData.input.hidden` generically for
+// ANY node type, rather than comparing `node.comfyClass` against a
+// hand-maintained list. A future live-view-capable node needs zero JS
+// changes: it only has to merge the same sentinel into its own `hidden`
+// dict.
 //
 // Registration-ordering note (load-bearing, not a style choice):
 // `api.addEventListener` MUST run inside `setup()` (fires once at app load),
@@ -58,8 +79,14 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const DGEMMA_STEP_EVENT = "dgemma.sampler.step";
-const DGEMMA_SAMPLER_NODE_TYPE = "DGemmaSampler";
+// Both values below MUST match `surfaces/comfyui/live_view.py`'s mint
+// exactly (`DGEMMA_STEP_EVENT` / the one key in `LIVE_VIEW_HIDDEN_INPUT`) —
+// this file's own re-inlining is the one JS-side literal the python-side
+// mint's own grep-gate style test (`tests/test_live_view_mint.py`) cannot
+// reach across the language boundary, so it is asserted by hand here and
+// reviewed alongside any future rename of either constant.
+const DGEMMA_STEP_EVENT = "dgemma.step";
+const LIVE_VIEW_HIDDEN_INPUT_KEY = "dgemma_live_view";
 const LIVE_WIDGET_NAME = "dgemma_live_view";
 
 const LIVE_LINE_HEIGHT = 14; // px per wrapped text line (12px monospace + leading)
@@ -140,17 +167,32 @@ function findLiveWidget(node) {
     return (node.widgets || []).find((w) => w.name === LIVE_WIDGET_NAME);
 }
 
+// ONE-MINT read (issue #188): a node declares live-view capability by
+// merging `live_view.LIVE_VIEW_HIDDEN_INPUT` into its own
+// `INPUT_TYPES()["hidden"]` dict (python side). ComfyUI's `/object_info`
+// serializes a node's entire `INPUT_TYPES()` return verbatim
+// (`server.py`'s `node_info`: `info['input'] = obj_class.INPUT_TYPES()`),
+// and the frontend attaches that same structure to
+// `node.constructor.nodeData.input` — so this checks the node's OWN
+// declared hidden inputs, not a hardcoded `comfyClass`/node-type list. Any
+// present/future node that merges the sentinel is covered with zero JS
+// changes.
+function isLiveViewCapable(node) {
+    const hidden = node.constructor?.nodeData?.input?.hidden;
+    return Boolean(hidden && LIVE_VIEW_HIDDEN_INPUT_KEY in hidden);
+}
+
 app.registerExtension({
     name: "DiffusionGemma.LiveView",
 
-    // Append the live widget to every DGemmaSampler instance as it is
-    // created — it lands after the node-def widgets (prompt, seed, ...,
+    // Append the live widget to every live-view-capable node instance as it
+    // is created — it lands after the node-def widgets (prompt, seed, ...,
     // thinking), i.e. at the bottom of the widget stack, with its own
     // layout-reserved lines ("explicitly add an empty line to the bottom",
     // as a widget that owns those lines). The idle text makes the reserved
     // space visibly intentional rather than a mystery gap.
     nodeCreated(node) {
-        if (node.comfyClass !== DGEMMA_SAMPLER_NODE_TYPE) {
+        if (!isLiveViewCapable(node)) {
             return;
         }
         if (findLiveWidget(node)) {

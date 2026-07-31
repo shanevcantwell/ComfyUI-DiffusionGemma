@@ -116,9 +116,12 @@ def test_kv_cache_optional_input_is_the_documented_denoise_delta():
 
 
 def test_hidden_inputs_match():
+    """Issue #188: both nodes now also merge `live_view.LIVE_VIEW_HIDDEN_INPUT`
+    (`dgemma_live_view`) into their `hidden` dict — the ONE-MINT sentinel the
+    JS extension reads generically instead of a hardcoded node-type list."""
     sampler_hidden = set(DGemmaSampler.INPUT_TYPES().get("hidden", {}))
     denoise_hidden = set(DGemmaDenoise.INPUT_TYPES().get("hidden", {}))
-    assert sampler_hidden == denoise_hidden == {"unique_id"}
+    assert sampler_hidden == denoise_hidden == {"unique_id", "dgemma_live_view"}
 
 
 def test_output_signature_matches_exactly():

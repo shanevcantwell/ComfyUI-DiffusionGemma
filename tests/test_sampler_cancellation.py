@@ -15,7 +15,7 @@ would duplicate the engine-side suite.
 this repo, by design — same posture `tests/test_seam.py` and
 `tests/test_loader_folder_paths.py` already document for `folder_paths`).
 `_build_should_cancel` imports `comfy.model_management` lazily, INSIDE the
-returned closure — the same shape `_build_on_frame` already uses for
+returned closure — the same shape `live_view.build_on_frame` already uses for
 `from server import PromptServer` — so:
 
 - the "no interrupt" case (a) needs no fake at all: the real `ImportError`
@@ -96,7 +96,7 @@ class TestBuildShouldCancel:
         self, fake_comfy_model_management
     ):
         """Display/interrupt plumbing must never kill generation (the same
-        non-negotiable rule `_build_on_frame`'s docstring states for the live
+        non-negotiable rule `live_view.build_on_frame`'s docstring states for the live
         push) — a `processing_interrupted()` that itself raises degrades to
         "not cancelled", logged, not propagated."""
 
@@ -111,7 +111,7 @@ class TestBuildShouldCancel:
 
     def test_returns_a_fresh_closure_each_call(self):
         """Not load-bearing behavior, just documents the shape: each call
-        builds an independent closure (mirrors `_build_on_frame`'s pattern),
+        builds an independent closure (mirrors `live_view.build_on_frame`'s pattern),
         not a shared singleton predicate."""
         first = sampler_module._build_should_cancel()
         second = sampler_module._build_should_cancel()
@@ -211,8 +211,8 @@ class TestZeroComfyImportSafety:
     def test_build_should_cancel_does_not_import_comfy_until_the_closure_is_called(self):
         """The lazy-import discipline itself: building the closure must not
         trigger the `comfy` import — only CALLING it does (same shape as
-        `_build_on_frame`, whose `from server import PromptServer` line lives
-        inside `on_frame`, not inside `_build_on_frame`)."""
+        `live_view.build_on_frame`, whose `from server import PromptServer` line
+        lives inside `on_frame`, not inside `build_on_frame` itself)."""
         assert "comfy" not in sys.modules
 
         should_cancel = sampler_module._build_should_cancel()
