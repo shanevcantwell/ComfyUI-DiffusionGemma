@@ -118,7 +118,19 @@ def _install_load_fakes(monkeypatch, captured: dict, hf_device_map=None):
     against `FakeHfModel.to` — but the no-CUDA guard upstream of it (issue
     #143) is a real host check, so without this pin these tests pass on a
     CUDA host and fail on CPU-only CI for a reason unrelated to what they're
-    testing."""
+    testing.
+
+    Also pins `torch.cuda.mem_get_info` to a roomy fake (48 GiB free)
+    (issue #135 — hermeticity fix, mirroring test_autoround_load.py's
+    `_install_fakes`): the autoround pre-load VRAM precondition
+    (`_assert_autoround_vram_precondition`, issue #183) reads it whenever
+    a test here reaches `load_model(quant="autoround")`. Without this pin,
+    the `is_available` True pin above sends that precondition into a REAL
+    `torch.cuda.mem_get_info()` call — which raises `RuntimeError: No CUDA
+    GPUs are available` on CPU-only CI (the `is_available` pin lies about
+    device presence) and reads live host VRAM occupancy on a real CUDA host
+    (flaking these tests under GPU-tenant contention). Neither failure mode
+    has anything to do with what these tests verify."""
 
     def fake_from_pretrained(repo_id, **kwargs):
         captured["repo_id"] = repo_id
@@ -138,6 +150,10 @@ def _install_load_fakes(monkeypatch, captured: dict, hf_device_map=None):
         fake_processor_from_pretrained,
     )
     monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr(
+        "dgemma.model.torch.cuda.mem_get_info",
+        lambda *a, **k: (48 * 1024**3, 48 * 1024**3),
+    )
 
 
 def _patch_autoconfig(monkeypatch, *, quantization_config=None, raise_exc=None):

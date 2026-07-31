@@ -502,6 +502,19 @@ class TestAutoroundMissingError:
             "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained",
             raising_from_pretrained,
         )
+        # Issue #135 hermeticity fix: pin the autoround pre-load VRAM
+        # precondition's own CUDA touchpoints (`_assert_autoround_vram_
+        # precondition`, issue #183) so this test exercises the
+        # from_pretrained ImportError path unconditionally, not whatever
+        # `torch.cuda.mem_get_info()` happens to report on the host running
+        # the suite (real host state under GPU-tenant contention; a raw
+        # RuntimeError on CPU-only CI once `is_available` is no longer
+        # pinned True elsewhere).
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (48 * 1024**3, 48 * 1024**3),
+        )
 
         with pytest.raises(RuntimeError) as excinfo:
             load_model(repo_id=None, quant="autoround")
@@ -519,6 +532,14 @@ class TestAutoroundMissingError:
         monkeypatch.setattr(
             "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained",
             raising_from_pretrained,
+        )
+        # Issue #135 hermeticity fix: see sibling test above — pin the VRAM
+        # precondition's CUDA touchpoints so this test isn't at the mercy of
+        # host VRAM occupancy or CUDA availability.
+        monkeypatch.setattr("dgemma.model.torch.cuda.is_available", lambda: True)
+        monkeypatch.setattr(
+            "dgemma.model.torch.cuda.mem_get_info",
+            lambda *a, **k: (48 * 1024**3, 48 * 1024**3),
         )
 
         with pytest.raises(RuntimeError) as excinfo:
