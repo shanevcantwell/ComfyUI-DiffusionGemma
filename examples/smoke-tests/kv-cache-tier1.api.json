@@ -1,9 +1,7 @@
 {
   "80": {
     "inputs": {
-      "repo_id": "google/diffusiongemma-26B-A4B-it",
-      "quant": "none",
-      "local_files_only": false
+      "quant": "none"
     },
     "class_type": "DGemmaLoader",
     "_meta": { "title": "DiffusionGemma Loader" }
@@ -26,6 +24,7 @@
       "entropy_bound": 0.1,
       "confidence": 0.005,
       "gen_length": 256,
+      "thinking": false,
       "model": ["80", 0],
       "kv_cache": ["81", 0]
     },
@@ -43,7 +42,7 @@
     "_meta": { "title": "Preview CanvasState" }
   },
   "85": {
-    "inputs": { "canvas_trace": ["82", 2] },
+    "inputs": { "canvas_trace": ["82", 2], "mode": "commit", "cell_px": 6 },
     "class_type": "DGemmaTrace",
     "_meta": { "title": "DiffusionGemma Trace (reads injected_cache_provenance)" }
   },

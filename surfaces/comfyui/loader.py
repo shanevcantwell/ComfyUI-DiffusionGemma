@@ -13,30 +13,46 @@ user pick" into a plain local filesystem path; `dgemma.model.load_model`
 still only ever sees a path/repo_id string and a `local_files_only` bool, no
 different than before.
 
-RATIFICATION 2026-07-13 — the folder_paths dropdown ships DISABLED by default
+RATIFICATION 2026-07-13 — the folder_paths dropdown shipped DISABLED by default
 (`_LOCAL_FOLDERS_ENABLED = False`). Rationale (operator ratification feedback):
-the pack's current load path is deliberately un-ComfyUI — weights come via
+the pack's load path was deliberately un-ComfyUI — weights came only via
 `from_pretrained()` out of the HF hub cache (`HF_HOME`), NOT from ComfyUI's
 `models/diffusion_models`/`text_encoders` directories. A folder_paths scan
-against directories the model never inhabits would present an empty (or worse,
-misleadingly populated) selector, so the HF-identifier flow (`repo_id`) stays
-the primary, visible input and the dropdown is scaffolding held behind the flag
-until its ENABLE TRIGGER is met:
+against directories the model never inhabited would present an empty (or worse,
+misleadingly populated) selector, so the HF-identifier flow (`repo_id`) stayed
+the primary, visible input and the dropdown was scaffolding held behind the
+flag until its ENABLE TRIGGER was met:
 
   * #15 — GGUF backend graduation (weights placed as `.gguf` under a ComfyUI
     model dir), and/or
   * #4  — an AWQ/quantized checkpoint placed conventionally under
     `models/diffusion_models` (or `text_encoders`).
 
-Until then the scanning/resolution code + its path-traversal guard are shipped,
-tested, and ready — but not wired into the visible UI. Flip `_LOCAL_FOLDERS_ENABLED`
-to `True` (and remove this note's "until then" clause) on the day weights
-actually live under ComfyUI model dirs. `local_files_only` and the traversal
-guard remain active for the HF-cache flow regardless of the flag — they are
-wanted independent of the dropdown (see `resolve_local_model_dir`'s docstring).
+ENABLE TRIGGER FIRED 2026-07-23 — an AutoRound INT4 checkpoint (#128) was
+placed at `models/text_encoders/diffusiongemma-26B-A4B-it-int4-AutoRound`, a
+real ComfyUI model dir, matching the #4 trigger above. `_LOCAL_FOLDERS_ENABLED`
+was flipped to `True` same-day in commit 69ab019 — but that commit ALSO
+narrowed `_MODEL_FOLDER_KEYS` from the union `("diffusion_models",
+"text_encoders")` to `("text_encoders",)` only, misattributed to issue #136
+(a same-day, unrelated `local_files_only`-widget-removal commit) and argued
+solely from "DiffusionGemma is an LLM — weights live under text_encoders, not
+diffusion_models" — silently dropping the other half of issue #17's original,
+deliberate reasoning: DiffusionGemma is a DiT-peer *by role* (a denoising
+loader analogous to UNETLoader) even though it is Gemma-lineage *by weights*,
+so users may reasonably drop a checkpoint under either ComfyUI models folder.
+No PR, no design note, and no argument against the union rationale accompanies
+the narrowing — see issue #150 (suite-census Cluster B forensic
+reconstruction) for the full timeline. Per records-govern (the un-rebutted
+#17 ratification stands absent a countervailing argument), the union scan is
+restored below; `_LOCAL_FOLDERS_ENABLED = True` stays, since the enable
+trigger's firing is independently confirmed. `local_files_only` and the
+traversal guard remain active for the HF-cache flow regardless of the flag —
+they are wanted independent of the dropdown (see `resolve_local_model_dir`'s
+docstring).
 """
 from __future__ import annotations
 
+import logging
 import os
 
 # Dual-context import, explicit package-depth gate (same discipline as the
@@ -72,6 +88,7 @@ if __package__ and __package__.count(".") >= 2:
         _QUANT_CHOICES,
         DEFAULT_QUANT,
         DEFAULT_REPO_ID,
+        LoadInterrupted,
         load_model,
     )
     from .socket_types import DGEMMA_MODEL
@@ -80,19 +97,14 @@ else:
         _QUANT_CHOICES,
         DEFAULT_QUANT,
         DEFAULT_REPO_ID,
+        LoadInterrupted,
         load_model,
     )
     from surfaces.comfyui.socket_types import DGEMMA_MODEL
 
-# Ratification 2026-07-13: the folder_paths dropdown is SCAFFOLDING held OFF
-# until weights actually live under ComfyUI model dirs. See the module
-# docstring for the enable trigger (#15 GGUF graduation / #4 conventional
-# checkpoint placement). When False (the default, current state): the dropdown
-# is omitted from `INPUT_TYPES` entirely — hidden, not merely de-defaulted —
-# and the HF-identifier `repo_id` flow is the sole visible load path. Flip to
-# True on the trigger day; the scan/resolve functions and their tests already
-# ship, so enabling is a one-line change, not a re-implementation.
-_LOCAL_FOLDERS_ENABLED = False
+# Enable trigger fired 2026-07-23 (INT4 AutoRound checkpoint under
+# text_encoders/ — see the module docstring and issue #150).
+_LOCAL_FOLDERS_ENABLED = True
 
 # `folder_paths` is a ComfyUI-runtime module: real inside a live ComfyUI
 # process (its repo root is on sys.path at startup — `ComfyUI/main.py`), and
@@ -104,8 +116,6 @@ _LOCAL_FOLDERS_ENABLED = False
 # the dual-context gate above (that branches on a deterministic `__package__`
 # signal that is always one of two known values); here the signal is
 # "importable or not" itself, so ImportError is the correct, narrow gate.
-from huggingface_hub.errors import LocalEntryNotFoundError
-
 try:
     import folder_paths
 except ImportError:
@@ -209,6 +219,42 @@ def resolve_local_model_dir(name: str) -> str | None:
     return None
 
 
+def _build_check_interrupted():
+    """Build the interrupt-poll predicate handed to `load_model` as
+    `check_interrupted` (issue #140 loader half), mirroring
+    `surfaces/comfyui/sampler.py`'s `_build_should_cancel` closure exactly:
+    `comfy.model_management` is imported lazily, INSIDE the returned closure
+    (never at module top, never even inside this builder), so this module
+    keeps importing — and `load()` keeps running — with zero ComfyUI
+    present (the normal pytest/headless condition this whole file's dual-
+    context import discipline already assumes).
+
+    `dgemma/model.py` never imports `comfy` itself (ADR-CDG-003): this
+    closure is the entire surface-side connection the core's
+    `check_interrupted` parameter needs. A failure reading
+    `processing_interrupted()` degrades to "not interrupted" (logged, not
+    raised) — the same non-negotiable rule `_build_should_cancel` states for
+    its own predicate: interrupt-plumbing must never itself crash the load
+    it is only supposed to be able to stop cleanly.
+    """
+
+    def check_interrupted() -> bool:
+        try:
+            import comfy.model_management as model_management
+
+            return bool(model_management.processing_interrupted())
+        except ImportError:
+            return False  # No live ComfyUI process (e.g. pytest) — never interrupt.
+        except Exception as exc:  # noqa: BLE001 — deliberate breadth: see docstring.
+            logging.warning(
+                "DGemmaLoader interrupt check failed (treating as not-interrupted): %s",
+                exc,
+            )
+            return False
+
+    return check_interrupted
+
+
 class DGemmaLoader:
     """Loads a DiffusionGemma model + processor onto the `DGEMMA_MODEL` socket."""
 
@@ -218,18 +264,13 @@ class DGemmaLoader:
         # `from_pretrained()` out of the HF hub cache (`HF_HOME`) — the pack's
         # deliberate (un-ComfyUI) load path (ratification 2026-07-13).
         required = {
-            "repo_id": ("STRING", {"default": DEFAULT_REPO_ID}),
-            # "none" = full bf16 (53GB VRAM); "autoround" = pre-quantized
+            # "none" = full bf16 (~53GB VRAM); "autoround" = pre-quantized
             # W4A16 INT4 checkpoint (~30GB VRAM, requires auto-round extra).
             # See issue #128.
-            "quant": (list(_QUANT_CHOICES), {"default": DEFAULT_QUANT}),
-            # Off by default: keep the HF download-and-cache behavior. On:
-            # forces both from_pretrained calls to resolve only from the local
-            # HF cache (no network) — useful once a checkpoint is already
-            # cached (e.g. tokenizer-only test runs). Kept active regardless of
-            # the folder_paths flag (ratification 2026-07-13): it applies to the
-            # HF-cache flow too and is wanted independent of the dropdown.
-            "local_files_only": ("BOOLEAN", {"default": False}),
+            "quant": (list(_QUANT_CHOICES), {
+                "default": DEFAULT_QUANT,
+                "tooltip": "none = full bf16 (~53GB VRAM) · autoround = pre-quantized INT4 (~30GB VRAM, requires auto-round extra)",
+            }),
         }
         spec: dict = {"required": required}
 
@@ -251,11 +292,16 @@ class DGemmaLoader:
 
     def load(
         self,
-        repo_id: str,
         quant: str,
+        repo_id: str = DEFAULT_REPO_ID,  # compat param — ignored, hardcoded below
         local_files_only: bool = False,
         local_model_dir: str | None = None,
     ):
+        # Interrupt wiring (issue #140 loader half): the same closure serves
+        # every load_model call this method makes, local-folders or HF-
+        # identifier — one predicate, built once per invocation.
+        check_interrupted = _build_check_interrupted()
+
         # Advanced/local-folders path (only reachable when the dropdown is
         # enabled AND a selection was made): resolve the dropdown pick through
         # the path-traversal guard (`resolve_local_model_dir`) and force
@@ -263,27 +309,48 @@ class DGemmaLoader:
         # fetch. The guard stays active here (ratification 2026-07-13) even
         # though the dropdown is scaffolding: a `/prompt` POST can carry a
         # `local_model_dir` string regardless of what the UI renders.
-        if _LOCAL_FOLDERS_ENABLED and local_model_dir:
-            model_path = resolve_local_model_dir(local_model_dir)
-            if model_path is None:
-                raise RuntimeError(
-                    f"DGemmaLoader: could not resolve local_model_dir={local_model_dir!r} "
-                    "to a model directory under the configured 'diffusion_models' or "
-                    "'text_encoders' folders. Place the DiffusionGemma checkpoint "
-                    "(a directory containing config.json) under one of those ComfyUI "
-                    "model folders — the local-folders path never falls back to a "
-                    "network fetch."
-                )
-            return (load_model(repo_id=model_path, quant=quant, local_files_only=True),)
-
-        # PRIMARY path: HF identifier. Try offline-first (skip all HEAD
-        # requests when cached), fall back to network on cache miss.
-        # The widget's local_files_only toggle is honored — if the user
-        # explicitly set it True, we never retry online; if False (default)
-        # or omitted, we try offline first and only hit the network on miss.
         try:
-            return (load_model(repo_id=repo_id, quant=quant, local_files_only=True),)
-        except LocalEntryNotFoundError:
-            if local_files_only:
-                raise  # user explicitly requested offline — don't retry
-            return (load_model(repo_id=repo_id, quant=quant, local_files_only=False),)
+            if _LOCAL_FOLDERS_ENABLED and local_model_dir:
+                model_path = resolve_local_model_dir(local_model_dir)
+                if model_path is None:
+                    raise RuntimeError(
+                        f"DGemmaLoader: could not resolve local_model_dir={local_model_dir!r} "
+                        "to a model directory under the configured 'diffusion_models' or "
+                        "'text_encoders' folders. Place the DiffusionGemma checkpoint "
+                        "(a directory containing config.json) under one of those ComfyUI "
+                        "model folders — the local-folders path never falls back to a "
+                        "network fetch."
+                    )
+                return (
+                    load_model(
+                        repo_id=model_path,
+                        quant=quant,
+                        local_files_only=True,
+                        check_interrupted=check_interrupted,
+                    ),
+                )
+
+            # PRIMARY path: HF identifier. Always network-available — transformers
+            # checks cache before hitting the network. Issue #136: local_files_only
+            # widget removed; hardcoded False.
+            return (
+                load_model(
+                    repo_id=None,
+                    quant=quant,
+                    local_files_only=False,
+                    check_interrupted=check_interrupted,
+                ),
+            )
+        except LoadInterrupted as exc:
+            # Translate the engine-neutral LoadInterrupted (dgemma/model.py
+            # stays ComfyUI-agnostic, ADR-CDG-003) into the exact exception
+            # type ComfyUI's own executor special-cases for a clean "Processing
+            # interrupted" outcome (execution.py's PromptExecutor) rather than
+            # the generic error/traceback path every other exception here
+            # takes. Lazy import mirrors _build_check_interrupted's own
+            # zero-comfy-present discipline — this except clause is only ever
+            # reached when check_interrupted() itself returned True, which
+            # already required a live `comfy.model_management` to say so.
+            import comfy.model_management as model_management
+
+            raise model_management.InterruptProcessingException() from exc

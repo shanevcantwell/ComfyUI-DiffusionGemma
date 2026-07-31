@@ -298,10 +298,13 @@ class KVCache:
 
     cache: Any
     """The live per-layer K/V store (`transformers.DynamicCache`). Per layer
-    `i`: `key_cache[i]`, `value_cache[i]` each a tensor of shape `(batch,
-    num_kv_heads, seq_len, head_dim)`, dtype matching the loaded model
-    (bfloat16 in production), on the model's device. Layer count must equal
-    the loaded model's decoder-layer count (V1)."""
+    `i`: `layers[i].keys`, `layers[i].values` each a tensor of shape (batch,
+    num_kv_heads, seq_len, head_dim), dtype matching the loaded model
+    (bfloat16 in production), on the model's device (transformers==5.13.0's
+    real `.layers`-list shape, grounded live — issue #178; the older
+    `.key_cache`/`.value_cache` list-attribute shape no longer exists on the
+    installed class). Layer count (`len(cache)`) must equal the loaded
+    model's decoder-layer count (V1)."""
 
     cumulative_length: "tuple[int, ...]"
     """Per-layer running committed length — the ADR-CDG-012 grounding

@@ -13,6 +13,7 @@ on 3.10 rather than hard-erroring (repo's own `requires-python = ">=3.10"`).
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -28,11 +29,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 REQUIREMENTS_PATH = REPO_ROOT / "requirements.txt"
 
-# ComfyUI core already ships these — a Manager-driven pip install of any of
-# them here would touch pre-built CUDA wheels (torch/torchvision) or the
-# numpy ABI the rest of a ComfyUI install depends on. PEP-503 canonicalized
-# (lowercase; this set has no hyphens/underscores/dots to normalize further).
-CORE_PROVIDED = {"torch", "torchvision", "numpy", "pillow"}
+
+def _load_emit_requirements_module():
+    """Load scripts/emit_requirements.py by path (it is a standalone script,
+    not an importable package) so this test can pull CORE_PROVIDED from it —
+    the ONE-MINT definition (issue #146): the script defines the set exactly
+    once, and this test imports rather than redefines it."""
+    script_path = REPO_ROOT / "scripts" / "emit_requirements.py"
+    spec = importlib.util.spec_from_file_location("emit_requirements", script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CORE_PROVIDED = _load_emit_requirements_module().CORE_PROVIDED
 
 _NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 

@@ -19,7 +19,8 @@ from typing import Any
 
 import requests
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "examples"
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "smoke-tests"
+# Workflows moved to examples/smoke-tests/ per #127 (b4c5eca, 2026-07-22).
 
 # examples/README.md's own provenance table: node 74 previews the STRING
 # text output, node 75 previews the CanvasState repr (validity readout).

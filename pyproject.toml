@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-diffusiongemma"
-version = "0.4.0"
+version = "0.4.1"
 description = "ComfyUI node pack for DiffusionGemma — uniform-state discrete diffusion text generation, made instrumentable."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -56,8 +56,7 @@ dev = ["pytest", "ruff", "requests", "websocket-client", "coverage"]
 # from this pack's core dependencies (`tests/test_seam.py`). A ComfyUI-only
 # install (the `dependencies` list above) never needs this extra; only
 # `surfaces/mcp/server.py` (via `python -m surfaces.mcp.server`) requires it.
-mcp = ["mcp>=1.0.0"]
-
+mcp = ["mcp>=1.0.0,<2.0.0"]
 # ComfyUI Registry metadata (comfy-cli / registry.comfy.org).
 # PublisherId minted 2026-07-05 (operator, registry.comfy.org — immutable).
 # Publishing: .github/workflows/publish_action.yml auto-publishes on version

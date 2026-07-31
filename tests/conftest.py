@@ -65,6 +65,8 @@ from typing import Any, Callable
 import pytest
 import torch
 
+from transformers.cache_utils import DynamicCache
+
 from dgemma.model import DEFAULT_REPO_ID
 from dgemma.types import DGemmaModel, EditOp, KVCache, Provenance
 
@@ -490,12 +492,24 @@ def fake_pipeline(fake_pipeline_factory: Callable[..., FakePipelineFactory]) -> 
 # `sliding_window_pattern = 6`) at a size cheap enough for a unit test.
 
 
-class FakeDynamicCache:
-    """Mirrors `transformers.DynamicCache`'s surface the KV_CACHE channel
-    touches (ADR-CDG-012 §D.0): per-layer `key_cache[i]`/`value_cache[i]`
-    tensors of shape `(batch, num_kv_heads, seq_len, head_dim)`, plus
-    `get_seq_length()`. Small CPU tensors — a controllable stand-in for
-    ingress-validation tests, not a numerical cache reimplementation.
+class FakeDynamicCache(DynamicCache):
+    """A REAL `transformers.DynamicCache` (issue #178: the prior fake
+    hand-rolled a `.key_cache`/`.value_cache` list-attribute shape that
+    `transformers==5.13.0`'s real class no longer has — `DynamicCache` per
+    `cache_utils.py:1499-1603` stores per-layer state on `.layers`, a list
+    of `DynamicLayer` objects each exposing `.keys`/`.values` tensors. The
+    unit suite passed against the old fake's stale shape while the real
+    live path crashed immediately — the exact defect class #162 already
+    named once. Fixed here by subclassing the REAL class directly instead
+    of re-mirroring its surface by hand, so no future transformers upgrade
+    can silently drift this fixture out of shape again.
+
+    Kept as a thin subclass (not a bare `DynamicCache()` at each call site)
+    only to preserve this module's synthetic-geometry construction
+    convenience (`num_layers=`/`seq_len=`/etc. kwargs) and the `.append()`
+    growth helper below — every attribute a caller reads off an instance
+    (`.layers`, `.get_seq_length()`, `len(cache)`) is the real class's own,
+    inherited, not reimplemented.
     """
 
     def __init__(
@@ -509,25 +523,29 @@ class FakeDynamicCache:
         dtype: torch.dtype = torch.bfloat16,
         device: str = "cpu",
     ) -> None:
+        super().__init__()
         shape = (batch, num_kv_heads, seq_len, head_dim)
-        self.key_cache = [torch.zeros(shape, dtype=dtype, device=device) for _ in range(num_layers)]
-        self.value_cache = [torch.zeros(shape, dtype=dtype, device=device) for _ in range(num_layers)]
-
-    def get_seq_length(self, layer_idx: int = 0) -> int:
-        return self.key_cache[layer_idx].shape[2]
+        for layer_idx in range(num_layers):
+            key_states = torch.zeros(shape, dtype=dtype, device=device)
+            value_states = torch.zeros(shape, dtype=dtype, device=device)
+            self.update(key_states, value_states, layer_idx)
 
     def append(self, num_new_tokens: int) -> None:
-        """Grows every layer's seq_len dim by `num_new_tokens` — the fake's
-        stand-in for the real `DynamicLayer.update()` cache-write
-        (`cache_utils.py:254`) `encode_sequence`'s wrapped encoder call
-        triggers. Zero-valued appended tensors: this fake exists to exercise
-        shape/bookkeeping (cumulative_length growth), not numerical content."""
-        for i, key in enumerate(self.key_cache):
-            batch, heads, _, head_dim = key.shape
-            extra = torch.zeros((batch, heads, num_new_tokens, head_dim), dtype=key.dtype, device=key.device)
-            self.key_cache[i] = torch.cat([key, extra], dim=2)
-            value = self.value_cache[i]
-            self.value_cache[i] = torch.cat([value, extra.clone()], dim=2)
+        """Grows every layer's seq_len dim by `num_new_tokens` — the
+        fixture's stand-in for the real encoder's own `past_key_values.
+        update()` cache-write (`DynamicLayer.update`, `cache_utils.py:
+        149-168`) that `encode_sequence`'s wrapped encoder call triggers.
+        Zero-valued appended tensors: this fixture exists to exercise
+        shape/bookkeeping (cumulative_length growth), not numerical
+        content. Goes through the real `.update()` per layer (the only
+        real mutation path — `DynamicLayer.update` concatenates in place
+        and returns the grown tensors), rather than hand-splicing
+        `.layers[i].keys` directly."""
+        for layer_idx, layer in enumerate(self.layers):
+            batch, heads, _, head_dim = layer.keys.shape
+            extra_key = torch.zeros((batch, heads, num_new_tokens, head_dim), dtype=layer.keys.dtype, device=layer.keys.device)
+            extra_value = torch.zeros((batch, heads, num_new_tokens, head_dim), dtype=layer.values.dtype, device=layer.values.device)
+            self.update(extra_key, extra_value, layer_idx)
 
 
 class FakeDGemmaTextConfig:

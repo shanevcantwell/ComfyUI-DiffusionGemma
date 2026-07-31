@@ -9,16 +9,17 @@ at all, so any such import would already have raised at collection time —
 the second test below is belt-and-suspenders on the same invariant
 `tests/test_seam.py` checks from the `dgemma/` side).
 
-Issue #17 (ratification 2026-07-13) — the `folder_paths` dropdown SHIPS
-DISABLED by default. The HF-identifier flow (`repo_id` STRING + `local_files_only`
-BOOLEAN) is the PRIMARY, visible load path; the dropdown scan/resolve glue
-(`surfaces.comfyui.loader.list_local_model_dirs`/`resolve_local_model_dir`) is shipped and
-tested but held behind `surfaces.comfyui.loader._LOCAL_FOLDERS_ENABLED` (default False)
-until weights actually live under ComfyUI model dirs (enable trigger: #15 GGUF
-graduation / #4 conventional checkpoint placement). While disabled the dropdown
-is omitted from `INPUT_TYPES` entirely (hidden, not de-defaulted). The
-path-traversal guard and `local_files_only` stay active regardless of the flag —
-they are wanted for the HF-cache flow too.
+Issue #17 (ratification 2026-07-13; enable trigger fired 2026-07-23, ratified
+via issue #150) — the `folder_paths` dropdown is ENABLED
+(`surfaces.comfyui.loader._LOCAL_FOLDERS_ENABLED = True`): the AutoRound INT4
+checkpoint (#128) landed under a real ComfyUI model dir, firing the
+2026-07-13 ratification's enable trigger. The HF-identifier flow (`repo_id`
+STRING + `local_files_only` BOOLEAN) remains the PRIMARY, visible load path;
+the dropdown (`surfaces.comfyui.loader.list_local_model_dirs`/
+`resolve_local_model_dir`, scanning the union of `diffusion_models` and
+`text_encoders` per #17's original design) surfaces in `optional`, never
+`required`. The path-traversal guard and `local_files_only` stay active
+regardless of the flag — they are wanted for the HF-cache flow too.
 """
 from __future__ import annotations
 
@@ -60,29 +61,33 @@ def test_nodes_modules_do_not_import_comfy():
     assert not any(m == "comfy" or m.startswith("comfy.") for m in sys.modules)
 
 
-def test_loader_input_types_declares_repo_id_quant_and_local_files_only():
-    """Ratification 2026-07-13: the HF-identifier flow is PRIMARY and visible —
-    `repo_id` STRING (default DEFAULT_REPO_ID), `quant`, and the
-    `local_files_only` BOOLEAN are all in `required`."""
+def test_loader_input_types_declares_quant_only():
+    """Issue #132: repo_id is no longer a widget — the pack loads one model.
+    Issue #136: local_files_only removed from widget — no user-facing value,
+    crashes on incomplete cache. Only `quant` COMBO remains."""
     spec = DGemmaLoader.INPUT_TYPES()
-    assert "repo_id" in spec["required"]
-    assert spec["required"]["repo_id"][0] == "STRING"
+    assert "repo_id" not in spec["required"]
+    assert "local_files_only" not in spec["required"]
     assert "quant" in spec["required"]
-    assert spec["required"]["quant"][0] == ["none"]
-    assert spec["required"]["local_files_only"] == ("BOOLEAN", {"default": False})
+    assert spec["required"]["quant"][0] == ["none", "autoround"]
+    # quant has a tooltip explaining VRAM impact
+    assert "tooltip" in spec["required"]["quant"][1]
+    assert "VRAM" in spec["required"]["quant"][1]["tooltip"]
 
 
-def test_loader_input_types_hides_folder_paths_dropdown_by_default():
-    """Ratification 2026-07-13: the folder_paths dropdown ships DISABLED
-    (`_LOCAL_FOLDERS_ENABLED` False by default). While disabled it is omitted
-    from INPUT_TYPES ENTIRELY — no `model_name`/`local_model_dir` widget, no
-    empty/misleading selector — not merely de-defaulted. Hidden means hidden."""
-    assert loader_module._LOCAL_FOLDERS_ENABLED is False  # the shipped default
+def test_loader_input_types_surfaces_folder_paths_dropdown_by_default():
+    """Issue #150 (closes Cluster B): the 2026-07-13 ratification's enable
+    trigger fired 2026-07-23 (INT4 AutoRound checkpoint under a real ComfyUI
+    model dir) — `_LOCAL_FOLDERS_ENABLED` is True by default, and the dropdown
+    is surfaced. It stays out of `required` regardless: the HF-identifier flow
+    is still the PRIMARY widget a user reaches for; the dropdown is the
+    advanced/local-folders path in `optional`."""
+    assert loader_module._LOCAL_FOLDERS_ENABLED is True  # the shipped default, per #150
     spec = DGemmaLoader.INPUT_TYPES()
     assert "model_name" not in spec["required"]
     assert "local_model_dir" not in spec["required"]
-    # No `optional` block with the dropdown either.
-    assert "local_model_dir" not in spec.get("optional", {})
+    # The dropdown lives in `optional`, not `required`.
+    assert "local_model_dir" in spec.get("optional", {})
 
 
 def test_loader_input_types_surfaces_dropdown_in_optional_when_enabled(monkeypatch):
@@ -95,8 +100,8 @@ def test_loader_input_types_surfaces_dropdown_in_optional_when_enabled(monkeypat
 
     spec = DGemmaLoader.INPUT_TYPES()
 
-    # HF-identifier still primary/visible/required.
-    assert "repo_id" in spec["required"]
+    # repo_id no longer a widget (issue #132) — the pack loads one model.
+    assert "repo_id" not in spec["required"]
     # Dropdown is optional (a COMBO — bare list of options), not required.
     assert spec["optional"]["local_model_dir"] == (["some-local-model"],)
     assert "local_model_dir" not in spec["required"]
@@ -138,13 +143,48 @@ def test_loader_declarations():
 
 
 def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
-    """Primary HF-identifier flow (ratification 2026-07-13): `load()` forwards
-    `repo_id`/`quant`/`local_files_only` straight to `load_model`, pure
-    pass-through/wrap (ADR-CDG-003)."""
+    """Primary HF-identifier flow: `load()` forwards `repo_id=None`/`quant`
+    to `load_model`, pure pass-through/wrap (ADR-CDG-003). repo_id=None lets
+    the core auto-select. Issue #136: local_files_only is hardcoded False —
+    no widget, always network-available (transformers checks cache first).
+    The compat param is accepted but ignored."""
     sentinel = object()
     captured = {}
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
+        captured["repo_id"] = repo_id
+        captured["quant"] = quant
+        captured["local_files_only"] = local_files_only
+        captured["check_interrupted"] = check_interrupted
+        return sentinel
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    # compat params (repo_id, local_files_only) accepted but ignored
+    result = node.load(repo_id="any-value", quant="none", local_files_only=True)
+
+    assert result == (sentinel,)
+    # Issue #140 loader half: a callable check_interrupted is always forwarded
+    # (unconditionally built by the node), mirroring how the sampler always
+    # forwards on_frame/should_cancel regardless of whether a live ComfyUI
+    # process exists to actually consume it.
+    assert callable(captured.pop("check_interrupted"))
+    assert captured == {
+        "repo_id": None,
+        "quant": "none",
+        "local_files_only": False,  # hardcoded — widget removed (#136)
+    }
+
+
+def test_loader_passes_none_repo_for_autoround_quant(monkeypatch):
+    """When quant='autoround', the loader still passes repo_id=None — the
+    core resolves it to AUTOROUND_REPO_ID (Intel INT4 checkpoint). This
+    ensures the loader never hardcodes a bf16 checkpoint for an INT4 load."""
+    sentinel = object()
+    captured = {}
+
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured["repo_id"] = repo_id
         captured["quant"] = quant
         captured["local_files_only"] = local_files_only
@@ -153,63 +193,38 @@ def test_loader_calls_load_model_and_wraps_tuple(monkeypatch):
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    result = node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+    result = node.load(quant="autoround")
 
     assert result == (sentinel,)
-    assert captured == {
-        "repo_id": "google/diffusiongemma-26B-A4B-it",
-        "quant": "none",
-        "local_files_only": True,
-    }
+    assert captured["repo_id"] is None  # core auto-selects Intel INT4 checkpoint
+    assert captured["quant"] == "autoround"
 
 
-def test_loader_offline_first_succeeds_when_cached(monkeypatch):
-    """When the model is cached locally, `load()` tries offline first and
-    succeeds — no network calls made. This eliminates the HEAD-request
-    latency that previously added ~1 min before actual load."""
+def test_loader_hardcodes_local_files_only_false(monkeypatch):
+    """Issue #136: local_files_only is hardcoded False — no widget, always
+    network-available. Transformers checks cache before hitting the network,
+    so this is identical to what every other ComfyUI loader does."""
     captured = []
 
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured.append(local_files_only)
         return object()
 
     monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
 
     node = DGemmaLoader()
-    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
+    node.load(quant="none")
 
-    # Single call, offline-first — no network needed when cached
-    assert captured == [True]
+    assert captured == [False]
 
 
-def test_loader_falls_back_to_network_on_cache_miss(monkeypatch):
-    """When the model is NOT cached locally, `load()` catches
-    LocalEntryNotFoundError and retries with network access."""
+def test_loader_propagates_cache_miss_directly(monkeypatch):
+    """When load_model raises (cache miss, network error, etc.), the exception
+    propagates directly — no retry machinery."""
     from huggingface_hub.errors import LocalEntryNotFoundError
     captured = []
 
-    def fake_load_model(repo_id, quant, local_files_only):
-        captured.append(local_files_only)
-        if local_files_only:
-            raise LocalEntryNotFoundError("not cached")
-        return object()
-
-    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
-
-    node = DGemmaLoader()
-    node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none")
-
-    # First try offline (fails), then retry online
-    assert captured == [True, False]
-
-
-def test_loader_respects_explicit_local_files_only_true(monkeypatch):
-    """When user explicitly sets `local_files_only=True` and cache is empty,
-    the error propagates — no silent network fallback."""
-    from huggingface_hub.errors import LocalEntryNotFoundError
-    captured = []
-
-    def fake_load_model(repo_id, quant, local_files_only):
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
         captured.append(local_files_only)
         raise LocalEntryNotFoundError("not cached")
 
@@ -217,18 +232,39 @@ def test_loader_respects_explicit_local_files_only_true(monkeypatch):
 
     node = DGemmaLoader()
     with pytest.raises(LocalEntryNotFoundError):
-        node.load(repo_id="google/diffusiongemma-26B-A4B-it", quant="none", local_files_only=True)
+        node.load(quant="none")
 
-    # Only one call — no retry when user explicitly requested offline
-    assert captured == [True]
+    assert captured == [False]
+
+
+def test_loader_compat_param_local_files_only_is_ignored(monkeypatch):
+    """Issue #136: the compat param `local_files_only` is accepted (for
+    /prompt POST backward compat) but ignored — hardcoded False."""
+    captured = []
+
+    def fake_load_model(repo_id, quant, local_files_only, check_interrupted=None):
+        captured.append(local_files_only)
+        return object()
+
+    monkeypatch.setattr("surfaces.comfyui.loader.load_model", fake_load_model)
+
+    node = DGemmaLoader()
+    # compat param True is ignored — still gets False
+    node.load(quant="none", local_files_only=True)
+
+    assert captured == [False]
 
 
 def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch):
     """Belt-and-suspenders: even if a `/prompt` POST smuggles a
-    `local_model_dir` while the dropdown is DISABLED (the shipped default),
-    `load()` must NOT take the local-folders path — it stays on the HF
-    identifier. The flag gates the load path, not just the UI."""
-    assert loader_module._LOCAL_FOLDERS_ENABLED is False
+    `local_model_dir` while the dropdown is DISABLED, `load()` must NOT take
+    the local-folders path — it stays on the HF identifier. The flag gates the
+    load path, not just the UI. Since #150, `_LOCAL_FOLDERS_ENABLED` is True
+    by default (the enable trigger fired), so this test explicitly forces the
+    disabled branch to keep covering it — it is no longer the shipped
+    default, but the code path (and its guard) still exists and must still
+    hold, e.g. for an install predating the trigger."""
+    monkeypatch.setattr(loader_module, "_LOCAL_FOLDERS_ENABLED", False)
     captured = {}
     resolve_calls = []
 
@@ -238,7 +274,10 @@ def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch
     )
     monkeypatch.setattr(
         "surfaces.comfyui.loader.load_model",
-        lambda repo_id, quant, local_files_only: captured.update(repo_id=repo_id) or object(),
+        lambda repo_id, quant, local_files_only, check_interrupted=None: captured.update(
+            repo_id=repo_id
+        )
+        or object(),
     )
 
     DGemmaLoader().load(
@@ -247,8 +286,9 @@ def test_loader_disabled_dropdown_selection_is_ignored_hf_path_taken(monkeypatch
         local_model_dir="smuggled-selection",
     )
 
-    # HF identifier used; the guard was never even consulted while disabled.
-    assert captured["repo_id"] == "google/diffusiongemma-26B-A4B-it"
+    # HF identifier used (repo_id=None for core auto-selection); 
+    # the guard was never even consulted while disabled.
+    assert captured["repo_id"] is None
     assert resolve_calls == []
 
 
@@ -266,7 +306,7 @@ def test_loader_enabled_dropdown_resolves_through_guard_and_forces_local(monkeyp
     )
     monkeypatch.setattr(
         "surfaces.comfyui.loader.load_model",
-        lambda repo_id, quant, local_files_only: captured.update(
+        lambda repo_id, quant, local_files_only, check_interrupted=None: captured.update(
             repo_id=repo_id, local_files_only=local_files_only
         )
         or object(),

@@ -12,7 +12,10 @@ quantizes `nn.Linear`/`Conv1D` modules, and DiffusionGemma's ~42.5GiB of
 fused 3D MoE expert params are neither, so NF4 still needs ~46GiB on a
 single card (`loose-ends.md`, 2026-07-05 bnb-MoE entry — issue #4). The
 grounded default is `quant="none"` (full-precision bf16, `device_map="auto"`
-CPU-spill), verified with two integration PASSes on this box.
+CPU-spill), verified with two integration PASSes on this box (most recently
+the 2026-07-30 instrumented probe, `docs/experiments/bf16-fit-mechanism/`:
+42.4GiB GPU + 10.25GiB mmap-backed lazy offload, 2.2 s/step on this 48GB
+card).
 
 AutoRound INT4 (`quant="autoround"`) loads pre-quantized W4A16 checkpoints
 (e.g. Intel/diffusiongemma-26B-A4B-it-int4-AutoRound) at ~30GB VRAM vs 53GB
@@ -31,11 +34,34 @@ to `("none", "autoround")` — see issue #128.
 """
 from __future__ import annotations
 
+import contextlib
+from typing import Callable
+
 import torch
 
 from .types import DGemmaModel
 
+
+class LoadInterrupted(Exception):
+    """Raised by `load_model` when the surface-supplied `check_interrupted`
+    predicate reports `True` at one of the phase boundaries (issue #140
+    loader half).
+
+    Mirrors `dgemma/composite.py`'s `DiffusionCancelled` in shape (a plain,
+    engine-local exception so `dgemma/model.py` stays ComfyUI-agnostic,
+    ADR-CDG-003 — never imports `comfy.model_management` itself) but NOT in
+    partial-return semantics: a load has no partial `(text, CanvasState,
+    CanvasTrace)` to salvage, so this is a hard stop, not a caught-and-return.
+    The surface (`surfaces/comfyui/loader.py`) is the layer that decides what
+    a `LoadInterrupted` means to ComfyUI's own executor (see that module for
+    the translation into `comfy.model_management.InterruptProcessingException`).
+    """
+
+
 DEFAULT_REPO_ID = "google/diffusiongemma-26B-A4B-it"
+# Pre-quantized AutoRound W4A16 checkpoint — ~30GB VRAM vs 53GB bf16.
+# Used as the default when quant="autoround" and no explicit repo_id is given.
+AUTOROUND_REPO_ID = "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound"
 
 _QUANT_CHOICES = ("none", "autoround")
 
@@ -142,8 +168,14 @@ except ImportError as exc:  # pragma: no cover — broken/partial transformers i
     ) from exc
 
 
-def _apply_autoround_patches() -> None:
-    """Patch transformers + auto-round for INT4 checkpoint loading.
+# Reentrancy guard for _apply_autoround_patches() — see its docstring (H2).
+_apply_autoround_patches_depth = 0
+
+
+@contextlib.contextmanager
+def _apply_autoround_patches():
+    """Context manager: patch transformers + auto-round for INT4 checkpoint
+    loading, active only across the `from_pretrained` call, restored after.
 
     Three patches, all verified on the 48GB RTX-8000 box with Intel's
     diffusiongemma-26B-A4B-it-int4-AutoRound (issue #128):
@@ -158,60 +190,359 @@ def _apply_autoround_patches() -> None:
 
     3. **Tied-weight finalization** — `mark_tied_weights_as_initialized` and
        `tie_weights` crash when lm_head.weight is tied to a quantized
-       embed_tokens that has no `.weight` attribute (only `.qweight`).
+       embed_tokens that has no `.weight` attribute (only `.qweight`). NOTE:
+       Patch 3 only suppresses that crash — it does not materialize the tied
+       tensor. `load_model`'s post-load meta-tensor assertion (issue #142)
+       is what catches the resulting meta-resident `lm_head.weight`; a
+       fresh re-tie there is what actually fixes it.
+
+    Scoped, not global-and-permanent (issue #142 H2 — investigation's
+    standing recommendation): these are load-time-only hooks (allocator
+    warmup, weight-tying), so leaving them installed after `from_pretrained`
+    returns serves no purpose and is a needless global-monkeypatch footprint
+    for the rest of the process lifetime. Original attributes are restored
+    on exit, success or failure.
+
+    Reentrancy-guarded: nested/concurrent `with _apply_autoround_patches():` calls
+    (e.g. a caller wrapping `load_model` while it also applies the patches)
+    only patch on the outermost entry and only restore on the outermost
+    exit, so an inner call never clobbers an outer call's originals.
     """
+    global _apply_autoround_patches_depth
     import re as _re
-
-    # Patch 1: auto-round regex pre-compilation
-    try:
-        from auto_round.inference import convert_model as _ar_convert
-
-        def _patched_skip(model, quant_config, layer_names, extra_config):
-            modules_to_not_convert = []
-            if extra_config:
-                for name in extra_config.keys():
-                    try:
-                        _re.compile(name)
-                        modules_to_not_convert.append(name)
-                    except _re.error:
-                        pass
-            compiled = [
-                _re.compile(n) if n else None for n in modules_to_not_convert
-            ]
-            return extra_config.copy()
-
-        _ar_convert.skip_not_convert_modules = _patched_skip
-    except ImportError:
-        # auto-round not installed — patch is a no-op, will fail at load time
-        pass
-
-    # Patch 2: skip bf16 KV-cache warmup (pre-allocates wrong size for INT4)
     from transformers import modeling_utils as _mu
-    _mu.caching_allocator_warmup = lambda *a, **k: None
 
-    # Patch 3: tied-weight finalization on quantized modules
-    _orig_mark = _mu.PreTrainedModel.mark_tied_weights_as_initialized
-
-    def _patched_mark(self, loading_info):
-        for tied_param in self._tied_weights_keys:
-            try:
-                param = self.get_parameter(tied_param)
-                if hasattr(param, "data"):
-                    loading_info.missing_keys.remove(tied_param)
-            except (AttributeError, KeyError):
-                pass
-
-    _mu.PreTrainedModel.mark_tied_weights_as_initialized = _patched_mark
-
-    _orig_tie = _mu.PreTrainedModel.tie_weights
-
-    def _patched_tie(self, *a, **kw):
+    _apply_autoround_patches_depth += 1
+    if _apply_autoround_patches_depth > 1:
+        # Already patched by an outer scope — no-op, defer restore to it.
         try:
-            return _orig_tie(self, *a, **kw)
-        except (NotImplementedError, AttributeError):
+            yield
+        finally:
+            _apply_autoround_patches_depth -= 1
+        return
+
+    orig_convert_skip = None
+    orig_warmup = _mu.caching_allocator_warmup
+    orig_mark = _mu.PreTrainedModel.mark_tied_weights_as_initialized
+    orig_tie = _mu.PreTrainedModel.tie_weights
+
+    try:
+        # Patch 1: auto-round regex pre-compilation
+        try:
+            from auto_round.inference import convert_model as _ar_convert
+
+            orig_convert_skip = _ar_convert.skip_not_convert_modules
+
+            def _patched_skip(model, quant_config, layer_names, extra_config):
+                modules_to_not_convert = []
+                if extra_config:
+                    for name in extra_config.keys():
+                        try:
+                            _re.compile(name)
+                            modules_to_not_convert.append(name)
+                        except _re.error:
+                            pass
+                compiled = [
+                    _re.compile(n) if n else None for n in modules_to_not_convert
+                ]
+                return extra_config.copy()
+
+            _ar_convert.skip_not_convert_modules = _patched_skip
+        except ImportError:
+            # auto-round not installed — patch is a no-op, will fail at load time
             pass
 
-    _mu.PreTrainedModel.tie_weights = _patched_tie
+        # Patch 2: skip bf16 KV-cache warmup (pre-allocates wrong size for INT4)
+        _mu.caching_allocator_warmup = lambda *a, **k: None
+
+        # Patch 3: tied-weight finalization on quantized modules
+        def _patched_mark(self, loading_info):
+            for tied_param in self._tied_weights_keys:
+                try:
+                    param = self.get_parameter(tied_param)
+                    if hasattr(param, "data"):
+                        loading_info.missing_keys.remove(tied_param)
+                except (AttributeError, KeyError):
+                    pass
+
+        _mu.PreTrainedModel.mark_tied_weights_as_initialized = _patched_mark
+
+        def _patched_tie(self, *a, **kw):
+            try:
+                return orig_tie(self, *a, **kw)
+            except (NotImplementedError, AttributeError):
+                pass
+
+        _mu.PreTrainedModel.tie_weights = _patched_tie
+
+        yield
+    finally:
+        if orig_convert_skip is not None:
+            try:
+                from auto_round.inference import convert_model as _ar_convert
+
+                _ar_convert.skip_not_convert_modules = orig_convert_skip
+            except ImportError:
+                pass
+        _mu.caching_allocator_warmup = orig_warmup
+        _mu.PreTrainedModel.mark_tied_weights_as_initialized = orig_mark
+        _mu.PreTrainedModel.tie_weights = orig_tie
+        _apply_autoround_patches_depth -= 1
+
+
+def _checkpoint_quant_method(repo_id: str, local_files_only: bool) -> tuple[bool, str | None]:
+    """Best-effort read of the checkpoint's declared
+    `quantization_config.quant_method`, without ever taking the blocking
+    `from_pretrained` path (issue #141).
+
+    Returns `(readable, quant_method)`:
+    - `(True, "auto-round")` — config was read; checkpoint declares that method.
+    - `(True, None)` — config was read; checkpoint declares no `quantization_config`.
+    - `(False, None)` — config could NOT be read (unreachable repo, network
+      trouble, malformed JSON, ...). Callers MUST treat `readable=False` as
+      "unknown" and fall through to the normal load rather than block or
+      raise — this is a pre-flight hint, not a second front door with its
+      own failure mode. `readable=False` is NOT the same as "confirmed
+      unquantized" (`(True, None)`); conflating the two would let an
+      unreadable config masquerade as a confirmed mismatch.
+
+    Reads via `transformers.AutoConfig.from_pretrained`, which resolves both
+    local paths and Hub ids uniformly and respects `local_files_only`.
+    """
+    try:
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(repo_id, local_files_only=local_files_only)
+    except Exception as exc:  # noqa: BLE001 — deliberately broad: best-effort only
+        print(
+            f"[WARN] ComfyUI-DiffusionGemma — could not pre-flight-check "
+            f"quantization_config for repo_id={repo_id!r} ({exc!r}); skipping the "
+            "quant/checkpoint mismatch guard and proceeding to load. If the "
+            "checkpoint's quantization does not match quant=..., the load may hang "
+            "or fail deeper in transformers."
+        )
+        return False, None
+
+    quant_config = getattr(config, "quantization_config", None)
+    if not quant_config:
+        return True, None
+
+    if isinstance(quant_config, dict):
+        return True, quant_config.get("quant_method")
+    return True, getattr(quant_config, "quant_method", None)
+
+
+def _check_quant_checkpoint_match(
+    repo_id: str, quant: str, local_files_only: bool
+) -> None:
+    """PRE-FLIGHT guard (issue #141): reject a `quant=...` / checkpoint
+    mismatch BEFORE the blocking `from_pretrained` call.
+
+    Root cause this prevents: an AutoRound INT4 checkpoint loaded with
+    quant="none" hangs permanently — transformers deserializes INT4 data
+    (`qweight`/`qzeros`) as bf16 tensors with no error surface, just a
+    freeze that requires killing ComfyUI. Symmetric in the other direction
+    too: quant="autoround" against an unquantized checkpoint is also a
+    silent-wrong-load risk, not just the INT4-into-bf16 hang.
+
+    Best-effort by construction: `_checkpoint_quant_method` never blocks or
+    raises on its own account (an unreadable config returns
+    `readable=False`, with a logged warning), so this guard only rejects a
+    *confirmed* mismatch — `readable=False` always falls through, on either
+    side of the direction check.
+
+    Every raise names BOTH the violated precondition AND the actionable
+    remedy in one message (house style, see `dgemma/kv_cache.py` V1-V6).
+    """
+    readable, declared_method = _checkpoint_quant_method(repo_id, local_files_only)
+    if not readable:
+        return
+
+    if declared_method is not None and quant == "none":
+        raise RuntimeError(
+            f"Checkpoint {repo_id!r} declares quantization_config.quant_method="
+            f"{declared_method!r} but quant='none' was passed. Loading a quantized "
+            "checkpoint with quant='none' deserializes quantized weights as bf16 "
+            "with no error surface — a permanent hang, not a crash. "
+            "Remedy: pass quant='autoround' (if the declared method is AutoRound), "
+            "or choose an unquantized checkpoint."
+        )
+
+    if declared_method is None and quant == "autoround":
+        raise RuntimeError(
+            f"quant='autoround' was passed but checkpoint {repo_id!r} has no "
+            "quantization_config (confirmed absent, not just unread). Loading an "
+            "unquantized checkpoint under the autoround path applies patches meant "
+            "for INT4 W4A16 weights to bf16 weights, which is not a supported "
+            "combination. "
+            "Remedy: pass quant='none' for this checkpoint, or point repo_id at a "
+            "pre-quantized AutoRound checkpoint (e.g. AUTOROUND_REPO_ID)."
+        )
+
+
+def _retie_lm_head(model) -> None:
+    """Re-tie `lm_head.weight` to its true-storage sibling when the AutoRound
+    load path leaves it meta-resident (issue #142).
+
+    Root cause (probe v3, issue #142): `_apply_autoround_patches()`'s Patch 3
+    suppresses `PreTrainedModel.tie_weights`'s crash on a quantized
+    `embed_tokens` (no plain `.weight`, only `.qweight`) but does not
+    materialize the tied tensor — `lm_head.weight` is left stranded on
+    `meta`. `DiffusionGemmaForBlockDiffusion._tied_weights_keys` declares
+    the tie explicitly: `{"lm_head.weight": "model.decoder.embed_tokens.weight"}`
+    (`transformers/models/diffusion_gemma/modeling_diffusion_gemma.py`).
+    Mirrors exactly what the library's own (unpatched) `tie_weights` does for
+    this pair — `setattr(parent, name, source_param)`, i.e. point
+    `lm_head.weight` at the *same* `nn.Parameter` object `embed_tokens`
+    already holds real (non-meta) data for — rather than a copy, since a
+    genuine weight tie shares storage.
+
+    No-op if `lm_head.weight` is already real (e.g. the bf16 `quant="none"`
+    path, or a future transformers release that fixes the underlying patch
+    interaction) — this is a targeted repair for the one known-affected
+    tensor, not a general meta-tensor materializer.
+    """
+    lm_head_weight = getattr(getattr(model, "lm_head", None), "weight", None)
+    if lm_head_weight is None or lm_head_weight.device.type != "meta":
+        return
+
+    source = model.get_parameter("model.decoder.embed_tokens.weight")
+    if source.device.type == "meta":
+        # The source itself is meta-resident — re-tying would just point one
+        # meta tensor at another. Leave it; the post-load assertion below
+        # will name both and fail loud rather than silently no-op here.
+        return
+
+    model.lm_head.weight = source
+
+
+def _explained_by_device_map_offload(name: str, device_map: dict) -> bool:
+    """True when parameter/buffer `name` is meta *because* accelerate offloaded
+    the module that owns it to `cpu`/`disk` under `device_map="auto"`.
+
+    `hf_device_map` keys are module paths — dotted prefixes of the full
+    parameter name (e.g. key `model.decoder.layers.27` owns param
+    `model.decoder.layers.27.mlp.gate_up_proj.weight`). accelerate places a
+    whole module at one device, so the owning entry is the *longest* device-map
+    key that is a dot-boundary prefix of `name` (longest-prefix match, so a
+    nested submodule with its own entry wins over an ancestor's). That module's
+    device is the offload signal: a value of `"cpu"` or `"disk"` (the same
+    strings `_resolve_device` skips over to find the accelerator) means the
+    meta residency is a legitimate mmap-backed offload, not a stranded tensor.
+    A bare-int / accelerator entry (or no matching entry) is NOT an offload —
+    a meta tensor there is genuinely stranded.
+    """
+    best_key = None
+    for key in device_map:
+        if name == key or name.startswith(key + "."):
+            if best_key is None or len(key) > len(best_key):
+                best_key = key
+    if best_key is None:
+        return False
+    return str(device_map[best_key]) in ("cpu", "disk")
+
+
+def _assert_no_meta_tensors(model) -> None:
+    """FAIL LOUD (issue #142's enforcement surface) if any parameter or
+    buffer is still meta-resident after load + re-tie, before the model is
+    returned to any caller (issue #183: no `.to("cuda")` follows anymore) —
+    SPILL-AWARE: a tensor that is meta *because* accelerate offloaded its
+    module to `cpu`/`disk` under `device_map="auto"` is legitimate and exempt.
+
+    Two meta-residency causes must be told apart (issue #173):
+
+    - **Legitimate offload (exempt).** Under `device_map="auto"` on a card that
+      cannot hold the whole bf16 checkpoint, accelerate places the overflow
+      modules at `cpu`/`disk` and their params report device **`meta`** in
+      `named_parameters()` — the mmap-backed lazy-load regime the probe record
+      quantified (`docs/experiments/bf16-fit-mechanism/README.md`, Trap #2:
+      "Offloaded params report device `meta`, not `cpu`, in
+      `named_parameters()`"; 13 modules / 5.50 B params / 10.25 GiB observed).
+      This meta is expected and correct — the module IS placed, at cpu/disk per
+      `hf_device_map`. Rejecting it would hard-refuse the default load the
+      restore of `device_map="auto"` exists to enable.
+    - **Stranded tensor (still raises).** A meta tensor NOT explained by an
+      offload entry — e.g. a tied `lm_head` suppressed but never materialized
+      during `from_pretrained` (issue #142's #142 class), whose owning module
+      the device map places on an accelerator — holds no data and cannot move
+      via `.to()`. It would otherwise surface later as an opaque 'Cannot copy
+      out of meta tensor' crash or a silent no-op hang. This still raises, by
+      name, with the actionable remedy.
+
+    The offload signal is the same one `_resolve_device` already reads: an
+    `hf_device_map` entry of `cpu`/`disk` for the module owning the tensor. See
+    `_explained_by_device_map_offload` for the (longest-prefix) name→module
+    match. Why the exemption exists is recorded in the probe:
+    `docs/experiments/bf16-fit-mechanism/README.md`.
+    """
+    device_map = getattr(model, "hf_device_map", None) or {}
+    meta_names = [
+        name
+        for name, tensor in (*model.named_parameters(), *model.named_buffers())
+        if tensor.device.type == "meta"
+        and not _explained_by_device_map_offload(name, device_map)
+    ]
+    if meta_names:
+        raise RuntimeError(
+            "ComfyUI-DiffusionGemma: model has meta-resident tensor(s) after "
+            f"load: {meta_names}. A meta tensor holds no "
+            "data and cannot be moved to a real device via .to() — this would "
+            "otherwise surface later as an opaque 'Cannot copy out of meta "
+            "tensor' crash or a silent no-op hang, depending on the dispatch "
+            "path. These tensor(s) are NOT explained by a cpu/disk offload "
+            "entry in hf_device_map, so this is not accelerate's legitimate "
+            "device_map=\"auto\" spill (issue #173) — it is usually a tied-"
+            "weight that was suppressed but never materialized during "
+            "from_pretrained (see issue #142). "
+            "Remedy: report this repo_id/quant combination — a new tied "
+            "parameter may need its own re-tie handling alongside "
+            "_retie_lm_head."
+        )
+
+
+# Whole-fit floor for the AutoRound INT4 checkpoint, in bytes. Grounded by
+# the 2026-07-30 forced-split probe (docs/experiments/
+# 2026-07-30-autoround-unified-path-split-check/): weights measure 28.55 GiB
+# resident after load; the floor adds margin for accelerate's dispatch
+# reserve so a card that passes the check genuinely places the model whole.
+# (Activation peak — 30.67 GiB process-wide in the 8-step probe — is a
+# run-time concern, not what the load-time dispatch crash gates on.)
+AUTOROUND_MIN_FREE_VRAM_BYTES = 30 * 1024**3
+
+
+def _assert_autoround_vram_precondition() -> None:
+    """FAIL LOUD, pre-load, when the card cannot hold the AutoRound INT4
+    checkpoint whole (issue #183 — the split-fails probe outcome).
+
+    Why refuse instead of split: under `device_map="auto"`, a card that
+    cannot fit the INT4 checkpoint whole makes accelerate attempt a CPU/GPU
+    split, and that split CANNOT LOAD — dispatch crashes inside
+    `from_pretrained` (`ValueError: weight is on the meta device...`,
+    forced-split probe leg, docs/experiments/
+    2026-07-30-autoround-unified-path-split-check/). This is unlike the bf16
+    path, whose CPU-mmap spill is field-proven. So the honest pre-load
+    behavior on a small card is a refusal naming both numbers and the
+    remedy, never a silent attempt at a split that is proven to crash.
+    Split-capable INT4 (block-wise onload) is banked as future work.
+
+    Skips silently when CUDA is unavailable — `load_model`'s existing
+    post-load CUDA check owns that refusal with its own canonical message.
+    """
+    if not torch.cuda.is_available():
+        return
+    free_bytes, _total_bytes = torch.cuda.mem_get_info()
+    if free_bytes < AUTOROUND_MIN_FREE_VRAM_BYTES:
+        raise RuntimeError(
+            f"quant='autoround' needs the whole INT4 checkpoint resident on one "
+            f"GPU: {AUTOROUND_MIN_FREE_VRAM_BYTES / 1024**3:.1f} GiB free VRAM "
+            f"required, {free_bytes / 1024**3:.1f} GiB free now. A CPU/GPU split "
+            "of the AutoRound INT4 checkpoint cannot load (accelerate dispatch "
+            "crashes on the quantized weights — see issue #183 and "
+            "docs/experiments/2026-07-30-autoround-unified-path-split-check/). "
+            "Remedy: free VRAM (unload other GPU tenants) and retry, or use "
+            "quant='none' — the bf16 path's CPU spill is supported and "
+            "field-proven."
+        )
 
 
 def _resolve_device(model) -> str:
@@ -235,46 +566,153 @@ def _resolve_device(model) -> str:
 
 
 def load_model(
-    repo_id: str = DEFAULT_REPO_ID,
+    repo_id: str | None = None,
     quant: str = DEFAULT_QUANT,
     local_files_only: bool = False,
+    check_interrupted: Callable[[], bool] | None = None,
 ) -> DGemmaModel:
     """Load `DiffusionGemmaForBlockDiffusion` + its processor onto `DGemmaModel`.
 
-    `quant` accepts only `"none"` (issue #18 — full-precision bf16 load,
-    `device_map="auto"`, CPU-spills the ~42.5GiB of MoE expert params that
-    bitsandbytes could never quantize anyway). Kept as a parameter/field for
-    the loader contract; a real quantized path is tracked in issue #4.
+    `repo_id` defaults to the quant-appropriate checkpoint:
+    - `quant="none"` → `DEFAULT_REPO_ID` (Google bf16, ~53GB VRAM)
+    - `quant="autoround"` → `AUTOROUND_REPO_ID` (Intel INT4 W4A16, ~30GB VRAM)
+    Pass an explicit path or HF repo ID to override.
+
+    `quant` accepts `"none"` (full-precision bf16) or `"autoround"`
+    (pre-quantized W4A16 INT4 checkpoint via auto-round). Placement is
+    UNIFORM across quant modes (issue #183): both load under
+    `device_map="auto"` — accelerate-managed GPU+CPU-mmap placement that
+    spills overflow modules to CPU where the card cannot hold the
+    checkpoint whole (the bf16 26B path on a 48GB card CPU-spills the
+    ~10GiB of overflow; the ~30GB INT4 checkpoint fits whole there). The
+    only per-quant difference is `dtype` — a checkpoint-identity fact, not
+    a placement decision.
 
     `local_files_only` forwards unchanged to both `from_pretrained` calls —
     off (default) keeps the normal HF download-and-cache behavior; on,
     resolution is restricted to whatever is already in the local HF cache.
 
+    `check_interrupted` (issue #140 loader half): an optional zero-argument
+    predicate polled at four phase boundaries — before the quant/checkpoint
+    pre-flight config read, before the model `from_pretrained`, before the
+    processor `from_pretrained`, and at the (historical) device-move
+    boundary — kept as a poll point even though no `.to("cuda")` happens
+    for any quant mode anymore (issue #183: accelerate places everything
+    during `from_pretrained`). When it reports `True`, `load_model` raises
+    `LoadInterrupted`
+    immediately, without starting the next blocking call. `None` (the
+    default, and every non-ComfyUI caller — tests, MCP, direct script use)
+    means "never interrupt", so this parameter is additive: no caller is
+    required to supply it. This narrows the hang window from "the whole
+    load" to "one blocking call" — a stuck `from_pretrained` itself still
+    cannot be interrupted mid-call (issue #140's plan explicitly scopes
+    mid-call interruption to 0.6.x, via thread/subprocess isolation).
+
     Raises `RuntimeError` (not a raw transformers/HF stack trace) when
     `repo_id` cannot be resolved — a typo'd repo, no network, or
-    `local_files_only=True` with nothing cached.
+    `local_files_only=True` with nothing cached. Raises `LoadInterrupted`
+    when `check_interrupted` reports `True` at a phase boundary.
     """
     if quant not in _QUANT_CHOICES:
         raise ValueError(f"quant must be one of {_QUANT_CHOICES}, got {quant!r}.")
 
-    # Autoround INT4 path: patches transformers + auto-round for correct load
+    def _poll(phase: str) -> None:
+        if check_interrupted is not None and check_interrupted():
+            raise LoadInterrupted(
+                f"DiffusionGemma load interrupted before phase: {phase}."
+            )
+
+    # Auto-select the checkpoint matching the quant mode when no explicit repo
+    if repo_id is None:
+        repo_id = AUTOROUND_REPO_ID if quant == "autoround" else DEFAULT_REPO_ID
+
+    # PRE-FLIGHT guard (issue #141): reject a quant=/checkpoint mismatch
+    # before the blocking from_pretrained call — see _check_quant_checkpoint_match.
+    # Also a phase boundary in its own right (issue #140): it reads the
+    # checkpoint config via AutoConfig.from_pretrained, itself a network-
+    # capable call when the config isn't already cached.
+    _poll("quant/checkpoint mismatch pre-flight")
+    _check_quant_checkpoint_match(repo_id, quant, local_files_only)
+
+    # ONE load path — placement is UNIFORM across quant modes (issue #183).
+    # `device_map="auto"` (accelerate-managed GPU+CPU-mmap placement) for
+    # BOTH quants; the ONLY per-quant residue is `dtype`, a checkpoint-
+    # identity fact (`"auto"` lets transformers read the INT4 checkpoint's
+    # own quantization_config; bf16 is stated explicitly), never a placement
+    # decision.
+    #
+    # device_map="auto" was fought for, not assumed — keep the history:
+    # dd2767c (2026-07-24) dropped it for both paths because accelerate's
+    # dispatch left the tied lm_head/embed_tokens pair meta-resident under
+    # CPU spill, crashing the (then-unconditional) .to("cuda"). d0bb93b
+    # (#142/#143, 2026-07-29) fixed that root cause directly —
+    # _retie_lm_head() + _assert_no_meta_tensors() materialize and verify
+    # tied weights regardless of quant mode — and PR #177 (#173) restored
+    # device_map="auto" for quant="none", where it is field-proven
+    # (docs/experiments/bf16-fit-mechanism/: 42.4GiB GPU + 10.25GiB
+    # mmap-backed spill, 2.2s/step). The autoround branch briefly kept
+    # dd2767c's no-device_map / low_cpu_mem_usage=False / .to("cuda")
+    # contract on a bare-process "~30GB fits whole" observation; #183's
+    # field report falsified that as placement policy, and the divergent
+    # branch was deleted (docs/experiments/
+    # 2026-07-30-autoround-unified-path-split-check/).
     if quant == "autoround":
-        _apply_autoround_patches()
-        dtype_kwarg = "auto"  # let transformers read quantization config
+        dtype_kwarg: object = "auto"  # checkpoint identity: read its quantization_config
         dtype_label = "int4"
     else:
         dtype_kwarg = torch.bfloat16
         dtype_label = "bfloat16"
-
     load_kwargs: dict = {
-        "device_map": "auto",
+        "device_map": "auto",  # accelerate-managed GPU+CPU-mmap placement
         "dtype": dtype_kwarg,
         "local_files_only": local_files_only,
     }
 
+    # PRE-LOAD VRAM precondition — the ONE quant-conditional besides dtype
+    # (issue #183, split-fails probe outcome): an INT4 checkpoint that cannot
+    # fit whole makes accelerate attempt a split that crashes inside
+    # from_pretrained, so refuse loudly BEFORE the blocking call. bf16 has no
+    # precondition — its spill path is field-proven.
+    if quant == "autoround":
+        _assert_autoround_vram_precondition()
+
+    print(
+        f"[INFO] ComfyUI-DiffusionGemma 0.4.0 — loading from {repo_id!r} "
+        f"({dtype_label}, quant={quant})"
+    )
+
+    # The autoround patches are load-time-only hooks (allocator warmup,
+    # weight-tying) — scoped to just the from_pretrained call, not left
+    # installed globally for the rest of the process (issue #142 H2).
+    patches_cm = _apply_autoround_patches() if quant == "autoround" else contextlib.nullcontext()
+
+    # Phase boundary (issue #140): poll before each blocking from_pretrained
+    # call, not after — an interrupt reported while a call is already
+    # in-flight cannot stop that call (transformers/safetensors expose no
+    # cancellation hook), so the check's only useful position is the gap
+    # between phases, catching the interrupt before it commits to the next
+    # one.
+    _poll("model from_pretrained")
     try:
-        model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
-        processor = AutoProcessor.from_pretrained(repo_id, local_files_only=local_files_only)
+        with patches_cm:
+            model = DiffusionGemmaForBlockDiffusion.from_pretrained(repo_id, **load_kwargs)
+        _poll("processor from_pretrained")
+        processor = AutoProcessor.from_pretrained(
+            repo_id,
+            local_files_only=local_files_only,
+        )
+    except ImportError as exc:
+        # auto-round not installed when quant="autoround" — surface an
+        # actionable message instead of a raw transformers ImportError deep
+        # in the accelerate dispatch stack (handoff 2026-07-23 open question 3)
+        if quant == "autoround":
+            raise RuntimeError(
+                f"quant='autoround' requires the auto-round library, but it is not "
+                f"installed in this Python environment. Fix: run "
+                f"`pip install 'auto-round>=0.5'` in ComfyUI's own Python environment. "
+                f"Original error: {exc}"
+            ) from exc
+        raise
     except OSError as exc:
         # transformers/huggingface_hub surface an unresolvable repo as an
         # OSError subclass (LocalEntryNotFoundError, RepositoryNotFoundError,
@@ -291,7 +729,43 @@ def load_model(
             f"{likely_cause}. Original error: {exc}"
         ) from exc
 
+    # issue #142: the autoround path's tied lm_head.weight can be left
+    # meta-resident (Patch 3 suppresses the tie crash without materializing
+    # the tensor) — re-tie it to its real-storage sibling before anything
+    # dispatches through it (a stranded meta tensor holds no data; issue
+    # #142's field failure was an opaque crash/hang downstream).
+    if quant == "autoround":
+        _retie_lm_head(model)
+
+    # POST-LOAD ASSERTION (all quant paths): fail loud, naming the tensor(s),
+    # if anything is still meta-resident — the enforcement surface that keeps
+    # this class of bug from ever again presenting as a downstream hang or an
+    # opaque .to("cuda") crash (issue #142).
+    _assert_no_meta_tensors(model)
+
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "ComfyUI-DiffusionGemma requires a CUDA-capable GPU. No CUDA device "
+            "found (torch.cuda.is_available() is False). There is no supported "
+            "CPU-only path for this pack: DiffusionGemma's ~53GB bf16 / ~30GB "
+            "INT4 footprint and the sampler's CUDA-seeded torch.Generator "
+            "(dgemma/loop.py run_diffusion) both assume an accelerator."
+        )
+
+    # Phase boundary (issue #140): still polled on both paths, so
+    # check_interrupted's four-boundary contract holds regardless of quant.
+    # NO device move happens here for EITHER quant mode (issue #183):
+    # accelerate already placed every tensor per device_map="auto" during
+    # from_pretrained (GPU + CPU-mmap spill where needed) — a whole-model
+    # .to("cuda") after that would pull any CPU-spilled weights back onto
+    # the card, defeating the spill and OOMing (issue #173, the exact
+    # mechanism PR #177 fixed for quant="none"). The boundary is kept as a
+    # poll point so the four-boundary cancellation contract stays stable.
+    _poll("device move (.to(\"cuda\"))")
+
     device = _resolve_device(model)
+
+    print(f"[INFO] ComfyUI-DiffusionGemma — model loaded on {device}")
 
     return DGemmaModel(
         model=model,

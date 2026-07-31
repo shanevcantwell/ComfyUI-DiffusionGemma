@@ -28,12 +28,6 @@ take apart.
 | P2 — knobs | EB params/seed/thinking as widgets; thought-channel leak fixed (#8); quant default grounded | live PASS + entropy_bound sweep |
 | P3 — instrumentation | `CANVAS_TRACE` + `DGemmaTrace`, live per-step push (`web/`), honesty readout (`turn_closed`/`answer_tokens`) | verifier PASS: ws events 1:1 with steps; [examples/](examples/) |
 
-## What this does
-
-A ComfyUI node pack that runs **DiffusionGemma** (Google's discrete diffusion text model) as an instrumentable graph. Unlike autoregressive LLMs, DiffusionGemma generates text by *annealing a canvas of noise* — every position starts random and crystallizes into coherent output step-by-step. This pack captures the full per-step trajectory: schedule position `t`, temperature `T`, entropy, commit fraction — and exposes it as heatmaps, flipbooks, and structured trace data you can replay after the run.
-
-**Nodes:** `DGemmaLoader` → `DGemmaSampler` → `DGemmaTrace`
-
 ## What it is — meaning annealed out of noise
 
 Every answer starts as a **canvas of pure noise**: 256 positions, each a random
@@ -130,10 +124,33 @@ for the evidence, and [issue #78](../../issues/78) for the full finding and reso
 
 ## Install
 
+**Via ComfyUI's Extensions button / registry (recommended):** search
+"ComfyUI-DiffusionGemma" and install. Dependencies
+(`transformers==5.13.0`, `diffusers>=0.39.0`, `accelerate`) install
+automatically from this pack's `requirements.txt`, followed by `install.py`
+(belt-and-braces: re-checks each pin against the interpreter ComfyUI is
+actually running and installs anything still missing — see
+[issue #147](../../issues/147) if you land here after a broken install; its
+loud, prefixed log block names the exact fix).
+
+**Manual clone:**
+
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/shanevcantwell/ComfyUI-DiffusionGemma
 # restart ComfyUI
+```
+
+A manual clone skips the Extensions flow's automatic dependency install —
+run the requirements install yourself, into the **same Python ComfyUI
+itself runs** (not a system Python or unrelated venv):
+
+```bash
+# ComfyUI portable/embedded (Windows):
+python_embeded\python.exe -s -m pip install -r requirements.txt
+
+# ComfyUI in a plain venv (Linux/macOS/manual venv on Windows):
+path/to/ComfyUI/venv/bin/python -m pip install -r requirements.txt
 ```
 
 Requires `transformers==5.13.0` (DiffusionGemma support) and
@@ -141,6 +158,16 @@ Requires `transformers==5.13.0` (DiffusionGemma support) and
 (~54 GB bf16, ungated) download from
 [google/diffusiongemma-26B-A4B-it](https://huggingface.co/google/diffusiongemma-26B-A4B-it)
 on first load.
+
+If dependencies still look wrong after either path (a stale `transformers`
+version, `diffusers` absent), run `install.py` yourself the same way
+ComfyUI's Extensions flow does — it diagnoses and self-heals in one pass:
+
+```bash
+python_embeded\python.exe -s install.py   # Windows portable, from the pack's own directory
+# or
+path/to/ComfyUI/venv/bin/python install.py
+```
 
 ### Hardware & memory — the honest requirements
 
@@ -215,10 +242,8 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 This is an instrument for poking at how this diffusion LLM thinks. Questions,
 findings, and half-formed ideas are exactly the point. The
 **[Discussions](../../discussions)** tab is open for show-and-tell (post a
-trace, a heatmap, a run that annealed somewhere strange) and for ideas.
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
-
-Watch the process in action on YouTube: [**@reflectiveattention**](https://youtube.com/@reflectiveattention).
+trace, a heatmap, a run that annealed somewhere strange) and for ideas. See
+**[CONTRIBUTING.md](CONTRIBUTING.md)** for how to jump in.
 
 ## License
 

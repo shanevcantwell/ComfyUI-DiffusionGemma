@@ -1,7 +1,8 @@
 {
   "72": {
     "inputs": {
-      "quant": "none"
+      "quant": "autoround",
+      "local_model_dir": "diffusiongemma-26B-A4B-it-int4-AutoRound"
     },
     "class_type": "DGemmaLoader",
     "_meta": {
