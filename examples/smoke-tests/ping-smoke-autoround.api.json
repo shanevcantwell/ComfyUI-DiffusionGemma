@@ -1,0 +1,57 @@
+{
+  "72": {
+    "inputs": {
+      "quant": "autoround",
+      "local_model_dir": "diffusiongemma-26B-A4B-it-int4-AutoRound"
+    },
+    "class_type": "DGemmaLoader",
+    "_meta": {
+      "title": "DiffusionGemma Loader"
+    }
+  },
+  "73": {
+    "inputs": {
+      "prompt": "ping",
+      "seed": 680870402931309,
+      "num_inference_steps": 48,
+      "t_min": 0.4,
+      "t_max": 0.8,
+      "entropy_bound": 0.1,
+      "confidence": 0.005,
+      "gen_length": 256,
+      "thinking": false,
+      "model": [
+        "72",
+        0
+      ]
+    },
+    "class_type": "DGemmaSampler",
+    "_meta": {
+      "title": "DiffusionGemma Sampler"
+    }
+  },
+  "74": {
+    "inputs": {
+      "source": [
+        "73",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "75": {
+    "inputs": {
+      "source": [
+        "73",
+        1
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  }
+}

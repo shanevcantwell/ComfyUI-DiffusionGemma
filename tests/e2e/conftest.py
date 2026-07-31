@@ -50,6 +50,25 @@ READINESS_TIMEOUT_S = 120.0
 READINESS_POLL_INTERVAL_S = 0.5
 
 
+# AutoRound INT4 checkpoint (issue #183 — the ping-smoke-autoround graphs):
+# recognized either by HF-cache repo id or as a conventionally-placed local
+# directory under ComfyUI's models/text_encoders (the loader's local-folders
+# path, issue #150 — how the rig resolves it without hub access).
+AUTOROUND_REPO_ID = "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound"
+AUTOROUND_LOCAL_DIR_NAME = "diffusiongemma-26B-A4B-it-int4-AutoRound"
+
+
+def _autoround_weights_available() -> bool:
+    """True when the Intel INT4 checkpoint is reachable for an autoround
+    e2e scenario — HF cache OR a local models/text_encoders directory
+    (config.json present as the directory-shape signal the loader's own
+    scan uses)."""
+    if _weights_cached(AUTOROUND_REPO_ID):
+        return True
+    local = COMFYUI_ROOT / "models" / "text_encoders" / AUTOROUND_LOCAL_DIR_NAME
+    return (local / "config.json").exists()
+
+
 def _weights_cached(repo_id: str = "google/diffusiongemma-26B-A4B-it") -> bool:
     """Same check as `tests/conftest.py:weights_cached`, reimplemented here
     rather than imported — the E2E tier's independence invariant forbids
@@ -206,6 +225,19 @@ class ComfyUIServer(NamedTuple):
     base_url: str
     client_id: str
     ws_url: str
+
+
+@pytest.fixture(scope="session")
+def autoround_weights_available() -> None:
+    """Skip-gate for autoround e2e scenarios (issue #183): the Intel INT4
+    checkpoint must be reachable (HF cache or local models/text_encoders
+    dir) — additive to `e2e_preconditions`, which gates the bf16 battery."""
+    if not _autoround_weights_available():
+        pytest.skip(
+            f"{AUTOROUND_REPO_ID} not in HF cache and no local "
+            f"models/text_encoders/{AUTOROUND_LOCAL_DIR_NAME} dir — "
+            "skipping autoround e2e scenario."
+        )
 
 
 @pytest.fixture(scope="session")
