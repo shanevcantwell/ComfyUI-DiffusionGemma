@@ -5,9 +5,10 @@ The DGEMMA_* strings are this surface's envelope; payloads are
 may appear at any other site in `surfaces/comfyui/` — enforced by
 `tests/test_socket_mint.py`'s grep-gate.
 
-`DGEMMA_STEP_EVENT` (defined in `sampler.py`) is NOT a socket type — it is
-a runtime WebSocket event name (`"dgemma.sampler.step"`), lowercase-dotted,
-and deliberately excluded from this mint.
+`DGEMMA_STEP_EVENT` (minted in `live_view.py`) is NOT a socket type — it is
+a runtime WebSocket event name (lowercase-dotted; see `live_view.py` for its
+value, deliberately not re-inlined here so the live-view grep-gate stays the
+single source), deliberately excluded from this mint.
 
 `DGEMMA_CONSTRAINTS`/`DGEMMA_CONTROL_SIGNALS` (ADR-CDG-010 D6 / ADR-CDG-011,
 issue #64 §3.3): minted here ahead of any node wiring them — Phase 1 lands
