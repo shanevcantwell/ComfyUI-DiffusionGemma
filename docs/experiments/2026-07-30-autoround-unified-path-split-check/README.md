@@ -261,3 +261,41 @@ composes and loads the INT4 checkpoint whole; (b) a forced split crashes at
 dispatch. The fits/works capacity verdict for the unified path in ComfyUI
 comes from the in-rig leg (S-A-autoround through the #163 rig / #59 driver),
 banked separately — see the PR body for which run discharges F5.
+
+---
+
+## PART 3 — in-rig capacity leg (F5 discharge), 2026-07-31 UTC
+
+The run that grounds the fits/works capacity claim at the correct evidence
+tier (F5: in-rig only). Vehicle: `examples/smoke-tests/ping-smoke-autoround.api.json`
+(S-A-autoround — `DGemmaLoader` quant='autoround' via the local-folders path →
+`DGemmaSampler` 48-step budget → `PreviewAny`), submitted through the
+black-box driver (`tests/e2e/driver.py`) against the standing `/tmp/smoke-050`
+rig, ComfyUI headless on 127.0.0.1:8188, rig pack checkout at this branch
+(`508b93c`). Model resolved via a symlink
+`ComfyUI/models/text_encoders/diffusiongemma-26B-A4B-it-int4-AutoRound` →
+the canonical read-only dir (loader union scan, #150; real-dir symlink
+followed, #182). Co-resident llama-server baseline: first sampler reading
+1805 MiB used card-wide pre-load (1641 MiB at teardown readback).
+
+**Result: GREEN.**
+
+- Prompt executed in **66.78 s** end-to-end (includes the in-ComfyUI model
+  load — weights streamed in-process; `[INFO] ... model loaded on cuda:0`).
+- Generation: converged/committed at **22/48 steps**, steady-state
+  **1.53–1.54 s/step** (first step 10.1 s warm-up), coherent output for the
+  "ping" prompt: `"I'm here! How can I help you today?"` — contrast the
+  ~10x-slow field report this issue opened with (#183).
+- **Peak VRAM 33,831 MiB card-wide (33.04 GiB)** across 162 one-second
+  samples (`runs/inrig_gpu_sample.csv`) — ≈31.3 GiB net of the co-resident
+  baseline, consistent with the bare-probe's 30.67 GiB in-process peak. No
+  overflow, no stranded-meta raise, no error in the ComfyUI log.
+- History entry banked verbatim: `runs/inrig_s-a-autoround-entry.json`.
+- Teardown: ComfyUI SIGTERM'd; card back to exact 1641 MiB baseline.
+
+**This run is the in-rig autoround analog of bf16's 42.4GiB/2.2s-step
+datapoint: ~33.0 GiB card-wide peak (~31.3 GiB net), ~1.54 s/step, through
+the real unified load path in ComfyUI.** It discharges F5 for the "unified
+path works" claim (step 1's pre-PR leg). The #163 release-gate smoke re-run
+(post-Opus-PASS, step 9's live leg) remains the release gate's own,
+separately-scheduled confirmation.
