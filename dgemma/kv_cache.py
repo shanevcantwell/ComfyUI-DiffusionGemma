@@ -293,6 +293,21 @@ def encode_sequence(
     caller-built cache (`DGemmaDenoise`'s live drive body, Phase 4); this
     function wraps the encoder's own unmodified first-encode call path,
     already exercised by every existing `run_diffusion` call today.
+
+    Device pinning (issue #187): `ids_tensor`/`position_ids` are minted
+    directly on the encoder's own parameter device (`next(encoder.
+    parameters()).device`) — parse-at-the-door for device identity, not a
+    reliance on ambient accelerate hooks moving CPU-default tensors for us.
+    Under bf16 spill, accelerate's `AlignDevicesHooks` happened to paper
+    over CPU-minted inputs; under a whole-fit INT4 load (post-#183) no such
+    hook exists, and a CPU `ids_tensor` reaching a CUDA-resident embedding
+    weight crashed (`RuntimeError: ... index is on cpu, different from
+    other tensors on cuda:0`). Resolving the device from the encoder itself
+    (not `dgemma_model.device`/`_resolve_device`) holds correctly under all
+    three regimes this function runs in: whole-fit (this fix's target),
+    bf16 CPU spill (unaffected — the encoder's own parameters already carry
+    the accelerator device attention needs), and CPU-only test fakes
+    (encoder parameters report `cpu`, so minted tensors stay `cpu` too).
     """
     num_layers = geometry_from_model(dgemma_model)["num_hidden_layers"]
 
@@ -303,13 +318,15 @@ def encode_sequence(
         cache = into.cache
         start_position = into.cumulative_length[0] if into.cumulative_length else 0
 
-    ids_tensor = torch.as_tensor(list(token_ids), dtype=torch.long)
+    encoder = dgemma_model.model.model.encoder
+    encoder_device = next(encoder.parameters()).device
+
+    ids_tensor = torch.as_tensor(list(token_ids), dtype=torch.long, device=encoder_device)
     if ids_tensor.dim() == 1:
         ids_tensor = ids_tensor.unsqueeze(0)
-    position_ids = torch.arange(ids_tensor.shape[-1]) + start_position
+    position_ids = torch.arange(ids_tensor.shape[-1], device=encoder_device) + start_position
     position_ids = position_ids.unsqueeze(0)
 
-    encoder = dgemma_model.model.model.encoder
     outputs = encoder(input_ids=ids_tensor, past_key_values=cache, position_ids=position_ids)
     advanced_cache = outputs.past_key_values
 
