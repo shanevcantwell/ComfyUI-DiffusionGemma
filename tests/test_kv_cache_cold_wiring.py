@@ -54,10 +54,20 @@ class _FakeEncoderModel:
     """Minimal `.model.model.encoder` stand-in — same shape as
     `tests/conftest.py`'s `_FakeEncoderModel`, duplicated here (not
     imported) to keep this cold-wiring test's fixture set self-contained
-    per DV.3c's independence requirement."""
+    per DV.3c's independence requirement.
+
+    `parameters()` (issue #187): `encode_sequence` reads
+    `next(encoder.parameters()).device` to pin minted tensors — this fake
+    must expose that surface too, or the minimal-graph call crashes on
+    `AttributeError` before DV.3c's own assertions ever run."""
 
     def __init__(self, num_hidden_layers: int):
         self.num_hidden_layers = num_hidden_layers
+
+    def parameters(self):
+        import torch
+
+        yield torch.zeros(1)
 
     def __call__(self, *, input_ids, past_key_values=None, position_ids=None):
         from tests.conftest import FakeDynamicCache
