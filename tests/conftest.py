@@ -644,10 +644,29 @@ class _FakeEncoderModel:
     own docstring is explicit that IT treats the KVCache payload as logically
     read-only, which is a property of `encode_sequence`'s wrapping, not of the
     underlying transformers cache-mutation semantics this fake mirrors
-    faithfully)."""
+    faithfully).
 
-    def __init__(self, num_hidden_layers: int) -> None:
+    `parameters()` (issue #187): mirrors the one surface `encode_sequence`
+    now reads directly off the encoder (`next(encoder.parameters()).device`)
+    to pin minted `ids_tensor`/`position_ids` at the encoder's own device —
+    a real `nn.Module`'s `.parameters()` generator, stood in here by a single
+    zero-dim tensor at `device` (default `"cpu"`, matching every other fake
+    in this module). `last_input_ids_device`/`last_position_ids_device`
+    record what device `encode_sequence` actually handed the encoder, so a
+    test can assert the pin took effect without needing a real CUDA device
+    to prove it (a fake `device="cuda:0"` string exercises the code path
+    identically — `torch.as_tensor(..., device=...)` doesn't require the
+    device to be resolvable in a CPU-only test process for a device object
+    to be constructed and compared)."""
+
+    def __init__(self, num_hidden_layers: int, *, device: str = "cpu") -> None:
         self.num_hidden_layers = num_hidden_layers
+        self._device = torch.device(device)
+        self.last_input_ids_device: torch.device | None = None
+        self.last_position_ids_device: torch.device | None = None
+
+    def parameters(self):
+        yield torch.zeros(1, device=self._device)
 
     def __call__(
         self,
@@ -656,6 +675,8 @@ class _FakeEncoderModel:
         past_key_values: "FakeDynamicCache | None" = None,
         position_ids: torch.Tensor | None = None,
     ) -> _FakeEncoderOutput:
+        self.last_input_ids_device = input_ids.device
+        self.last_position_ids_device = None if position_ids is None else position_ids.device
         num_new_tokens = input_ids.shape[-1]
         if past_key_values is None:
             cache = FakeDynamicCache(num_layers=self.num_hidden_layers, seq_len=0)
@@ -671,8 +692,8 @@ class _FakeDiffusionGemmaModel:
     hop `dgemma.kv_cache.encode_sequence` calls through, grounded against the
     real `DiffusionGemmaForBlockDiffusion.model.encoder` path."""
 
-    def __init__(self, config: FakeDGemmaModelConfig) -> None:
-        self.encoder = _FakeEncoderModel(config.get_text_config().num_hidden_layers)
+    def __init__(self, config: FakeDGemmaModelConfig, *, encoder_device: str = "cpu") -> None:
+        self.encoder = _FakeEncoderModel(config.get_text_config().num_hidden_layers, device=encoder_device)
 
 
 class _FakeInnerModel:
@@ -681,9 +702,9 @@ class _FakeInnerModel:
     ingress reads already ground on `dgemma_model.model.config`) plus `.model`
     (the inner `DiffusionGemmaModel`, Phase 3's `.model.model.encoder` hop)."""
 
-    def __init__(self, config: FakeDGemmaModelConfig) -> None:
+    def __init__(self, config: FakeDGemmaModelConfig, *, encoder_device: str = "cpu") -> None:
         self.config = config
-        self.model = _FakeDiffusionGemmaModel(config)
+        self.model = _FakeDiffusionGemmaModel(config, encoder_device=encoder_device)
 
 
 class _FakeTokenizer:
@@ -713,15 +734,24 @@ def fake_dgemma_model(
     vocab_size: int = 32,
     dtype: str = "bfloat16",
     device: str = "cpu",
+    encoder_device: str | None = None,
 ) -> DGemmaModel:
     """Builds a `DGemmaModel` whose `.model.config`, `.model.model.encoder`,
     and `.processor` expose exactly the surface
     `dgemma.kv_cache.geometry_from_model` / `tokenizer_fingerprint` /
     `validate_kv_cache_ingress` / `encode_sequence` read — the fake twin of a
-    real `load_model()` result, sized for a unit test."""
+    real `load_model()` result, sized for a unit test.
+
+    `encoder_device` (issue #187) is the fake encoder's own `.parameters()`
+    device — what `encode_sequence` now pins minted tensors to. Defaults to
+    `device` (mirroring the common case where the whole model, encoder
+    included, sits at one place) but is independently settable so a test can
+    simulate the bf16-spill regime where `DGemmaModel.device` (the pipeline's
+    execution device) and the encoder's own parameter device can genuinely
+    differ, without conflating the two."""
     config = FakeDGemmaModelConfig(num_hidden_layers=num_hidden_layers, sliding_window=sliding_window)
     return DGemmaModel(
-        model=_FakeInnerModel(config),
+        model=_FakeInnerModel(config, encoder_device=device if encoder_device is None else encoder_device),
         processor=_FakeProcessor(vocab_size=vocab_size),
         device=device,
         dtype=dtype,

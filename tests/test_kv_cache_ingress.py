@@ -279,6 +279,54 @@ class TestEncodeSequenceAlreadyBatchedIds:
         assert cache.cache.layers[0].keys.shape[2] == 3
 
 
+class TestEncodeSequenceDevicePinning:
+    """Issue #187: `encode_sequence` must mint `ids_tensor`/`position_ids`
+    directly on the encoder's own parameter device
+    (`next(encoder.parameters()).device`), not on whatever device
+    `torch.as_tensor`/`torch.arange` default to (CPU) and hope an ambient
+    accelerate hook moves later. `"meta"` stands in for a non-CPU
+    accelerator device here (real CUDA is not assumed present in a test
+    process) — `dgemma_model_factory`'s `encoder_device=` threads straight
+    to `tests/conftest.py`'s `_FakeEncoderModel.parameters()`, which is
+    exactly the surface `encode_sequence` now reads, so this is a live
+    exercise of the production code path, not a re-implementation of it.
+    """
+
+    def test_mints_on_encoder_parameter_device_not_cpu_default(self, dgemma_model_factory):
+        model = dgemma_model_factory(encoder_device="meta")
+
+        encode_sequence(model, [1, 2, 3], into=None)
+
+        encoder = model.model.model.encoder
+        assert encoder.last_input_ids_device == torch.device("meta")
+        assert encoder.last_position_ids_device == torch.device("meta")
+
+    def test_stays_on_cpu_when_encoder_is_cpu_resident(self, dgemma_model_factory):
+        """The CPU-only test-fake regime (acceptance criteria's third named
+        regime, alongside whole-fit and spill): an encoder whose parameters
+        report `cpu` must still receive `cpu`-resident minted tensors — the
+        fix must not force a device move where none is needed."""
+        model = dgemma_model_factory(encoder_device="cpu")
+
+        encode_sequence(model, [1, 2, 3], into=None)
+
+        encoder = model.model.model.encoder
+        assert encoder.last_input_ids_device == torch.device("cpu")
+        assert encoder.last_position_ids_device == torch.device("cpu")
+
+    def test_advance_path_also_pins_to_encoder_device(self, synthetic_kv_cache_factory, dgemma_model_factory):
+        """IN-3 (advance, `into=<KVCache>` non-`None`) goes through the same
+        mint call inside `encode_sequence` — pins just as the fresh-mint
+        (IN-1) path does, not a second unguarded code path."""
+        model, cache = synthetic_kv_cache_factory(model_kwargs={"encoder_device": "meta"})
+
+        encode_sequence(model, [4, 5], into=cache)
+
+        encoder = model.model.model.encoder
+        assert encoder.last_input_ids_device == torch.device("meta")
+        assert encoder.last_position_ids_device == torch.device("meta")
+
+
 class TestOrderingIsDeterministic:
     """V1 fires before V2/V4/V3/V6/V5 when multiple checks would fail —
     pins the ordering the module docstring commits to, so a future edit that
