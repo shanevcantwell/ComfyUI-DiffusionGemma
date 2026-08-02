@@ -19,6 +19,19 @@ listened for (it hardcoded `"dgemma.sampler.step"` and only decorated
 derives its decoration/listen logic from that shared mint (see
 `live_view.py` and `web/live_view.js` for the full mechanism).
 
+**Signature-parity fix (issue #212):** #188's mint above added the
+`dgemma_live_view` hidden-input DECLARATION to `INPUT_TYPES()["hidden"]` on
+BOTH `DGemmaSampler` and this node, but never added a matching
+`dgemma_live_view` parameter to either node's `FUNCTION` signature —
+`sample()`/`denoise()` were left unchanged. ComfyUI's executor calls
+`FUNCTION(**inputs)` with every declared input, hidden included
+(`execution.py`'s `process_inputs`), so this was a live TypeError on BOTH
+nodes, not just this one — the field report happened to exercise the
+Denoise leg first. `denoise()` below now accepts (and deliberately
+consumes-and-ignores) `dgemma_live_view`, in parity with `sample()`'s
+matching fix; see that parameter's own comment for why "ignore" is the
+correct wiring rather than a swallowed bug.
+
 **Full connection parity with `DGemmaSampler` (issue #166 ratified scope,
 operator scope decision 2026-07-30):** this node's output signature is
 `DGemmaSampler`'s existing six-output socket set, adopted verbatim —
@@ -265,6 +278,22 @@ class DGemmaDenoise:
         thinking: bool,
         kv_cache=None,
         unique_id=None,
+        # Issue #212: ComfyUI's executor calls FUNCTION(**inputs) with every
+        # declared input, including hidden ones — a node whose INPUT_TYPES
+        # declares a hidden key its FUNCTION signature lacks is fatal at
+        # execution (execution.py's process_inputs, f(**inputs)). This node
+        # merges live_view.LIVE_VIEW_HIDDEN_INPUT ("dgemma_live_view") into
+        # its own hidden dict (issue #188), so the signature must accept it.
+        # Deliberately consumed-and-ignored, not wired anywhere below: the
+        # value is a client-side-only JS widget sentinel (web/live_view.js's
+        # `createLiveWidget`, serialize: false) with no backend-meaningful
+        # payload — "DGEMMA_LIVE_VIEW" is never a real ComfyUI socket type,
+        # it exists purely so nodeData.input.hidden carries a key the JS
+        # extension can `in`-check to decide whether to decorate/listen (see
+        # live_view.py's docstring). The actual live per-step push is the
+        # independent on_frame=build_on_frame(unique_id) wiring below, keyed
+        # off unique_id, not off this parameter.
+        dgemma_live_view=None,
     ):
         text, canvas_state, canvas_trace = run_diffusion(
             model,
