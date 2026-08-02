@@ -1314,26 +1314,28 @@ def run_diffusion(
     frame after the walker's write (clause 6: walker prepares the next step,
     capture records the finished step).
 
-    `kv_cache=` (ADR-CDG-012 IN-2, issue #62 Phase 2 — types + ingress door,
-    no live drive body yet): an optional injected `KVCache` payload (§62's
-    `dgemma/types.py` dataclass). `None` (default) is today's EXACT behavior,
-    byte-for-byte unchanged — the run mints its own cache internally via the
-    pipeline's own first encode, and rule-6 `STATELESS-CORE` is trivially
-    satisfied (no injected state crosses). When non-`None`,
-    `dgemma.kv_cache.validate_kv_cache_ingress(kv_cache, dgemma_model)` fires
-    BEFORE the scheduler/pipeline are constructed (fail-on-mismatch, rule 5
-    `EMIT-CANONICAL / PARSE-AT-THE-DOOR` — a bad cache is rejected before any
-    resource tied to this call is built) and, on pass,
-    `CanvasTrace.injected_cache_provenance` is stamped with the payload's
-    `Provenance` record (OUT-3) so a downstream analysis can always tell a
-    conditioned run from an unconditioned one. This phase does NOT yet drive
-    the decoder off the injected cache's tensors — that live drive body is
-    GATED on the ADR's real-weights de-risk smoke test (Open Question #1,
-    issue #62 Phase 4); `run_diffusion` validates and stamps provenance
-    (the skeleton), and otherwise proceeds exactly as it does when
-    `kv_cache=None`. The input `kv_cache` payload itself is never mutated by
-    this function (§3 advance-returns-new-payload discipline — this phase
-    reads it, it does not write through it).
+    `kv_cache=` (ADR-CDG-012 IN-2, issue #62 Phase 2 — types + ingress door;
+    Phase 4 decoder-drive body NOT YET BUILT, issue #207 makes that gap fail
+    loud rather than silently no-op): an optional injected `KVCache` payload
+    (§62's `dgemma/types.py` dataclass). `None` (default) is today's EXACT
+    behavior, byte-for-byte unchanged — the run mints its own cache
+    internally via the pipeline's own first encode, and rule-6
+    `STATELESS-CORE` is trivially satisfied (no injected state crosses).
+    When non-`None`, `dgemma.kv_cache.validate_kv_cache_ingress(kv_cache,
+    dgemma_model)` fires BEFORE the scheduler/pipeline are constructed
+    (fail-on-mismatch, rule 5 `EMIT-CANONICAL / PARSE-AT-THE-DOOR` — a bad
+    cache is rejected before any resource tied to this call is built), and
+    on pass this function **still raises** — `NotImplementedError` naming
+    issue #62 Phase 4 — because a well-formed injected cache is not the same
+    thing as a path that can honor it: the decoder-drive body that would
+    actually consume the cache's tensors does not exist yet (Open Question
+    #1, gated on the ADR's real-weights de-risk smoke test), and letting a
+    validated-but-ignored cache silently fall through to an uninjected run
+    would itself be the `EMIT-CANONICAL / PARSE-AT-THE-DOOR` violation this
+    ADR's own ingress discipline forbids (issue #207 operator ruling,
+    2026-08-01). The input `kv_cache` payload is never mutated by this
+    function regardless (§3 advance-returns-new-payload discipline — this
+    phase only reads it before raising).
 
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
@@ -1342,7 +1344,9 @@ def run_diffusion(
     `constraints`+`logit_hook` combination fails (see
     `dgemma.ingress.validate_ingress`'s error register), or if `kv_cache` is
     given and fails `validate_kv_cache_ingress`'s V1-V6 checks (see
-    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register).
+    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register). Raises
+    `NotImplementedError` if `kv_cache` is given and PASSES ingress — the
+    inert-path door (issue #207); see above.
     """
     if t_min >= t_max:
         raise ValueError(f"t_min must be < t_max, got t_min={t_min!r} t_max={t_max!r}.")
@@ -1368,8 +1372,32 @@ def run_diffusion(
     # or pipeline object (rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR). `None`
     # (the default) skips this entirely — zero behavior change from before
     # this parameter existed.
+    #
+    # Issue #207 (operator ruling 2026-08-01): V1-V6 above only confirm the
+    # PAYLOAD is well-formed — they say nothing about whether this PATH can
+    # honor it. It cannot: the decoder-drive body that would actually consume
+    # an injected cache's tensors is issue #62 Phase 4, gated on the ADR's
+    # real-weights de-risk smoke test and NOT YET BUILT. Before this fix, a
+    # well-formed `kv_cache` passed V1-V6, got its provenance stamped onto
+    # `CanvasTrace.injected_cache_provenance` (OUT-3), and the run then
+    # proceeded exactly as an uninjected run would — the decoder silently
+    # never touched the cache. That is an accepted-and-ignored input, the
+    # trust-and-degrade failure ADR-CDG-001 / EMIT-CANONICAL/PARSE-AT-THE-DOOR
+    # forbids (rule 5): a payload that type-checks and validates but is
+    # discarded downstream is a lying door, not an honest one. Fail loud
+    # instead, naming the tracked enablement so a caller knows this is a gap
+    # to watch for landing, not a permanent rejection.
     if kv_cache is not None:
         validate_kv_cache_ingress(kv_cache, dgemma_model)
+        raise NotImplementedError(
+            "run_diffusion(kv_cache=...) ingress passed validation (V1-V6), but "
+            "this path cannot yet drive the decoder off an injected cache's "
+            "tensors — that live drive body is issue #62 Phase 4 "
+            "(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62), "
+            "gated on ADR-CDG-012's real-weights de-risk smoke test, and is not "
+            "built yet. Remedy: omit kv_cache= (or pass None) until Phase 4 "
+            "lands — a run with no injected cache is fully supported today."
+        )
 
     # Constraints -> the two-mechanism givens (ADR-CDG-010 Decision 1, issue
     # #64 Phase 3). Both mechanisms are built from the SAME validated

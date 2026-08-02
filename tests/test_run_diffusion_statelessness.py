@@ -553,18 +553,21 @@ class TestEffectiveKnobTelemetryStatelessness:
 
 
 class TestKVCacheInjectionStatelessness:
-    """ADR-CDG-012 Phase 2 rider (issue #62 §K): two identical
-    `run_diffusion(kv_cache=...)` calls yield identical telemetry AND
-    identical `injected_cache_provenance` stamps, and no cache state
-    persists across calls — `run_diffusion` never caches a `kv_cache`
-    payload on `dgemma_model` or a module global (rule 6, `STATELESS-CORE`).
-    Full ingress/OUT-3 test coverage for the `kv_cache=` door itself lives in
-    `tests/test_kv_cache_run_diffusion.py`; this class only proves the
-    same-in/same-out cross-run containment this module's sibling classes
-    already established for the pre-existing knobs, extended to the new
-    parameter."""
+    """ADR-CDG-012 Phase 2 rider (issue #62 §K), amended by issue #207
+    (fail-loud at the inert `kv_cache` door, operator ruling 2026-08-01):
+    two identical `run_diffusion(kv_cache=...)` calls both raise the SAME
+    shape of `NotImplementedError` (naming issue #62 Phase 4) — proving the
+    raise itself carries no cross-call state — and no cache state persists
+    across calls — `run_diffusion` never caches a `kv_cache` payload on
+    `dgemma_model` or a module global (rule 6, `STATELESS-CORE`), proven by
+    a THIRD, uninjected call staying unaffected by the two prior raises.
+    Full ingress/inert-door test coverage for the `kv_cache=` door itself
+    lives in `tests/test_kv_cache_run_diffusion.py`; this class only proves
+    the same-in/same-out cross-run containment this module's sibling
+    classes already established for the pre-existing knobs, extended to the
+    new parameter."""
 
-    def test_two_identical_kv_cache_calls_yield_identical_telemetry_and_provenance(self, monkeypatch):
+    def test_two_identical_kv_cache_calls_both_raise_with_no_cross_call_state(self, monkeypatch):
         from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint
         from dgemma.types import KVCache, Provenance
         from tests.conftest import FakeDGemmaModelConfig, FakeDynamicCache
@@ -607,20 +610,25 @@ class TestKVCacheInjectionStatelessness:
         cache1 = _kv_cache_for(model1)
         cache2 = _kv_cache_for(model2)
 
-        _, _, trace1 = run_diffusion(
-            model1, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache1
-        )
-        _, _, trace2 = run_diffusion(
-            model2, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache2
-        )
+        with pytest.raises(NotImplementedError, match="Phase 4"):
+            run_diffusion(
+                model1, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache1
+            )
+        with pytest.raises(NotImplementedError, match="Phase 4"):
+            run_diffusion(
+                model2, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache2
+            )
 
-        assert trace1.scheduler_config == trace2.scheduler_config
-        assert trace1.injected_cache_provenance == trace2.injected_cache_provenance
-        assert trace1.injected_cache_provenance is not trace2.injected_cache_provenance
+        # No scheduler was ever constructed for either call — the raise
+        # fires before scheduler/pipeline construction (rule 5) — so the
+        # stateless-registry rider this module's sibling classes assert has
+        # nothing to compare here; the meaningful assertion is the THIRD,
+        # uninjected call below staying fully unaffected.
 
-        # A THIRD call with no kv_cache at all is unaffected by the two prior
-        # injected-cache calls — no residual cache state survives on the
-        # model or anywhere `run_diffusion` could have stashed it.
+        # A THIRD call with no kv_cache at all is unaffected by the two
+        # prior (raising) injected-cache calls — no residual cache state
+        # survives on the model or anywhere `run_diffusion` could have
+        # stashed it, and this call completes normally rather than raising.
         _, _, trace3 = run_diffusion(
             _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
         )

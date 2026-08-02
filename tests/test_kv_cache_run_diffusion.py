@@ -1,17 +1,21 @@
-"""tests/test_kv_cache_run_diffusion.py — ADR-CDG-012 Phase 2 (issue #62):
-`run_diffusion`'s `kv_cache=` door (IN-2), fired against the fake pipeline
-(no real weights).
+"""tests/test_kv_cache_run_diffusion.py — ADR-CDG-012 Phase 2 (issue #62)
++ issue #207 (fail-loud at the inert `kv_cache` door): `run_diffusion`'s
+`kv_cache=` door (IN-2), fired against the fake pipeline (no real weights).
 
-Scope, per the ratified Phase 2 plan (issue #62 §N): `kv_cache=None` is
-byte-identical to today; `kv_cache=<valid synthetic>` ingress-validates
+Scope, per the ratified Phase 2 plan (issue #62 §N) as amended by issue #207
+(operator ruling 2026-08-01): `kv_cache=None` is byte-identical to today.
+`kv_cache=<well-formed synthetic>` still ingress-validates
 (`dgemma.kv_cache.validate_kv_cache_ingress`) BEFORE the scheduler/pipeline
-are constructed, stamps `CanvasTrace.injected_cache_provenance` (OUT-3), and
-never mutates the input `KVCache` payload (§3 advance-returns-new-payload —
-Phase 2 has no OUT-1/OUT-2 emit path of its own; that is the Phase-3 node
-bodies'). The live decoder-drive body stays a skeleton (Phase 4, gated on the
-ADR's real-weights de-risk smoke test) — these tests do not, and must not,
-assert anything about the decoder actually consuming the injected cache's
-tensors.
+are constructed, and never mutates the input `KVCache` payload — but where
+Phase 2 originally let a payload that PASSED V1-V6 fall through to a silent,
+uninjected run (stamping `CanvasTrace.injected_cache_provenance` for a cache
+the decoder then quietly ignored), #207 closes that trust-and-degrade gap:
+passing ingress now raises `NotImplementedError` naming issue #62 Phase 4 as
+the tracked enablement, because the live decoder-drive body that would
+actually honor the cache does not exist yet. These tests assert the new
+fail-loud contract; they do not, and must not, assert anything about the
+decoder actually consuming the injected cache's tensors (that remains
+Phase 4's job, unbuilt).
 
 Fixture composition note: `dgemma_model_factory`/`synthetic_kv_cache_factory`
 (`tests/conftest.py` §L) build a `DGemmaModel` whose `.processor` is the bare
@@ -196,30 +200,62 @@ class TestKVCacheNoneUnchanged:
         assert trace_a.injected_cache_provenance == trace_b.injected_cache_provenance is None
 
 
-class TestKVCacheValidIngress:
-    """`kv_cache=<valid synthetic>` ingress-validates and stamps OUT-3 on the
-    fake pipeline — Phase 2's positive path."""
+class TestKVCacheValidIngressFailsLoudOnInertPath:
+    """`kv_cache=<well-formed synthetic>` passes V1-V6 ingress, then hits the
+    inert-path door (issue #207) and raises `NotImplementedError` naming
+    issue #62 Phase 4 — never a silent pass-through to an uninjected run."""
 
-    def test_valid_cache_stamps_injected_cache_provenance(self, monkeypatch):
+    def test_valid_cache_raises_not_implemented_naming_phase_4(self, monkeypatch):
         _install_fakes(monkeypatch, num_steps=2)
         model = _kv_capable_fake_model()
         cache = _matching_kv_cache(model, minting_sequence=(4, 5, 6))
 
-        _, _, trace = run_diffusion(
-            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache
-        )
+        with pytest.raises(NotImplementedError, match="Phase 4"):
+            run_diffusion(
+                model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache
+            )
 
-        assert trace.injected_cache_provenance is not None
-        assert trace.injected_cache_provenance == cache.provenance
-        assert trace.injected_cache_provenance.minting_sequence == (4, 5, 6)
-        assert trace.injected_cache_provenance.model_repo_id == model.repo_id
+    def test_valid_cache_error_names_issue_62(self, monkeypatch):
+        """DV.3b-style self-remedying message (ADR-CDG-012): the raise names
+        both the gap (no live drive body) and the tracked enablement
+        (#62 Phase 4), not a bare assertion."""
+        _install_fakes(monkeypatch, num_steps=2)
+        model = _kv_capable_fake_model()
+        cache = _matching_kv_cache(model)
 
-    def test_valid_cache_does_not_mutate_input_payload(self, monkeypatch):
-        """§3 advance-returns-new-payload, Phase-2 slice: `run_diffusion`
-        reads the injected payload (to validate + stamp OUT-3) but never
-        writes through it — the cache object, cumulative_length, geometry,
-        and provenance identity are all the exact objects/values supplied,
-        untouched, after the call returns."""
+        with pytest.raises(NotImplementedError, match=r"#62 Phase 4"):
+            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
+
+    def test_valid_cache_raises_before_scheduler_or_pipeline_built(self, monkeypatch):
+        """The inert-path raise fires in the same pre-construction window as
+        ingress (rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR) — a cache this
+        path can't honor never ties up a scheduler or pipeline object
+        either, mirroring the invalid-ingress raise's own guarantee below."""
+        constructed: list = []
+
+        class TrackingScheduler:
+            def __init__(self, **kwargs):
+                constructed.append("scheduler")
+
+        class TrackingPipeline:
+            def __init__(self, **kwargs):
+                constructed.append("pipeline")
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", TrackingScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", TrackingPipeline)
+
+        model = _kv_capable_fake_model()
+        cache = _matching_kv_cache(model)
+
+        with pytest.raises(NotImplementedError, match="Phase 4"):
+            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
+
+        assert constructed == []
+
+    def test_valid_cache_not_mutated_before_raise(self, monkeypatch):
+        """§3 advance-returns-new-payload discipline holds even on the raise
+        path: `run_diffusion` reads the injected payload (to validate) but
+        never writes through it before raising."""
         _install_fakes(monkeypatch, num_steps=2)
         model = _kv_capable_fake_model()
         cache = _matching_kv_cache(model)
@@ -227,33 +263,13 @@ class TestKVCacheValidIngress:
         original_provenance = cache.provenance
         original_cache_obj = cache.cache
 
-        run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
+        with pytest.raises(NotImplementedError):
+            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
 
         assert cache.cache is original_cache_obj
         assert cache.cumulative_length == original_cumulative_length
         assert cache.provenance is original_provenance
         assert cache.provenance.minting_sequence == (1, 2, 3)
-
-    def test_two_identical_kv_cache_calls_yield_identical_provenance_stamp(self, monkeypatch):
-        """Same-in/same-out rider (statelessness, rule 6): two independent
-        `run_diffusion(kv_cache=...)` calls with equal-but-distinct payloads
-        produce equal (not aliased) `injected_cache_provenance` stamps, and
-        neither call's scheduler config leaks into the other's."""
-        _install_fakes(monkeypatch, num_steps=2)
-        model_a = _kv_capable_fake_model()
-        model_b = _kv_capable_fake_model()
-        cache_a = _matching_kv_cache(model_a)
-        cache_b = _matching_kv_cache(model_b)
-
-        _, _, trace_a = run_diffusion(
-            model_a, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache_a
-        )
-        _, _, trace_b = run_diffusion(
-            model_b, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache_b
-        )
-
-        assert trace_a.injected_cache_provenance == trace_b.injected_cache_provenance
-        assert trace_a.injected_cache_provenance is not trace_b.injected_cache_provenance
 
 
 class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
@@ -328,11 +344,13 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
 
         assert constructed == []
 
-    def test_tier2_cache_with_edit_script_passes_ingress(self, monkeypatch):
+    def test_tier2_cache_with_edit_script_passes_ingress_then_hits_inert_door(self, monkeypatch):
         """Non-orphan tier-2 shape (`minting_sequence=None`,
         non-empty `edit_script`) is legal input to the ingress door even
         though no tier-2 surgery op exists yet (Phase 5, out of scope) — the
-        `Provenance` dataclass shape alone is what V5 checks."""
+        `Provenance` dataclass shape alone is what V5 checks. Passing V5
+        does not exempt it from the inert-path raise (issue #207): no
+        `kv_cache` shape — tier 1 or tier 2 — is honored by the decoder yet."""
         _install_fakes(monkeypatch, num_steps=2)
         model = _kv_capable_fake_model()
         good_cache = _matching_kv_cache(model)
@@ -348,9 +366,7 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
             ),
         )
 
-        _, _, trace = run_diffusion(
-            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=tier2_cache
-        )
-
-        assert trace.injected_cache_provenance.minting_sequence is None
-        assert len(trace.injected_cache_provenance.edit_script) == 1
+        with pytest.raises(NotImplementedError, match="Phase 4"):
+            run_diffusion(
+                model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=tier2_cache
+            )
