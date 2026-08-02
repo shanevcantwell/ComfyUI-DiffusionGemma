@@ -371,6 +371,18 @@ class DGemmaSampler:
         gen_length: int,
         thinking: bool,
         unique_id=None,
+        # Issue #212: ComfyUI's executor calls FUNCTION(**inputs) with every
+        # declared input, including hidden ones — a node whose INPUT_TYPES
+        # declares a hidden key its FUNCTION signature lacks is fatal at
+        # execution (execution.py's process_inputs, f(**inputs)). This node
+        # merges live_view.LIVE_VIEW_HIDDEN_INPUT ("dgemma_live_view") into
+        # its own hidden dict (issue #188), so the signature must accept it
+        # — see DGemmaDenoise.denoise's matching parameter for the full
+        # rationale (same mint, same deliberate consume-and-ignore: the
+        # value is a client-side-only JS widget sentinel with no backend
+        # payload; the real live push is the independent
+        # on_frame=build_on_frame(unique_id) wiring below).
+        dgemma_live_view=None,
     ):
         text, canvas_state, canvas_trace = run_diffusion(
             model,
