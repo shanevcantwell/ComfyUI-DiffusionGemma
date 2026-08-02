@@ -160,24 +160,58 @@ class DGemmaTrace:
     curve / mask-token corroboration do not depend on which heatmap mode is
     selected)."""
 
+    DESCRIPTION = (
+        "Post-hoc analysis over a complete canvas_trace. Renders a heatmap "
+        "IMAGE plus a STRING summary (avalanche/commit curve + mask-token "
+        "corroboration verdict). mode selects the heatmap signal: commit "
+        "(which positions changed per step) or entropy (per-position "
+        "predictive entropy, normalized per render). cell_px upscales the "
+        "raw steps×positions grid so it's readable."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "canvas_trace": (DGEMMA_CANVAS_TRACE,),
+                "canvas_trace": (
+                    DGEMMA_CANVAS_TRACE,
+                    {"tooltip": "A complete per-step trace from a sampler-class node."},
+                ),
                 # Nearest-neighbor upscale factor (operator finding,
                 # 2026-07-05: a raw steps×positions map — 256×11 observed —
                 # is unreadably small). Threads straight through to
                 # `build_commit_heatmap`/`build_entropy_heatmap`'s own
                 # `scale=...`; the scaling math is engine-side
                 # (ADR-CDG-003), this widget is pure unpack.
-                "cell_px": ("INT", {"default": 6, "min": 1, "max": 32}),
+                "cell_px": (
+                    "INT",
+                    {
+                        "default": 6,
+                        "min": 1,
+                        "max": 32,
+                        "tooltip": (
+                            "Nearest-neighbor upscale factor for the "
+                            "heatmap (a raw steps×positions grid is "
+                            "unreadably small)."
+                        ),
+                    },
+                ),
                 # ADR-CDG-014 issue #61 P-D: which per-position signal the
                 # heatmap IMAGE renders. Default "commit" is byte-identical
                 # to every pre-P-D graph (no widget on an older saved graph
                 # resolves to this same default, mirroring `cell_px`'s own
                 # default-parity contract, `test_render_defaults_cell_px_to_6`).
-                "mode": (["commit", "entropy"], {"default": "commit"}),
+                "mode": (
+                    ["commit", "entropy"],
+                    {
+                        "default": "commit",
+                        "tooltip": (
+                            "Heatmap signal: commit = which positions "
+                            "changed each step; entropy = per-position "
+                            "predictive entropy (normalized per render)."
+                        ),
+                    },
+                ),
             }
         }
 

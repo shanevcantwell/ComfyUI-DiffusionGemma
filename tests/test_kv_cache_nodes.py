@@ -57,6 +57,20 @@ class TestDGemmaEncodeContract:
         assert spec["required"]["text"][0] == "STRING"
         assert spec["optional"]["kv_cache"][0] == DGEMMA_KV_CACHE
 
+    def test_description_and_tooltips(self):
+        """Issue #175 minimal phase: DESCRIPTION class attribute + per-input
+        tooltips (model, text, kv_cache), so the mint/advance dual-door
+        behavior is explained in-UI rather than only in the docstring."""
+        spec = DGemmaEncode.INPUT_TYPES()
+        assert DGemmaEncode.DESCRIPTION
+        assert "mint" in DGemmaEncode.DESCRIPTION.lower()
+        assert "advance" in DGemmaEncode.DESCRIPTION.lower()
+        assert "tooltip" in spec["required"]["model"][1]
+        assert "tooltip" in spec["required"]["text"][1]
+        assert "tooltip" in spec["optional"]["kv_cache"][1]
+        assert "UNWIRED" in spec["optional"]["kv_cache"][1]["tooltip"]
+        assert "WIRED" in spec["optional"]["kv_cache"][1]["tooltip"]
+
     def test_return_types(self):
         assert DGemmaEncode.RETURN_TYPES == (DGEMMA_KV_CACHE,)
         assert DGemmaEncode.RETURN_NAMES == ("kv_cache",)
@@ -118,6 +132,32 @@ class TestDGemmaDenoiseContract:
         assert "thinking" in spec["required"]
         assert spec["optional"]["kv_cache"][0] == DGEMMA_KV_CACHE
         assert "unique_id" in spec["hidden"]
+
+    def test_description_and_tooltips(self):
+        """Issue #175 minimal phase: DESCRIPTION class attribute + the six
+        KNOB_DOCS tooltips that pre-#175 existed on DGemmaSampler but not
+        here (grounding note in the ratified spec), plus model/prompt/
+        kv_cache tooltips."""
+        from dgemma.loop import KNOB_DOCS
+
+        spec = DGemmaDenoise.INPUT_TYPES()
+        assert DGemmaDenoise.DESCRIPTION
+        assert "kv_cache" in DGemmaDenoise.DESCRIPTION
+        for knob in (
+            "seed",
+            "num_inference_steps",
+            "t_min",
+            "t_max",
+            "entropy_bound",
+            "confidence",
+            "gen_length",
+        ):
+            assert spec["required"][knob][1]["tooltip"] is KNOB_DOCS[knob], (
+                f"{knob}'s Denoise tooltip is not the KNOB_DOCS mint object"
+            )
+        assert "tooltip" in spec["required"]["model"][1]
+        assert "tooltip" in spec["required"]["prompt"][1]
+        assert "tooltip" in spec["optional"]["kv_cache"][1]
 
     def test_return_types(self):
         """Issue #166 ratified scope: full connection parity with

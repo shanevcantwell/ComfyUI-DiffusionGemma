@@ -280,9 +280,14 @@ class TestDGemmaRunLogWriterNode:
     def test_declarations(self):
         spec = DGemmaRunLogWriter.INPUT_TYPES()
         assert set(spec["required"]) == {"canvas_trace", "run_config", "frames", "canvas_state", "filename_prefix"}
-        assert spec["required"]["canvas_trace"] == ("DGEMMA_CANVAS_TRACE",)
-        assert spec["required"]["run_config"] == ("DGEMMA_RUN_CONFIG",)
+        assert spec["required"]["canvas_trace"][0] == "DGEMMA_CANVAS_TRACE"
+        assert spec["required"]["run_config"][0] == "DGEMMA_RUN_CONFIG"
         assert set(spec["optional"]) == {"debug_log_path"}
+        # Issue #175 minimal phase: DESCRIPTION + per-input tooltips.
+        assert DGemmaRunLogWriter.DESCRIPTION
+        for name in ("canvas_trace", "run_config", "frames", "canvas_state", "filename_prefix"):
+            assert "tooltip" in spec["required"][name][1]
+        assert "tooltip" in spec["optional"]["debug_log_path"][1]
         assert DGemmaRunLogWriter.INPUT_IS_LIST is True
         assert DGemmaRunLogWriter.RETURN_TYPES == ("STRING",)
         assert DGemmaRunLogWriter.RETURN_NAMES == ("log_path",)

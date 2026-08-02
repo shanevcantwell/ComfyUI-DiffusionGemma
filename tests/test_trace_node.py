@@ -19,18 +19,27 @@ from surfaces.comfyui.trace import DGemmaTrace
 def test_declarations():
     spec = DGemmaTrace.INPUT_TYPES()
     assert set(spec["required"]) == {"canvas_trace", "cell_px", "mode"}
-    assert spec["required"]["canvas_trace"] == ("DGEMMA_CANVAS_TRACE",)
+    assert spec["required"]["canvas_trace"][0] == "DGEMMA_CANVAS_TRACE"
     # cell_px (operator finding, 2026-07-05): nearest-neighbor upscale
     # widget — a raw steps×positions heatmap (256×11 observed live) is
     # unreadably small as pixels.
-    assert spec["required"]["cell_px"] == ("INT", {"default": 6, "min": 1, "max": 32})
+    assert spec["required"]["cell_px"][0] == "INT"
+    assert spec["required"]["cell_px"][1]["default"] == 6
+    assert spec["required"]["cell_px"][1]["min"] == 1
+    assert spec["required"]["cell_px"][1]["max"] == 32
     # mode (ADR-CDG-014 issue #61 P-D): default "commit" is byte-identical
     # to every pre-P-D graph.
-    assert spec["required"]["mode"] == (["commit", "entropy"], {"default": "commit"})
+    assert spec["required"]["mode"][0] == ["commit", "entropy"]
+    assert spec["required"]["mode"][1]["default"] == "commit"
     assert DGemmaTrace.RETURN_TYPES == ("IMAGE", "STRING")
     assert DGemmaTrace.RETURN_NAMES == ("heatmap", "summary")
     assert DGemmaTrace.FUNCTION == "render"
     assert DGemmaTrace.CATEGORY == "DiffusionGemma"
+    # Issue #175 minimal phase: DESCRIPTION + per-input tooltips.
+    assert DGemmaTrace.DESCRIPTION
+    assert "tooltip" in spec["required"]["canvas_trace"][1]
+    assert "tooltip" in spec["required"]["cell_px"][1]
+    assert "tooltip" in spec["required"]["mode"][1]
 
 
 class _FakeTrace:
