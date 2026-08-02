@@ -35,15 +35,50 @@ class DGemmaEncode:
     """Mints a fresh `DGEMMA_KV_CACHE` from a text prompt (IN-1), or advances
     an existing one with newly-committed text (IN-3, `kv_cache` wired)."""
 
+    DESCRIPTION = (
+        "Mints or advances a DiffusionGemma KV-cache from a text prompt. "
+        "The optional kv_cache input is a dual door: leave it UNWIRED to "
+        "mint a fresh cache from text alone (IN-1); WIRE an existing "
+        "kv_cache in to ADVANCE it with the newly-committed text (IN-3). "
+        "Same node, one call — the presence of a wired cache is the only "
+        "thing that switches mint vs. advance. Feed the output cache into "
+        "DGemmaDenoise's kv_cache input to condition a run on it."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (DGEMMA_MODEL,),
-                "text": ("STRING", {"multiline": True, "default": ""}),
+                "model": (
+                    DGEMMA_MODEL,
+                    {"tooltip": "Loaded DiffusionGemma model (from DGemmaLoader)."},
+                ),
+                "text": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": (
+                            "Text to encode into the KV-cache. On a fresh "
+                            "mint this is the full prompt; when advancing a "
+                            "wired cache, this is the newly-committed "
+                            "continuation."
+                        ),
+                    },
+                ),
             },
             "optional": {
-                "kv_cache": (DGEMMA_KV_CACHE,),
+                "kv_cache": (
+                    DGEMMA_KV_CACHE,
+                    {
+                        "tooltip": (
+                            "UNWIRED = mint a fresh cache from text. WIRED "
+                            "= advance the incoming cache with text. This "
+                            "one connection is what switches mint vs. "
+                            "advance — there is no separate mode widget."
+                        )
+                    },
+                ),
             },
         }
 

@@ -14,11 +14,14 @@ from surfaces.comfyui.token_trace import DGemmaTokenTrace
 def test_declarations():
     spec = DGemmaTokenTrace.INPUT_TYPES()
     assert set(spec["required"]) == {"canvas_trace"}
-    assert spec["required"]["canvas_trace"] == ("DGEMMA_CANVAS_TRACE",)
+    assert spec["required"]["canvas_trace"][0] == "DGEMMA_CANVAS_TRACE"
     assert DGemmaTokenTrace.RETURN_TYPES == ("STRING",)
     assert DGemmaTokenTrace.RETURN_NAMES == ("token_report",)
     assert DGemmaTokenTrace.FUNCTION == "render"
     assert DGemmaTokenTrace.CATEGORY == "DiffusionGemma"
+    # Issue #175 minimal phase: DESCRIPTION + per-input tooltip.
+    assert DGemmaTokenTrace.DESCRIPTION
+    assert "tooltip" in spec["required"]["canvas_trace"][1]
 
 
 def _frame(canvas_idx, step_idx, canvas_row, t=1.0, temperature=0.5):

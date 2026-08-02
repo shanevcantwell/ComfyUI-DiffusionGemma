@@ -103,28 +103,105 @@ class DGemmaDenoise:
     """Drives the denoising loop for one prompt, optionally consuming a
     `DGEMMA_KV_CACHE` injected via `DGemmaEncode` (IN-2)."""
 
+    DESCRIPTION = (
+        "Drives the denoising loop for one prompt, optionally conditioned "
+        "on a KV-cache. Identical knob surface and six outputs to "
+        "DGemmaSampler, plus one extra input: the optional kv_cache (from "
+        "DGemmaEncode) — wire it to inject a known-provenance cache "
+        "(IN-2); leave it unwired for an unconditioned run. Outputs: text "
+        "(decoded result), canvas_state (a resumable/validity save-state), "
+        "canvas_trace (per-step analysis data — feeds DGemmaTrace/"
+        "DGemmaTokenTrace), frames (one decoded string per captured step), "
+        "images (those frames as a watchable batch), run_config (the run's "
+        "header bundle — feeds DGemmaRunLogWriter). The <|think|> "
+        "block-boundary KV output (\"OUT-1\") is deferred until the live "
+        "mid-run stop point exists; a wired cache's provenance is already "
+        "readable off canvas_trace."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (DGEMMA_MODEL,),
-                "prompt": ("STRING", {"multiline": True, "default": ""}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
+                "model": (
+                    DGEMMA_MODEL,
+                    {"tooltip": "Loaded DiffusionGemma model (from DGemmaLoader)."},
+                ),
+                "prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "The user turn to generate a response to.",
+                    },
+                ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 0xFFFFFFFFFFFFFFFF,
+                        "tooltip": KNOB_DOCS["seed"],
+                    },
+                ),
                 "num_inference_steps": (
                     "INT",
-                    {"default": DEFAULT_NUM_INFERENCE_STEPS, "min": 1, "max": 1024},
+                    {
+                        "default": DEFAULT_NUM_INFERENCE_STEPS,
+                        "min": 1,
+                        "max": 1024,
+                        "tooltip": KNOB_DOCS["num_inference_steps"],
+                    },
                 ),
-                "t_min": ("FLOAT", {"default": DEFAULT_T_MIN, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "t_max": ("FLOAT", {"default": DEFAULT_T_MAX, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "t_min": (
+                    "FLOAT",
+                    {
+                        "default": DEFAULT_T_MIN,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": KNOB_DOCS["t_min"],
+                    },
+                ),
+                "t_max": (
+                    "FLOAT",
+                    {
+                        "default": DEFAULT_T_MAX,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": KNOB_DOCS["t_max"],
+                    },
+                ),
                 "entropy_bound": (
                     "FLOAT",
-                    {"default": DEFAULT_ENTROPY_BOUND, "min": 0.0, "max": 1.0, "step": 0.001},
+                    {
+                        "default": DEFAULT_ENTROPY_BOUND,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.001,
+                        "tooltip": KNOB_DOCS["entropy_bound"],
+                    },
                 ),
                 "confidence": (
                     "FLOAT",
-                    {"default": DEFAULT_CONFIDENCE, "min": 0.0, "max": 1.0, "step": 0.001},
+                    {
+                        "default": DEFAULT_CONFIDENCE,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.001,
+                        "tooltip": KNOB_DOCS["confidence"],
+                    },
                 ),
-                "gen_length": ("INT", {"default": DEFAULT_GEN_LENGTH, "min": 1, "max": 8192}),
+                "gen_length": (
+                    "INT",
+                    {
+                        "default": DEFAULT_GEN_LENGTH,
+                        "min": 1,
+                        "max": 8192,
+                        "tooltip": KNOB_DOCS["gen_length"],
+                    },
+                ),
                 # EXPERIMENTAL — same widget, same default, same honesty note
                 # as `DGemmaSampler`'s (issue #166 input-side parity): the
                 # injected system-turn path is one token short of native
@@ -140,7 +217,16 @@ class DGemmaDenoise:
                 ),
             },
             "optional": {
-                "kv_cache": (DGEMMA_KV_CACHE,),
+                "kv_cache": (
+                    DGEMMA_KV_CACHE,
+                    {
+                        "tooltip": (
+                            "Optional KV-cache from DGemmaEncode to "
+                            "condition this run on (IN-2). Leave unwired "
+                            "for an unconditioned run."
+                        )
+                    },
+                ),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
