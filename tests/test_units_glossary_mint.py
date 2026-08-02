@@ -71,12 +71,31 @@ def test_gen_length_doc_states_the_grounded_block_arithmetic():
     canvas length, confirmed byte-identical across all cached checkpoint
     variants per issue #165's enumeration close-out) — this is the divisor
     the doc's "gen_length 1024 -> 4 blocks" example computes against
-    (ceil(1024 / 256) == 4), matching the spec's own worked example."""
-    assert DEFAULT_GEN_LENGTH == 256
+    (ceil(1024 / 256) == 4), matching the spec's own worked example.
+
+    The assertions below derive their expected substrings FROM
+    `DEFAULT_GEN_LENGTH` (never restate a literal `256`/`4` that merely
+    happens to agree with it): if the constant changes, the doc must state
+    the new divisor and the new worked-example block count, or this test
+    fails — the doc-to-constant tie is mechanical, not coincidental."""
+    import math
+
+    block_size = DEFAULT_GEN_LENGTH
     doc = KNOB_DOCS["gen_length"]
-    assert "256" in doc
+    # The doc must name the actual per-block canvas length (the divisor).
+    assert str(block_size) in doc, (
+        f"gen_length doc does not state the block-size divisor {block_size}"
+    )
     assert "num_inference_steps" in doc
-    assert "1024" in doc and "4 blocks" in doc
+    # The worked example ("gen_length WORKED_EXAMPLE -> N blocks") must state
+    # the block count computed from the real constant, not a pinned literal.
+    worked_example = 1024
+    expected_blocks = math.ceil(worked_example / block_size)
+    assert str(worked_example) in doc, "gen_length doc dropped its worked example"
+    assert f"{expected_blocks} blocks" in doc, (
+        f"gen_length doc's worked example is not "
+        f"ceil({worked_example} / {block_size}) == {expected_blocks} blocks"
+    )
 
 
 def test_sampler_and_mcp_agree_by_construction():
