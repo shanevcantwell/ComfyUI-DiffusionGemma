@@ -11,7 +11,7 @@ mode this test exists to catch.
 """
 from __future__ import annotations
 
-from dgemma.loop import KNOB_DOCS
+from dgemma.loop import DEFAULT_GEN_LENGTH, KNOB_DOCS
 from surfaces.comfyui.sampler import DGemmaSampler
 from surfaces.mcp.commands import generate as generate_module
 
@@ -61,6 +61,22 @@ def test_mcp_generate_schema_descriptions_are_the_mint_object_not_a_copy():
             f"{knob}'s MCP schema description is not the KNOB_DOCS mint "
             "object — re-typed text instead of a shared reference"
         )
+
+
+def test_gen_length_doc_states_the_grounded_block_arithmetic():
+    """Issue #175 minimal-phase grounding flag: the gen_length tooltip's
+    blocks×steps arithmetic must be confirmed against the loop's actual
+    block-size constant, not restated from the spec unverified. Grounded
+    against `dgemma/loop.py`'s `DEFAULT_GEN_LENGTH = 256` (the per-block
+    canvas length, confirmed byte-identical across all cached checkpoint
+    variants per issue #165's enumeration close-out) — this is the divisor
+    the doc's "gen_length 1024 -> 4 blocks" example computes against
+    (ceil(1024 / 256) == 4), matching the spec's own worked example."""
+    assert DEFAULT_GEN_LENGTH == 256
+    doc = KNOB_DOCS["gen_length"]
+    assert "256" in doc
+    assert "num_inference_steps" in doc
+    assert "1024" in doc and "4 blocks" in doc
 
 
 def test_sampler_and_mcp_agree_by_construction():

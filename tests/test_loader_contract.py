@@ -385,7 +385,7 @@ def test_sampler_input_types_declares_all_p2_widgets():
     # sentinel merged from `live_view.LIVE_VIEW_HIDDEN_INPUT` — see
     # `tests/test_live_view_mint.py` for the dedicated enforcement surface.
     assert spec["hidden"] == {"unique_id": "UNIQUE_ID", "dgemma_live_view": "DGEMMA_LIVE_VIEW"}
-    assert spec["required"]["model"] == ("DGEMMA_MODEL",)
+    assert spec["required"]["model"][0] == "DGEMMA_MODEL"
     # Issue #22 honesty finding: `thinking` carries an on-widget (hover)
     # tooltip marking it experimental — the injected-message path is
     # pinned one token short of native `enable_thinking=True`
@@ -401,6 +401,12 @@ def test_sampler_input_types_declares_all_p2_widgets():
     assert spec["required"]["entropy_bound"][1]["default"] == pytest.approx(0.1)
     assert spec["required"]["confidence"][1]["default"] == pytest.approx(0.005)
     assert spec["required"]["gen_length"][1]["default"] == 256
+    # Issue #175 minimal phase: DESCRIPTION class attribute + model/prompt
+    # hover tooltips (the six knob tooltips above already existed pre-#175).
+    assert "DGemmaSampler" not in DGemmaSampler.DESCRIPTION  # prose, not a name-echo
+    assert DGemmaSampler.DESCRIPTION
+    assert "tooltip" in spec["required"]["model"][1]
+    assert "tooltip" in spec["required"]["prompt"][1]
 
 
 def test_sampler_calls_run_diffusion_and_wraps_tuple(monkeypatch):

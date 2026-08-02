@@ -153,15 +153,70 @@ class DGemmaRunLogWriter:
     SaveImage-convention: owns and writes its own file, never routes text
     through a `STRING` save node."""
 
+    DESCRIPTION = (
+        "Writes a schema'd JSONL run log to disk — one header record, one "
+        "record per captured frame (with its decoded step text), one final "
+        "record. Wire it from ONE sampler-class node (DGemmaSampler or "
+        "DGemmaDenoise): run_config, canvas_trace, frames, and canvas_state "
+        "all come from that same node's outputs. debug_log_path is always "
+        "a directory and filename_prefix names the file — the writer "
+        "creates the directory if missing and writes "
+        "{filename_prefix}_{timestamp}.jsonl inside it; leave "
+        "debug_log_path empty to use ComfyUI's output directory. Returns "
+        "the written log's path."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "canvas_trace": (DGEMMA_CANVAS_TRACE,),
-                "run_config": (DGEMMA_RUN_CONFIG,),
-                "frames": ("STRING", {"forceInput": True}),
-                "canvas_state": (DGEMMA_CANVAS_STATE,),
-                "filename_prefix": ("STRING", {"default": DEFAULT_FILENAME_PREFIX}),
+                "canvas_trace": (
+                    DGEMMA_CANVAS_TRACE,
+                    {
+                        "tooltip": (
+                            "Per-step trace from the sampler-class node "
+                            "that produced this run."
+                        )
+                    },
+                ),
+                "run_config": (
+                    DGEMMA_RUN_CONFIG,
+                    {
+                        "tooltip": (
+                            "Run header bundle from the SAME sampler-class "
+                            "node (seed, knobs, model identity)."
+                        )
+                    },
+                ),
+                "frames": (
+                    "STRING",
+                    {
+                        "forceInput": True,
+                        "tooltip": (
+                            "The decoded per-step strings from the same "
+                            "node's frames output."
+                        ),
+                    },
+                ),
+                "canvas_state": (
+                    DGEMMA_CANVAS_STATE,
+                    {
+                        "tooltip": (
+                            "The final save-state from the same node's "
+                            "canvas_state output."
+                        )
+                    },
+                ),
+                "filename_prefix": (
+                    "STRING",
+                    {
+                        "default": DEFAULT_FILENAME_PREFIX,
+                        "tooltip": (
+                            "The FILE name stem. The log is written as "
+                            "{filename_prefix}_{timestamp}.jsonl."
+                        ),
+                    },
+                ),
             },
             "optional": {
                 # A DIRECTORY (issue #189) — filename_prefix names the
@@ -170,7 +225,20 @@ class DGemmaRunLogWriter:
                 # the value looks like a file path (e.g. ends `.jsonl`).
                 # Empty string (the default) means "use the ComfyUI
                 # output-directory convention."
-                "debug_log_path": ("STRING", {"default": ""}),
+                "debug_log_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": (
+                            "A DIRECTORY to write into (created if "
+                            "missing) — NOT a file path. The file name "
+                            "comes from filename_prefix. Leave empty to "
+                            "use ComfyUI's output directory. A trailing "
+                            "slash or a .jsonl-looking value is still "
+                            "treated as a directory."
+                        ),
+                    },
+                ),
             },
         }
 

@@ -346,7 +346,12 @@ KNOB_DOCS: dict[str, str] = {
     ),
     "gen_length": (
         "Canvas length in tokens (a token count) — how many positions the "
-        "denoising loop allocates for the generated turn."
+        "denoising loop allocates for the generated turn. This is split "
+        "into blocks of DEFAULT_GEN_LENGTH (256) tokens each: gen_length is "
+        "processed as ceil(gen_length / 256) blocks, each denoised over "
+        "num_inference_steps substeps (e.g. gen_length 1024 -> 4 blocks, "
+        "each denoised over num_inference_steps steps). Larger gen_length "
+        "costs proportionally more block passes."
     ),
     "seed": (
         "RNG seed for the generator driving canvas initialization/renoise "

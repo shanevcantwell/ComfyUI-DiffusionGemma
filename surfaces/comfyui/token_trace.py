@@ -59,11 +59,28 @@ class DGemmaTokenTrace:
     pre-excision final canvas ids (`CanvasTrace.raw_canvas_ids`) and the
     per-step raw token-identity grid as a `STRING` report."""
 
+    DESCRIPTION = (
+        "Debug node: renders the pre-excision final canvas token ids "
+        "(raw_canvas_ids) and a per-step raw token-id grid from a "
+        "canvas_trace, as a STRING report. Shows integer ids, not decoded "
+        "text (it has no tokenizer — take a DGemmaTrace/sampler path for "
+        "decoded views)."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "canvas_trace": (DGEMMA_CANVAS_TRACE,),
+                "canvas_trace": (
+                    DGEMMA_CANVAS_TRACE,
+                    {
+                        "tooltip": (
+                            "A complete per-step trace from a "
+                            "sampler-class node. Rendered as raw integer "
+                            "token ids, not decoded text."
+                        )
+                    },
+                ),
             }
         }
 

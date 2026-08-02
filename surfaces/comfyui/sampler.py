@@ -217,12 +217,30 @@ class DGemmaSampler:
     """Drives the denoising loop for one prompt; EB params/seed/thinking are
     widgets (P2)."""
 
+    DESCRIPTION = (
+        "Drives the denoising loop for one prompt. Six outputs: text, "
+        "canvas_state, canvas_trace, frames, images, run_config (wire the "
+        "last four into DGemmaRunLogWriter for a run log, or canvas_trace "
+        "into DGemmaTrace/DGemmaTokenTrace for analysis). Use DGemmaDenoise "
+        "instead if you need to condition on a KV-cache."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (DGEMMA_MODEL,),
-                "prompt": ("STRING", {"multiline": True, "default": ""}),
+                "model": (
+                    DGEMMA_MODEL,
+                    {"tooltip": "Loaded DiffusionGemma model (from DGemmaLoader)."},
+                ),
+                "prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "The user turn to generate a response to.",
+                    },
+                ),
                 "seed": (
                     "INT",
                     {
