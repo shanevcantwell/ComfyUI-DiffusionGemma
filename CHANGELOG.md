@@ -4,6 +4,18 @@ This changelog starts at 0.3.0 — no retroactive entries for earlier releases.
 
 All notable user-facing changes to this project are documented here.
 
+## [0.4.2] - 2026-08-01
+### Fixed
+- #191 — GPU memory diagnostics now report measured memory holders instead of hypothetical causes.
+- #187 — `encode_sequence`'s minted tensors are pinned to the encoder device.
+- #188 — live-view capability is single-minted (PR #206).
+- #207 — the `kv_cache` ingress now fails loud on an inert/unwired input instead of silently no-opping (#209). **Behavioral change:** callers relying on the prior silent no-op will now see an explicit error.
+- #212 — `DGemmaDenoise` accepts the minted live-view input; added an executor-faithful declared-input/signature parity test, in force for all nodes going forward (#213).
+- #151 — pin the `mcp` extra to `<2.0.0` (2.x moved its API under `surfaces/mcp/server.py`).
+
+### Added
+- #175 — per-node descriptions and widget tooltips (minimal phase, #208).
+
 ## [0.4.1] - 2026-07-29
 ### Added
 - `install.py` — belt-and-braces post-install script (issue #147). ComfyUI's Extensions flow (Manager merged into core) honors it post-requirements: logs interpreter + installed dependency versions via `importlib.metadata`, re-checks each `requirements.txt` pin, and installs anything still missing into the correct interpreter. Diagnostic insurance for a broken fresh install, not a claimed root-cause fix — root cause on the affected box remains unpinned pending operator data (#147).
