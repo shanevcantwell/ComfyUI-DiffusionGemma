@@ -1,13 +1,23 @@
-"""tests/test_kv_cache_cold_wiring.py — ADR-CDG-012 DV.3c (issue #62 Phase 3):
-the "effortless" guarantee, made executable.
+"""tests/test_kv_cache_cold_wiring.py — ADR-CDG-012 DV.3c (issue #62 Phase 3)
++ issue #207 (fail-loud at the inert `kv_cache` door): the "effortless"
+guarantee, made executable.
 
-Constructs the MINIMAL legal `DGemmaEncode -> DGemmaDenoise` graph
-PROGRAMMATICALLY — calling the node bodies directly with all-default
-parameters, NOT loading a shipped `examples/*.json` (that is DV.2's job,
-`tests/test_kv_cache_workflows.py`) — and asserts the result is valid and
-non-degenerate. Independent of DV.2's fixtures by construction: this test
-cannot be satisfied by a hand-tuned example file, only by the node
-signatures + engine actually composing correctly with no tribal knowledge.
+Constructs the MINIMAL `DGemmaEncode -> DGemmaDenoise` graph PROGRAMMATICALLY
+— calling the node bodies directly with all-default parameters, NOT loading
+a shipped `examples/*.json` (that is DV.2's job, `tests/test_kv_cache_workflows.py`)
+— and asserts the result matches the current contract. Independent of DV.2's
+fixtures by construction: this test cannot be satisfied by a hand-tuned
+example file, only by the node signatures + engine actually composing
+correctly with no tribal knowledge.
+
+Post-#207, "effortless to get valid results" (DV.3c) is served by TWO
+distinct assertions rather than one: (1) the minimal graph WITH `kv_cache`
+wired fails loud, naming issue #62 Phase 4, because that path cannot yet
+honor an injected cache (#207's fail-loud ruling supersedes DV.3c's
+pre-#207 "wire the two nodes together, get output" framing for THIS
+specific wiring); (2) the minimal `DGemmaDenoise`-alone graph (`kv_cache`
+omitted) remains legal-and-non-degenerate — DV.3c's guarantee holds in full
+for every wiring this path CAN honor today.
 
 Deliberately builds its own minimal decode-capable fake model + fake
 scheduler/pipeline (mirrors `tests/test_kv_cache_run_diffusion.py`'s
@@ -17,6 +27,7 @@ be independent of any other fixture set built for a different clause.
 """
 from __future__ import annotations
 
+import pytest
 import torch
 
 from dgemma.loop import DEFAULT_ENTROPY_BOUND, DEFAULT_T_MAX, DEFAULT_T_MIN
@@ -177,7 +188,17 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
     """The executable form of "effortless": `DGemmaEncode` -> `DGemmaDenoise`
     with every parameter at its node default, called programmatically."""
 
-    def test_minimal_graph_produces_converged_non_empty_result(self, monkeypatch):
+    def test_minimal_graph_with_kv_cache_wired_fails_loud_naming_phase_4(self, monkeypatch):
+        """Issue #207 (operator ruling 2026-08-01) supersedes this test's
+        pre-#207 shape: wiring `DGemmaEncode`'s output into `DGemmaDenoise`'s
+        `kv_cache` input is precisely the inert path — the minted cache
+        passes ingress, then `run_diffusion` raises `NotImplementedError`
+        naming issue #62 Phase 4, rather than silently completing a run
+        that never actually consumed the cache. DV.3c's "effortless to get
+        valid results" guarantee is served by the OTHER minimal graph
+        (`DGemmaDenoise` alone, `kv_cache` omitted — the test below): a cold
+        user who wires the pair together gets an explicit, actionable error
+        naming the gap, not a silently degenerate or misleading success."""
         _install_denoise_fakes(monkeypatch, num_steps=2)
         model = _cold_wiring_model()
 
@@ -186,25 +207,21 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
 
         denoise_node = DGemmaDenoise()
         denoise_defaults = _widget_defaults(DGemmaDenoise.INPUT_TYPES())
-        text, canvas_state, canvas_trace, frames, images, run_config = denoise_node.denoise(
-            model,
-            prompt="hi",
-            seed=denoise_defaults["seed"],
-            num_inference_steps=2,
-            t_min=DEFAULT_T_MIN,
-            t_max=DEFAULT_T_MAX,
-            entropy_bound=DEFAULT_ENTROPY_BOUND,
-            confidence=denoise_defaults["confidence"],
-            gen_length=denoise_defaults["gen_length"],
-            thinking=denoise_defaults["thinking"],
-            kv_cache=kv_cache,
-        )
 
-        assert text
-        assert canvas_state.converged is True
-        assert canvas_state.committed_fraction == 1.0
-        assert canvas_trace.injected_cache_provenance is not None
-        assert canvas_trace.injected_cache_provenance == kv_cache.provenance
+        with pytest.raises(NotImplementedError, match="Phase 4"):
+            denoise_node.denoise(
+                model,
+                prompt="hi",
+                seed=denoise_defaults["seed"],
+                num_inference_steps=2,
+                t_min=DEFAULT_T_MIN,
+                t_max=DEFAULT_T_MAX,
+                entropy_bound=DEFAULT_ENTROPY_BOUND,
+                confidence=denoise_defaults["confidence"],
+                gen_length=denoise_defaults["gen_length"],
+                thinking=denoise_defaults["thinking"],
+                kv_cache=kv_cache,
+            )
 
     def test_minimal_graph_with_kv_cache_omitted_still_non_degenerate(self, monkeypatch):
         """`kv_cache=None` (the default, IN-2's "no injection" path) keeps
