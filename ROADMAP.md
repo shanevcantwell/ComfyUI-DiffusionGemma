@@ -38,13 +38,17 @@ tag.
   (node explanations, draft tier), plus the Encode/Denoise visibility disposition
   (operator call pending — the kv_cache door is inert until the seam bracket).
   Ship discipline per #195 (gate integrity axis) and #196 (version/tag timing).
-- **0.5.0 — the refactor version.**
+- **0.5.0 — the refactor version, and only that** (operator scoping ruling
+  2026-08-03: the bracket is exactly the decomposition).
   [ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md): decompose
-  `dgemma/loop.py` (~21.8k tokens) into responsibility modules — plan +
-  ARCHITECTURE-fate amendment on #129, awaiting ratification. Follow-on bracket,
-  separately scoped:
+  `dgemma/loop.py` (~21.8k tokens) into responsibility modules. Plan +
+  ARCHITECTURE-fate amendment on #129, awaiting operator ratification;
+  no phase executes before it.
+- **Next bracket — topology (version minted at opening):**
   [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
-  topology remediation (#138), import-gate consolidation (#57).
+  (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
+  finding I1) → topology remediation (#138), import-gate consolidation (#57),
+  and the interrupt fix (#140, rides the restructure per operator 2026-08-01).
 - **The seam (post-refactor).**
   [ADR-CDG-012](decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md)
   Phase 4: the Q-2 real-weights de-risk smoke, then the decoder genuinely driven
