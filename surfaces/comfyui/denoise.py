@@ -72,7 +72,7 @@ from __future__ import annotations
 # Issue #62 implementation plan §M: this file is a new consumer of the
 # existing depth-2 predicate, not a fourth gate variant.
 if __package__ and __package__.count(".") >= 2:
-    from ...dgemma.loop import (
+    from ...dgemma.config import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
         DEFAULT_GEN_LENGTH,
@@ -80,8 +80,8 @@ if __package__ and __package__.count(".") >= 2:
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
         KNOB_DOCS,
-        run_diffusion,
     )
+    from ...dgemma.loop import run_diffusion
     from .emission import build_sampler_shaped_outputs
     from .live_view import LIVE_VIEW_HIDDEN_INPUT, build_on_frame
     from .socket_types import (
@@ -92,7 +92,7 @@ if __package__ and __package__.count(".") >= 2:
         DGEMMA_RUN_CONFIG,
     )
 else:
-    from dgemma.loop import (
+    from dgemma.config import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
         DEFAULT_GEN_LENGTH,
@@ -100,8 +100,8 @@ else:
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
         KNOB_DOCS,
-        run_diffusion,
     )
+    from dgemma.loop import run_diffusion
     from surfaces.comfyui.emission import build_sampler_shaped_outputs
     from surfaces.comfyui.live_view import LIVE_VIEW_HIDDEN_INPUT, build_on_frame
     from surfaces.comfyui.socket_types import (

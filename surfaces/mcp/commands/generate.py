@@ -1,5 +1,5 @@
 """surfaces/mcp/commands/generate.py — the `generate` tool: this surface's
-wrap of `dgemma.loop.run_diffusion` (`dgemma/loop.py:465`).
+wrap of `dgemma.loop.run_diffusion`.
 
 Thin adapter (ARCHITECTURE.md surface-tier rules): unpack `args`, call
 `run_diffusion` exactly once, wrap `(text, CanvasState, CanvasTrace)` into a
@@ -70,7 +70,7 @@ if __package__ and __package__.count(".") >= 3:
     # one level short (`<pack>.surfaces.dgemma`, which doesn't exist) — see
     # `tests/test_mcp_dual_context_import.py`, which is the tripwire that
     # caught this depth being off-by-one during authoring.
-    from ....dgemma.loop import (
+    from ....dgemma.config import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
         DEFAULT_GEN_LENGTH,
@@ -78,13 +78,13 @@ if __package__ and __package__.count(".") >= 3:
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
         KNOB_DOCS,
-        run_diffusion,
     )
+    from ....dgemma.loop import run_diffusion
     from ....dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
 else:
     from surfaces.mcp._mcp_sdk_guard import require_mcp_sdk
     from surfaces.mcp.state_manager import StateManager
-    from dgemma.loop import (
+    from dgemma.config import (
         DEFAULT_CONFIDENCE,
         DEFAULT_ENTROPY_BOUND,
         DEFAULT_GEN_LENGTH,
@@ -92,8 +92,8 @@ else:
         DEFAULT_T_MAX,
         DEFAULT_T_MIN,
         KNOB_DOCS,
-        run_diffusion,
     )
+    from dgemma.loop import run_diffusion
     from dgemma.payloads import Binding, CaptureSpec, Constraints, ControlSignals, Pin
 
 require_mcp_sdk()
@@ -144,7 +144,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "prompt": {"type": "string", "description": "The prompt to generate from"},
                     # Every "description" below is sourced from the ONE-MINT
-                    # KNOB_DOCS vocabulary (`dgemma/loop.py`) — the same text
+                    # KNOB_DOCS vocabulary (`dgemma/config.py`) — the same text
                     # `surfaces/comfyui/sampler.py`'s widget tooltips read, so
                     # the ComfyUI and MCP doors describe each knob identically
                     # by construction (rule-8 parity), never a re-typed copy
