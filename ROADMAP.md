@@ -38,12 +38,16 @@ tag.
   (node explanations, draft tier), plus the Encode/Denoise visibility disposition
   (operator call pending — the kv_cache door is inert until the seam bracket).
   Ship discipline per #195 (gate integrity axis) and #196 (version/tag timing).
-- **0.5.0 — the refactor version, and only that** (operator scoping ruling
-  2026-08-03: the bracket is exactly the decomposition).
-  [ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md): decompose
-  `dgemma/loop.py` (~21.8k tokens) into responsibility modules. Plan +
-  ARCHITECTURE-fate amendment on #129, awaiting operator ratification;
-  no phase executes before it.
+- **0.5.0 — the refactor version, and only that** — **shipped 2026-08-03**, tag
+  `v0.5.0` @ `c4beb3e`.
+  [ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md): `dgemma/loop.py`
+  decomposed into `config`/`compat`/`capture`/`excision` behind a re-export
+  facade; pure refactor proven by golden-trace byte-identity + AST comparison;
+  live-verified 4/4 on real weights (#129, closed). The registry still serves
+  0.4.2 — a 0.5.0 registry publish is a separate operator call. Post-tag on
+  `main`: #119 offload-aware tied-weights guard (`f04688f`), rides the next tag.
+  Banked beyond the topology bracket: #219 (salience decomposition: model.py
+  map + prose evacuation).
 - **Next bracket — topology (version minted at opening):**
   [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
   (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
