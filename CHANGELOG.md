@@ -4,6 +4,9 @@ This changelog starts at 0.3.0 — no retroactive entries for earlier releases.
 
 All notable user-facing changes to this project are documented here.
 
+## [0.5.1] - 2026-08-03
+0.5.1 — documentation release + field fix. ARCHITECTURE.md re-grounded against the decomposed tree (#220 audit); README/CLAUDE/AGENTS refreshed; fix(#119): offload-aware tied-weights integrity guard (first tagged release carrying it).
+
 ## [0.5.0] - 2026-08-03
 ### Changed
 - #129 — `dgemma/loop.py` (1665 lines) decomposed into responsibility modules per ADR-CDG-018: `dgemma/config.py`, `dgemma/compat.py`, `dgemma/capture.py`, `dgemma/excision.py`. `loop.py` is now a 691-line re-export facade holding `DGemmaPipeline`/`run_diffusion`/`_build_result`; every prior `from dgemma.loop import X` path stays valid. Pure structural refactor, no behavior change — verified against a golden-trace oracle (`tests/test_loop_golden_trace.py`) and live tier 4/4 against real bf16 weights.
