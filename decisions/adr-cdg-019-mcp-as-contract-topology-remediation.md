@@ -1,7 +1,8 @@
 # ADR-CDG-019 — MCP as contract: topology remediation (primitives layer, directory morph)
 
-**Status**: proposed
-**Date**: 2026-07-23 (re-grounded 2026-08-03 per design-gate FAIL)
+**Status**: accepted
+**Date**: 2026-07-23 (re-grounded 2026-08-03 per design-gate FAIL; re-gated PASS + accepted 2026-08-03)
+**Gate record**: Independent design-gate re-review 2026-08-03 — **VERDICT: PASS**. Every prior finding (B1/B2/B3, I1/I2/I3, OQ1–OQ3) verified resolved by HEAD-readback against the actual tree, not the stale text: the Phase-1b git-mv list matches `surfaces/comfyui/` file-for-file (`emission.py`, `live_view.py` + `web/live_view.js` present); the 12-gate census (9 comfyui @ `>= 2`, 3 mcp) reproduces exactly by grep, with correct threshold transitions (comfyui `>= 2`→`>= 3`, `state_manager` `>= 2`→`>= 1`, two `commands/*.py` gates deleted); the SHADOWS ruling is grounded (MCP SDK v1.28.1 in `.venv`, `server.py` imports `mcp.server`/`mcp.server.stdio`/`mcp.types` at module scope — `dgemma_mcp/` rename is the correct fix); the #129 sequencing clause is coherent against accepted ADR-CDG-018 (Stage 1 `config.py`, Stage 4 `excision.py`, `run_diffusion` unchanged in `loop.py`); no open question rides as a question. Resolutions recorded in-document.
 **Related**:
 - ADR-CDG-008 (MCP-center topology — this **corrects** the "peer surfaces" framing that ADR-CDG-008 encoded structurally)
 - ADR-CDG-018 / [Issue #129](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/129) (decompose `dgemma/loop.py`) — **sequencing dependency, gate-ruled 2026-08-03: #129 lands first.** ADR-CDG-018 Stage 1 relocates `DEFAULT_*` / `KNOB_DOCS` out of `loop.py` into `dgemma/config.py`, and Stage 4 relocates `decode_frames` into `dgemma/excision.py`. This ADR's Phase 0 primitives extraction and Phase 2 import redirection therefore import from the **post-decomposition** layout (`dgemma.config`, `dgemma.excision`), not from `dgemma.loop`. Building CDG-019 against the pre-decomposition layout would collide with #129 mid-flight. See "Sequencing" below.
