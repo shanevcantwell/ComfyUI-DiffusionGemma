@@ -60,8 +60,8 @@ mcp = ["mcp>=1.0.0,<2.0.0"]
 # ComfyUI Registry metadata (comfy-cli / registry.comfy.org).
 # PublisherId minted 2026-07-05 (operator, registry.comfy.org — immutable).
 # Publishing: MANUAL — workflow_dispatch of .github/workflows/publish_action.yml
-# (no push-to-main trigger). Requires the REGISTRY_ACCESS_TOKEN repo secret,
-# currently absent pending reconstruction; see that workflow's header for status.
+# (no push-to-main trigger). Requires the REGISTRY_ACCESS_TOKEN repo secret
+# (verify with `gh secret list`; present as of 2026-08-03).
 [tool.comfy]
 PublisherId = "reflectiveattention"
 DisplayName = "ComfyUI-DiffusionGemma"

@@ -1,7 +1,7 @@
 # Manual-dispatch only by design: publish is an explicit release act, never a
-# merge side effect. The required REGISTRY_ACCESS_TOKEN repo secret is
-# deliberately absent until reconstruction (see session task ledger /
-# next-release reconstruction).
+# merge side effect. Requires the REGISTRY_ACCESS_TOKEN repo secret (present
+# since 2026-07-14; verify with `gh secret list` — the secret store is the
+# ground truth, not this comment).
 name: Publish to Comfy registry
 on:
   workflow_dispatch:
