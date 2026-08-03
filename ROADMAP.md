@@ -48,6 +48,12 @@ tag.
   `main`: #119 offload-aware tied-weights guard (`f04688f`), rides the next tag.
   Banked beyond the topology bracket: #219 (salience decomposition: model.py
   map + prose evacuation).
+- **Next bracket — operator-directed 2026-08-03 (ordering decided at opening):**
+  (a) **KV-cache encoder completion** — encode→denoise consumes the injected
+  cache (ADR-CDG-012 lineage; #47, #62; ingress currently fail-loud inert per
+  #207/#209). (b) **Bespoke llama.cpp binaries in the release package** —
+  #131 rung 4, CI-built from the owned pin (`c3fb972`, build-proven), owned
+  provenance. Topology (#138) and #219 remain queued below.
 - **Next bracket — topology (version minted at opening):**
   [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
   (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
