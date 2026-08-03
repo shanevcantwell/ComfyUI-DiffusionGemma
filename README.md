@@ -12,11 +12,13 @@ take apart.
 > flipbook** of the whole process, and a **trace node** (commit heatmap +
 > summary) to read what happened. Verified on real weights across two GPUs.
 >
-> **VRAM footprint today: ~50GB bf16 + CPU spill, needs a ≥48GB card.**
-> `quant="none"` is the only load path (bitsandbytes can't touch this
-> model's fused MoE experts — see "What works today" below); the model
-> card's ~18GB quantized / consumer-GPU footprint is **not yet reachable
-> through this pack**. A real quantized load path is tracked in
+> **VRAM footprint today: ~50GB bf16 + CPU spill (needs a ≥48GB card), or
+> ~30GB via a pre-quantized AutoRound INT4 checkpoint (`quant="autoround"`,
+> issue #128).** bitsandbytes can't touch this model's fused MoE experts —
+> see "What works today" below; `quant="none"` (bf16) and `quant="autoround"`
+> (INT4) are the two load paths. The model card's ~18GB quantized /
+> consumer-GPU footprint below the ~24GB offload floor is **not yet reachable
+> through this pack**. A smaller-card load path is tracked in
 > [issue #4](../../issues/4).
 >
 > Where it's headed lives in the [roadmap](ROADMAP.md).
@@ -50,11 +52,13 @@ You can't catch that by reading the final text. You can watch it happen here.
 ## What works today
 
 - **`DGemmaLoader`** — loads `google/diffusiongemma-26B-A4B-it` via transformers,
-  drives via the Diffusers pipeline (ADR-CDG-004). `quant` offers `none` only
-  (bf16 with CPU spill — fits a 48 GB card). bitsandbytes `nf4`/`int8` were
-  removed (issue #18): they can't touch this model's fused 3D MoE experts —
-  bnb only swaps `nn.Linear`, silently skipping ~22.84 B of 26 B params, so the
-  "quantized" load is still ~46 GB and mislabeled as 4-bit on *any* card. A real
+  drives via the Diffusers pipeline (ADR-CDG-004). `quant` offers `none` (bf16
+  with CPU spill — fits a 48 GB card) or `autoround` (pre-quantized INT4
+  W4A16 checkpoint, ~30 GB VRAM, requires the `auto-round` extra — issue
+  #128). bitsandbytes `nf4`/`int8` were removed (issue #18): they can't touch
+  this model's fused 3D MoE experts — bnb only swaps `nn.Linear`, silently
+  skipping ~22.84 B of 26 B params, so the "quantized" load is still ~46 GB
+  and mislabeled as 4-bit on *any* card. A real
   quantized path for smaller cards is tracked in issue #4.
 - **`DGemmaSampler`** — all knobs as widgets, defaults from grounded live runs:
   `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`,
@@ -88,7 +92,8 @@ You can't catch that by reading the final text. You can watch it happen here.
 
 The sampler's knobs mix schedule positions, temperatures, and an entropy
 budget — same-looking names, different units. Minted once as `KNOB_DOCS` in
-[`dgemma/loop.py`](dgemma/loop.py) (source of every widget tooltip and MCP
+[`dgemma/config.py`](dgemma/config.py) (re-exported via `dgemma/loop.py` —
+source of every widget tooltip and MCP
 schema description below — see that module for the full provenance):
 
 | Symbol | What it is | Units |
@@ -171,11 +176,14 @@ path/to/ComfyUI/venv/bin/python install.py
 
 ### Hardware & memory — the honest requirements
 
-This is a **large model with no quantized path yet** (issue #4 — bitsandbytes
-can't quantize its fused MoE experts, so you load full bf16, ~54 GB). The model
-card asks for a ≥ 60 GB GPU for a naïve full-VRAM load — but **you do not need
-one**, because **ComfyUI's memory management carries it**: it offloads weights to
-system RAM and streams them to the GPU as needed.
+This is a **large model**: bitsandbytes can't quantize its fused MoE experts
+(issue #4), so `quant="none"` loads full bf16, ~54 GB. A pre-quantized
+AutoRound INT4 checkpoint (`quant="autoround"`, ~30 GB VRAM, issue #128) is
+the working quantized path today — a smaller-card path below the ~24 GB
+offload floor is still open. The model card asks for a ≥ 60 GB GPU for a
+naïve full-VRAM bf16 load — but **you do not need one**, because **ComfyUI's
+memory management carries it**: it offloads weights to system RAM and
+streams them to the GPU as needed.
 
 - **Disk — ~54 GB free.** The weights download once to your HuggingFace cache
   (`~/.cache/huggingface`, or wherever `HF_HOME` points); budget the space before
@@ -236,6 +244,9 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 | **ADR-CDG-002 → 004** | Access path: load via transformers, **drive via the Diffusers pipeline** (004 amends 002). |
 | **ADR-CDG-005** | `CANVAS_STATE` is a resumable save-state, not a display snapshot. |
 | **[ADR-CDG-006](decisions/adr-cdg-006-advanced-sampler-step-window-resume.md)** | `DGemmaSamplerAdvanced` — step-windowed, chainable/resumable sampler (**proposed**, not yet built). |
+| **[ADR-CDG-008](decisions/adr-cdg-008-mcp-center-multi-surface-topology.md)** | MCP-center, multi-surface topology — `dgemma/` is the one contract, MCP the base surface. |
+| **[ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md)** | `dgemma/loop.py` decomposed into `config`/`compat`/`capture`/`excision` behind a re-export facade (0.5.0, shipped). |
+| **[ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)** | MCP-as-contract topology remediation (primitives layer, `dgemma_mcp/` rename) — accepted, next bracket. |
 
 ## Come explore
 

@@ -119,7 +119,7 @@ DiffusionGemma generates text through **uniform-state discrete diffusion**:
 | `ARCHITECTURE.md` | Agent-facing: layering rules, enforcement surfaces, conformance table |
 | `VISION.md` | Research questions tagged `[established]` / `[hypothesis]` / `[open]` |
 | `ROADMAP.md` | Forward view: engineering seams + liquid-phase research program |
-| `decisions/adr-cdg-*.md` | ADRs — why load-bearing choices were made (18 documents) |
+| `decisions/adr-cdg-*.md` | ADRs — why load-bearing choices were made (19 documents) |
 
 **Key ADRs for agents:**
 - **ADR-CDG-008** — MCP-center topology, multi-surface architecture

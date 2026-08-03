@@ -13,7 +13,7 @@ Doctrine by reference: ground-physics invariants in
 
 Eight rules, all simultaneous. Rules 1–7 govern the core/surface seam; rule 8 governs the tier above surfaces.
 
-1. **One core, one contract.** `dgemma/` is the sole contract: `load_model` (`dgemma/model.py:157`) and `run_diffusion` (`dgemma/loop.py:run_diffusion`, returning `(text, CanvasState, CanvasTrace)`). Every surface reaches the model *only* through these two functions. The core imports with zero ComfyUI present — enforced by subprocess test in `tests/test_seam.py`. *(→ ADR-CDG-003, ADR-CDG-008 · `ONE-DOOR`)*
+1. **One core, one contract.** `dgemma/` is the sole contract: `load_model` (`dgemma/model.py:load_model`) and `run_diffusion` (`dgemma/loop.py:run_diffusion`, returning `(text, CanvasState, CanvasTrace)`). Every surface reaches the model *only* through these two functions. The core imports with zero ComfyUI present — enforced by subprocess test in `tests/test_seam.py`. *(→ ADR-CDG-003, ADR-CDG-008 · `ONE-DOOR`)*
 
 2. **MCP is the canonical surface; ComfyUI consumes MCP.** The MCP surface wraps core into tools. ComfyUI calls those tools — it does not import `dgemma/` directly. No `for`-loop-over-denoising-steps in a consumer body. *(→ ADR-CDG-008 · `ONE-DOOR`)*
    **GAP (#137):** ComfyUI currently imports core directly (`surfaces/comfyui/loader.py`, `sampler.py`). Reconciling to MCP-consumer topology is tracked in issue #137.
@@ -166,7 +166,7 @@ All original violations from #35 resolved. Remaining gaps: beta-rebuild body (AD
 
 ## Relation to the decision record
 
-See `decisions/adr-cdg-*.md` (18 documents). Key ADRs:
+See `decisions/adr-cdg-*.md` (19 documents). Key ADRs:
 
 | ADR | What it fixes |
 |-----|---------------|
