@@ -43,7 +43,6 @@ tools/flipbook/out/
 .claude/
 
 # Agent-ops residue (kept locally, never shipped in the public tree)
-handoffs/
 CLAUDE.md
 plan.md
 loose-ends.md

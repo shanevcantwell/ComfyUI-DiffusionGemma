@@ -13,7 +13,7 @@ Doctrine by reference: ground-physics invariants in
 
 Eight rules, all simultaneous. Rules 1–7 govern the core/surface seam; rule 8 governs the tier above surfaces.
 
-1. **One core, one contract.** `dgemma/` is the sole contract: `load_model` (`dgemma/model.py:load_model`) and `run_diffusion` (`dgemma/loop.py:run_diffusion`, returning `(text, CanvasState, CanvasTrace)`). Every surface reaches the model *only* through these two functions. The core imports with zero ComfyUI present — enforced by subprocess test in `tests/test_seam.py`. *(→ ADR-CDG-003, ADR-CDG-008 · `ONE-DOOR`)*
+1. **One core, one contract.** `dgemma/` is the sole contract: `load_model` (`dgemma/model.py:load_model`) and `run_diffusion` (`dgemma/loop.py:run_diffusion`, returning `(text, CanvasState, CanvasTrace)`) — plus the contract types (`dgemma/types.py`) and the decomposed support modules surfaces import directly per #129 Ruling 1 Phase 5: `config` (knob defaults/docs), `payloads`, `kv_cache.encode_sequence`, `excision.decode_frames`. Every surface reaches the model through `dgemma`'s exported API. The core imports with zero ComfyUI present — enforced by subprocess test in `tests/test_seam.py`. *(→ ADR-CDG-003, ADR-CDG-008 · `ONE-DOOR`; → ADR-CDG-018, #129 Phase-5 repoint)*
 
 2. **MCP is the canonical surface; ComfyUI consumes MCP.** The MCP surface wraps core into tools. ComfyUI calls those tools — it does not import `dgemma/` directly. No `for`-loop-over-denoising-steps in a consumer body. *(→ ADR-CDG-008 · `ONE-DOOR`)*
    **GAP (#137):** ComfyUI currently imports core directly (`surfaces/comfyui/loader.py`, `sampler.py`). Reconciling to MCP-consumer topology is tracked in issue #137.
@@ -26,7 +26,7 @@ Eight rules, all simultaneous. Rules 1–7 govern the core/surface seam; rule 8 
 
 6. **The core is stateless across runs; only the model load persists.** No mutable run-state survives a `run_diffusion` call. Two identical calls yield identical telemetry. The ~53 GB model load is the *only* persisted object. *(→ ADR-CDG-008, #35 R5 · `STATELESS-CORE`)*
 
-7. **Step-end intervention enters as declarative payloads through one door.** `run_diffusion` widens only by validated declarative payloads (`constraints=`, `control_signals=`, `capture=`). No surface-supplied closures or hooks — ingress rejects them. The only executable crossing is the read-only `on_frame` observer. *(→ ADR-CDG-010/011 · `ONE-DOOR`)*
+7. **Step-end intervention enters as declarative payloads through one door.** `run_diffusion` widens only by validated declarative payloads (`constraints=`, `control_signals=`, `capture=`). No surface-supplied closures or hooks — ingress rejects them. The only executable crossing is the read-only `on_frame` observer. `should_cancel` is the second sanctioned executable crossing — a surface-supplied read-only cancellation poll (returns bool, mutates nothing; `surfaces/mcp/commands/generate.py`, `surfaces/comfyui/sampler.py`). **GAP (#221):** `logit_hook` is engine-internal by convention only; ingress rejects the `constraints`+`logit_hook` combination but not a bare surface-supplied closure — hardening tracked in #221. *(→ ADR-CDG-010/011 · `ONE-DOOR`)*
 
 8. **Consumers orchestrate; they do not extend.** Run sequencing — sweeps, loops, batteries — belongs to the tier *above* surfaces, never inside a surface body and never accreted into the core. A consumer that reaches past the surface contract to touch core internals is an instant fail. *(→ sk-mcp rule 3 transcribed · `ONE-DOOR`)*
 
@@ -52,7 +52,10 @@ Top (consumer) to bottom (substrate).
         |  load_model + run_diffusion  -- THE ONE CONTRACT
 +-----------------------------------------------------------+
 | dgemma/   core -- surface-agnostic, zero ComfyUI present  |
-|   model.py (load) . loop.py (drive) . types.py (contract) |
+|   model.py (load) . loop.py (drive, facade) .              |
+|   types.py (contract) . config/compat/capture/excision +   |
+|   composite/constraints_hook/hooks/ingress/kv_cache/        |
+|   participants/payloads (support, post ADR-CDG-018)        |
 +-----------------------------------------------------------+
         |
    torch . transformers . diffusers   -- shared substrate
@@ -79,7 +82,7 @@ Pure trace-analysis functions: `consumers/analysis.py` (`build_commit_heatmap`, 
 The MCP surface wraps core into tools. Consumers call those tools — they do not import `dgemma/` directly.
 
 - **`surfaces/mcp/`** — Canonical surface (`server.py`, `state_manager.py`, `commands/{model,generate}.py`). Thin adapter: unpack args → call one `dgemma.*` function → wrap the result. State manager persists only the loaded model (rule 6).
-- **`surfaces/comfyui/`** — ComfyUI node graph (`loader.py`, `sampler.py`, `trace.py`, `token_trace.py`, `frames_image.py`, `socket_types.py`) + `web/`. **GAP (#137):** currently imports core directly instead of consuming MCP tools. Reconciling to MCP-consumer topology is tracked in issue #137.
+- **`surfaces/comfyui/`** — ComfyUI node graph (`loader.py`, `sampler.py`, `trace.py`, `token_trace.py`, `frames_image.py`, `socket_types.py`, `denoise.py`, `encode.py`, `emission.py`, `live_view.py`, `run_log_writer.py`, `tally_audit.py`) + `web/`. **GAP (#137):** currently imports core directly instead of consuming MCP tools. Reconciling to MCP-consumer topology is tracked in issue #137.
 
 ### Core — the one contract (`dgemma/`)
 
@@ -160,7 +163,7 @@ Expansion lands core-side of the seam, so every surface inherits it. Shape decid
 
 ## Conformance summary
 
-All original violations from #35 resolved. Remaining gaps: beta-rebuild body (ADR-CDG-010 OQ2), frames↔images index correspondence (ADR-CDG-009), E2E battery live-run evidence (issue #59). Full enforcement-surface table and detailed conformance history in the issue tracker and ADRs.
+All original violations from #35 resolved. Remaining gaps: beta-rebuild body (ADR-CDG-010 OQ2), frames↔images index correspondence (ADR-CDG-009). E2E battery live-green 2026-08-03 (#59; S3 strict-xfail rides #9). Full enforcement-surface table and detailed conformance history in the issue tracker and ADRs.
 
 ---
 
