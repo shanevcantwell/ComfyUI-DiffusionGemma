@@ -59,8 +59,9 @@ dev = ["pytest", "ruff", "requests", "websocket-client", "coverage"]
 mcp = ["mcp>=1.0.0,<2.0.0"]
 # ComfyUI Registry metadata (comfy-cli / registry.comfy.org).
 # PublisherId minted 2026-07-05 (operator, registry.comfy.org — immutable).
-# Publishing: .github/workflows/publish_action.yml auto-publishes on version
-# bump to main (secret REGISTRY_ACCESS_TOKEN, set operator-side).
+# Publishing: MANUAL — workflow_dispatch of .github/workflows/publish_action.yml
+# (no push-to-main trigger). Requires the REGISTRY_ACCESS_TOKEN repo secret,
+# currently absent pending reconstruction; see that workflow's header for status.
 [tool.comfy]
 PublisherId = "reflectiveattention"
 DisplayName = "ComfyUI-DiffusionGemma"
