@@ -1,0 +1,270 @@
+{
+  "canvas_state": {
+    "answer_tokens": 4,
+    "canvas_ids": {
+      "__tensor__": true,
+      "data": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "dtype": "torch.int64"
+    },
+    "committed_fraction": 1.0,
+    "converged": true,
+    "steps_used": 6,
+    "stray_thought_delimiter": false,
+    "text": "TEXT:0,0,0,0",
+    "thought": null,
+    "turn_closed": false
+  },
+  "canvas_trace": {
+    "frames": [
+      {
+        "canvas": {
+          "__tensor__": true,
+          "data": [
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ],
+          "dtype": "torch.int64"
+        },
+        "canvas_idx": 0,
+        "committed_fraction_per_example": [
+          1.0
+        ],
+        "distribution": null,
+        "effective_entropy_bound": 0.1,
+        "effective_t_max": 0.8,
+        "effective_t_min": 0.4,
+        "entropy": {
+          "__tensor__": true,
+          "data": [
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197
+          ],
+          "dtype": "torch.float32"
+        },
+        "pinned_mask": null,
+        "step_idx": 0,
+        "t": 1.0,
+        "temperature": 0.8,
+        "top_k_ids": null,
+        "top_k_weights": null
+      },
+      {
+        "canvas": {
+          "__tensor__": true,
+          "data": [
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ],
+          "dtype": "torch.int64"
+        },
+        "canvas_idx": 0,
+        "committed_fraction_per_example": [
+          1.0
+        ],
+        "distribution": null,
+        "effective_entropy_bound": 0.1,
+        "effective_t_max": 0.8,
+        "effective_t_min": 0.4,
+        "entropy": {
+          "__tensor__": true,
+          "data": [
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197
+          ],
+          "dtype": "torch.float32"
+        },
+        "pinned_mask": null,
+        "step_idx": 1,
+        "t": 0.8333333333333334,
+        "temperature": 0.7333333333333334,
+        "top_k_ids": null,
+        "top_k_weights": null
+      },
+      {
+        "canvas": {
+          "__tensor__": true,
+          "data": [
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ],
+          "dtype": "torch.int64"
+        },
+        "canvas_idx": 0,
+        "committed_fraction_per_example": [
+          1.0
+        ],
+        "distribution": null,
+        "effective_entropy_bound": 0.1,
+        "effective_t_max": 0.8,
+        "effective_t_min": 0.4,
+        "entropy": {
+          "__tensor__": true,
+          "data": [
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197
+          ],
+          "dtype": "torch.float32"
+        },
+        "pinned_mask": null,
+        "step_idx": 2,
+        "t": 0.6666666666666666,
+        "temperature": 0.6666666666666667,
+        "top_k_ids": null,
+        "top_k_weights": null
+      },
+      {
+        "canvas": {
+          "__tensor__": true,
+          "data": [
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ],
+          "dtype": "torch.int64"
+        },
+        "canvas_idx": 0,
+        "committed_fraction_per_example": [
+          1.0
+        ],
+        "distribution": null,
+        "effective_entropy_bound": 0.1,
+        "effective_t_max": 0.8,
+        "effective_t_min": 0.4,
+        "entropy": {
+          "__tensor__": true,
+          "data": [
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197
+          ],
+          "dtype": "torch.float32"
+        },
+        "pinned_mask": null,
+        "step_idx": 3,
+        "t": 0.5,
+        "temperature": 0.6000000000000001,
+        "top_k_ids": null,
+        "top_k_weights": null
+      },
+      {
+        "canvas": {
+          "__tensor__": true,
+          "data": [
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ],
+          "dtype": "torch.int64"
+        },
+        "canvas_idx": 0,
+        "committed_fraction_per_example": [
+          1.0
+        ],
+        "distribution": null,
+        "effective_entropy_bound": 0.1,
+        "effective_t_max": 0.8,
+        "effective_t_min": 0.4,
+        "entropy": {
+          "__tensor__": true,
+          "data": [
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197
+          ],
+          "dtype": "torch.float32"
+        },
+        "pinned_mask": null,
+        "step_idx": 4,
+        "t": 0.3333333333333333,
+        "temperature": 0.5333333333333333,
+        "top_k_ids": null,
+        "top_k_weights": null
+      },
+      {
+        "canvas": {
+          "__tensor__": true,
+          "data": [
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ],
+          "dtype": "torch.int64"
+        },
+        "canvas_idx": 0,
+        "committed_fraction_per_example": [
+          1.0
+        ],
+        "distribution": null,
+        "effective_entropy_bound": 0.1,
+        "effective_t_max": 0.8,
+        "effective_t_min": 0.4,
+        "entropy": {
+          "__tensor__": true,
+          "data": [
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197,
+            2.0794413089752197
+          ],
+          "dtype": "torch.float32"
+        },
+        "pinned_mask": null,
+        "step_idx": 5,
+        "t": 0.16666666666666666,
+        "temperature": 0.4666666666666667,
+        "top_k_ids": null,
+        "top_k_weights": null
+      }
+    ],
+    "injected_cache_provenance": null,
+    "raw_canvas_ids": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "scheduler_config": {
+      "entropy_bound": 0.1,
+      "num_inference_steps_effective": 6,
+      "num_inference_steps_requested": 6,
+      "t_max": 0.8,
+      "t_min": 0.4
+    },
+    "scheduler_name": "FakeEntropyBoundScheduler"
+  },
+  "text": "TEXT:0,0,0,0"
+}

@@ -15,7 +15,7 @@ and `tests/test_socket_mint.py`, unchanged).
 
 Surface-tier, not core (ADR-CDG-003 rule 2): this module renders `IMAGE`
 tensors and assembles a ComfyUI-node-shaped return tuple — display/adapter
-concerns, not denoising-loop logic. It imports `dgemma.loop.decode_frames`
+concerns, not denoising-loop logic. It imports `dgemma.excision.decode_frames`
 and `consumers.run_log.RunConfig` (both already-consumed-by-surface
 concerns; see `sampler.py`'s own docstring for why `RunConfig` lives in
 `consumers/`, not `dgemma/`), plus this package's own `frames_image`
@@ -37,11 +37,11 @@ from __future__ import annotations
 # `__package__.count(".") >= 2`, not a bare dot-presence check.
 if __package__ and __package__.count(".") >= 2:
     from ...consumers.run_log import RunConfig
-    from ...dgemma.loop import decode_frames
+    from ...dgemma.excision import decode_frames
     from .frames_image import FrameMetadata, render_frames_to_image_batch
 else:
     from consumers.run_log import RunConfig
-    from dgemma.loop import decode_frames
+    from dgemma.excision import decode_frames
     from surfaces.comfyui.frames_image import FrameMetadata, render_frames_to_image_batch
 
 # `frames_image` render defaults (issue #21 rework, moved here unchanged from

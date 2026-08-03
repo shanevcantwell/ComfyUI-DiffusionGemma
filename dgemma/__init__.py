@@ -18,7 +18,7 @@ assertion enforces that `import dgemma` never pulls `consumers.*` in).
 """
 from __future__ import annotations
 
-from .loop import (
+from .config import (
     DEFAULT_CONFIDENCE,
     DEFAULT_ENTROPY_BOUND,
     DEFAULT_GEN_LENGTH,
@@ -26,8 +26,8 @@ from .loop import (
     DEFAULT_T_MAX,
     DEFAULT_T_MIN,
     THINK_TOKEN,
-    run_diffusion,
 )
+from .loop import run_diffusion
 from .model import AUTOROUND_REPO_ID, DEFAULT_QUANT, DEFAULT_REPO_ID, load_model
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame
 
