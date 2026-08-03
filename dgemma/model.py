@@ -31,6 +31,34 @@ can't touch the part of this architecture that dominates its size, so
 selecting either was misleading on any hardware, not just this box. `quant`
 is kept as a parameter (loader contract, tests) with its domain constrained
 to `("none", "autoround")` — see issue #128.
+
+**Fix #119 (tied-weight corruption under split `device_map="auto"`).**
+transformers 5.13.0 ties every encoder text-stack weight to the decoder's by
+regex (`modeling_diffusion_gemma.py:1480-1492`) via a shape-unchecked
+`setattr` (`modeling_utils.py:2770-2771` — no shape/equality check once both
+sides are off the meta device). Under a split placement, accelerate's
+per-submodule dispatch hooks can independently re-materialize the encoder's
+nominally-tied parameter with the wrong shape while the decoder's stays
+correct, producing a cryptic mid-sample `numel==seq_len` view crash instead
+of an honest load-time failure. `_assert_tie_integrity` (2026-07-22 forensic
+verdict fix-candidate 1) is the backstop for whatever placement
+`device_map="auto"` produces: it asserts a sample of encoder layers'
+`self_attn.q_proj.weight` is correctly shaped and tied to its decoder
+counterpart, raising an actionable `RuntimeError` at the end of `load_model`
+naming `model.hf_device_map` rather than letting a corrupted load reach
+`run_diffusion`. `_tensor_ties_match`/`_resolve_meta_weight` make that
+comparison offload-aware (2026-07-22 discriminating probe, PR #121 comment
+5044645329) — a cpu-offloaded tied pair's weights are meta-at-rest under
+accelerate's `AlignDevicesHook`, and a naive `torch.equal` on the unresolved
+meta tensors reports a false positive on every offloaded sampled layer,
+which this guard resolves through `module._hf_hook.weights_map` before
+comparing. Deliberately NOT included: an explicit pairwise-co-located
+`device_map` placement *policy* that would override `"auto"` — issues
+#173/#183 hardened `device_map="auto"` as this pack's field-verified,
+release-blocking-protected default for both quant modes, and an untested
+override belongs behind its own live-GPU verification, not folded into this
+guard fix. See issue #119 and this repo's PR referencing it for the scope
+note.
 """
 from __future__ import annotations
 
@@ -657,6 +685,207 @@ def _resolve_device(model) -> str:
     return str(next(model.parameters()).device)
 
 
+def _resolve_meta_weight(module):
+    """Resolve `module.weight` to its real (non-meta) backing tensor when the
+    module sits under a cpu-offloaded `AlignDevicesHook(offload=True)` — the
+    common `device_map="auto"` + CPU-spill regime this repo's default load
+    path uses (2026-07-22 false-positive probe, issue #119, PR #121 comment
+    5044645329). Under that hook, the parameter itself is meta-at-rest and
+    the real data lives in `module._hf_hook.weights_map`, a `PrefixedDataset`
+    keyed by the parameter's LOCAL name (`"weight"`), not its fully-qualified
+    module path — so the lookup is always `weights_map["weight"]`, resolved
+    independently per side (one side may be GPU-resident while the other is
+    offloaded; the two sides are never assumed symmetric).
+
+    Returns the resolved tensor, or `None` when the weight is meta and there
+    is no resolvable hook/weights_map to resolve it through — a genuinely
+    unverifiable tie, which the caller must treat as a failure, not a pass.
+    """
+    weight = module.weight
+    if not weight.is_meta:
+        return weight
+    hook = getattr(module, "_hf_hook", None)
+    weights_map = getattr(hook, "weights_map", None)
+    if weights_map is None:
+        return None
+    try:
+        return weights_map["weight"]
+    except KeyError:
+        return None
+
+
+def _tensor_ties_match(enc_module, dec_module) -> bool:
+    """Same tensor (fast path, the common in-memory-tie case) OR
+    value-equal (the offload/meta-tensor case).
+
+    Takes the encoder/decoder `q_proj` MODULES (not bare `.weight` tensors)
+    so a meta-at-rest weight — the state accelerate's
+    `AlignDevicesHook(offload=True)` leaves the live parameter in under this
+    repo's default `device_map="auto"` CPU-spill load — can be resolved to
+    its real backing tensor via `_resolve_meta_weight` before any comparison
+    is attempted. This closes a false positive the 2026-07-22 discriminating
+    probe found on issue #119 (PR #121 comment 5044645329): `torch.equal`
+    itself raises `NotImplementedError` on a meta tensor ("Cannot copy out of
+    meta tensor; no data!"), and a naive version of this helper caught that
+    into an unconditional `False` — so every cpu-offloaded sampled layer
+    would report a broken tie even when the tie was, per the probe's three
+    independent checks (shared weights_map storage, hook-materialized
+    `data_ptr` equality, and coherent live generation with the guard
+    bypassed), fully intact.
+
+    Meta tensors are EXCLUDED from the fast `data_ptr()` identity path on the
+    UNRESOLVED weight (mirrors transformers' own `tie_weights`,
+    `modeling_utils.py`'s "In case the AlignDevicesHook is on meta device,
+    ignore tied weights as data_ptr() is then always zero" comment): every
+    meta tensor's `data_ptr()` reads `0`, so two UNRELATED meta tensors would
+    otherwise spuriously compare as tied. Resolution happens first, then the
+    same identity/equality logic runs on the resolved (never-meta) tensors.
+    """
+    if enc_module.weight.shape != dec_module.weight.shape:
+        return False
+
+    enc_weight = _resolve_meta_weight(enc_module)
+    dec_weight = _resolve_meta_weight(dec_module)
+    if enc_weight is None or dec_weight is None:
+        # A meta weight with no resolvable _hf_hook/weights_map — genuinely
+        # unverifiable. Never silently pass an unverifiable tie.
+        return False
+
+    same_real_storage = (
+        enc_weight.device.type != "meta"
+        and dec_weight.device.type != "meta"
+        and enc_weight.device == dec_weight.device
+        and enc_weight.data_ptr() == dec_weight.data_ptr()
+    )
+    if same_real_storage:
+        return True
+    try:
+        return bool(torch.equal(enc_weight.detach().to("cpu"), dec_weight.detach().to("cpu")))
+    except (RuntimeError, NotImplementedError):  # pragma: no cover — backstop only: both
+        # branches above resolve meta tensors before this line runs, so the healthy
+        # offloaded-tie path (this fix's actual target) never reaches this except;
+        # kept as a non-crashing backstop for any other unresolvable comparison —
+        # never silently pass an unverifiable tie.
+        return False
+
+
+def _assert_tie_integrity(model) -> None:
+    """Load-time tie-integrity guard (issue #119, 2026-07-22 forensic
+    verdict fix-candidate 1): converts the cryptic mid-sample
+    `numel==seq_len` view crash (`modeling_diffusion_gemma.py:329-330`'s
+    `hidden_shape` view, downstream of a corrupted encoder `q_proj` weight)
+    into an honest, actionable load-time `RuntimeError` — EMIT-CANONICAL /
+    fail-at-the-door applied to a model object instead of a socket payload.
+
+    Root cause this guards (static pass, issue #119 2026-07-22 forensic
+    verdict): transformers 5.13.0 ties every encoder text-stack weight to the
+    decoder's by regex (`modeling_diffusion_gemma.py:1480-1492`) via a
+    shape-unchecked `setattr` (`modeling_utils.py:2770-2771`, no
+    `torch.equal`/shape check on the *live* materialized tensors once both
+    are off the meta device). Under a split `device_map` placement,
+    accelerate's per-submodule dispatch hooks can independently
+    re-materialize the encoder's "tied" parameter, collapsing it to the
+    wrong shape while the decoder's stays correct — the tie holds at
+    Python-object-identity time and silently breaks at dispatch time.
+    `device_map="auto"` is this pack's default placement for both quant
+    modes (issues #173/#183) — this guard is the backstop for whatever
+    placement that produces, without changing the placement itself.
+
+    Checks a SAMPLE of encoder layers (layer 0 and the last layer — cheap,
+    and sufficient to catch a placement-driven corruption, which is a
+    per-layer dispatch-hook effect, not a per-tensor content bug that would
+    need every layer checked) for its `self_attn.q_proj.weight`:
+    - 2-D with shape `(num_attention_heads * head_dim, hidden_size)`,
+      DERIVED from `model.config.text_config` at call time (never
+      hardcoded — a config for a different-sized checkpoint must not
+      silently pass a stale hardcoded shape). `head_dim` is PER-LAYER, not
+      global: `DiffusionGemmaEncoderTextAttention`/
+      `DiffusionGemmaDecoderTextAttention`
+      (`modeling_diffusion_gemma.py:296,398`) both use
+      `config.global_head_dim` for full-attention layers and
+      `config.head_dim` for sliding-attention layers
+      (`config.layer_types[layer_idx]`) — a single global `head_dim` would
+      misjudge a healthy full-attention layer as corrupt.
+    - identical (or value-equal, for the offload/data_ptr-unreliable case —
+      see `_tensor_ties_match`) to the decoder counterpart at the same layer
+      index.
+
+    Raises `RuntimeError` naming the defect, the observed (bad) shape, and
+    `model.hf_device_map` (whatever placement produced the corruption) — the
+    three facts an operator needs to diagnose this without re-deriving the
+    forensic pass. Called at the end of `load_model`, before `DGemmaModel` is
+    returned: a caller that gets a `DGemmaModel` back has a load this guard
+    has already vetted.
+
+    No-op (returns without checking) if the model has no `.config`, the
+    config has no `text_config`, or `text_config` reports zero hidden
+    layers — a real `DiffusionGemmaForBlockDiffusion` always has all three,
+    so this is defensive only (untriggerable against a real checkpoint), but
+    this guard must never itself be the reason an otherwise-valid model
+    fails to load, and must not require every existing test double
+    elsewhere in this module's test suite to grow encoder/decoder layer
+    structure it has no reason to model.
+    """
+    config = getattr(model, "config", None)
+    if config is None:
+        return
+    text_config = getattr(config, "text_config", None)
+    if text_config is None:  # pragma: no cover — DiffusionGemmaConfig always sets this; defensive only
+        return
+
+    num_hidden_layers = getattr(text_config, "num_hidden_layers", 0)
+    if num_hidden_layers <= 0:  # pragma: no cover — untriggerable against a real checkpoint config
+        return
+
+    num_attention_heads = text_config.num_attention_heads
+    hidden_size = text_config.hidden_size
+    layer_types = getattr(text_config, "layer_types", None) or []
+    global_head_dim = getattr(text_config, "global_head_dim", None)
+    sliding_head_dim = text_config.head_dim
+
+    inner = model.model if hasattr(model, "model") else model
+    encoder_layers = inner.encoder.language_model.layers
+    decoder_layers = inner.decoder.layers
+
+    sample_indices = sorted({0, num_hidden_layers - 1})
+
+    for layer_idx in sample_indices:
+        is_sliding = layer_idx < len(layer_types) and layer_types[layer_idx] == "sliding_attention"
+        # Mirrors DiffusionGemmaEncoderTextAttention.__init__'s own derivation
+        # (modeling_diffusion_gemma.py:296): global_head_dim wins on a
+        # full-attention layer only when it is truthy/set.
+        head_dim = sliding_head_dim if (is_sliding or not global_head_dim) else global_head_dim
+        expected_shape = (num_attention_heads * head_dim, hidden_size)
+
+        enc_q_proj = encoder_layers[layer_idx].self_attn.q_proj
+        dec_q_proj = decoder_layers[layer_idx].self_attn.q_proj
+        enc_weight = enc_q_proj.weight
+        dec_weight = dec_q_proj.weight
+
+        shape_ok = tuple(enc_weight.shape) == expected_shape
+        tie_ok = _tensor_ties_match(enc_q_proj, dec_q_proj)
+
+        if not shape_ok or not tie_ok:
+            device_map = getattr(model, "hf_device_map", None)
+            raise RuntimeError(
+                "DiffusionGemma tied-weight corruption detected under split "
+                "placement (issue #119): transformers 5.13.0 ties every "
+                "encoder text-stack weight to the decoder's via a "
+                "shape-unchecked setattr, and a split device_map placement "
+                "can independently re-materialize the encoder's 'tied' "
+                f"parameter with the wrong shape. layer {layer_idx}'s "
+                f"encoder self_attn.q_proj.weight has shape "
+                f"{tuple(enc_weight.shape)}; expected {expected_shape} "
+                f"(derived from config: num_attention_heads={num_attention_heads}, "
+                f"head_dim={head_dim}, hidden_size={hidden_size}) and equal to "
+                f"the decoder's counterpart (shape {tuple(dec_weight.shape)}). "
+                f"model.hf_device_map={device_map!r}. This model load is "
+                "unsafe to use — reduce the split (fewer/no CPU-offloaded "
+                "encoder/decoder layer pairs) or use a single-device load if "
+                "the model fits. See issue #119."
+            )
+
+
 def load_model(
     repo_id: str | None = None,
     quant: str = DEFAULT_QUANT,
@@ -834,6 +1063,14 @@ def load_model(
     # this class of bug from ever again presenting as a downstream hang or an
     # opaque .to("cuda") crash (issue #142).
     _assert_no_meta_tensors(model)
+
+    # POST-LOAD ASSERTION (all quant paths): fail loud, naming the device
+    # map, if the encoder/decoder tied text-stack weights were corrupted by
+    # a split device_map dispatch — the enforcement surface for issue #119.
+    # Pure backstop: does not change device_map="auto" (issues #173/#183's
+    # field-proven, release-blocking-protected default) — only vets whatever
+    # placement accelerate actually produced.
+    _assert_tie_integrity(model)
 
     if not torch.cuda.is_available():
         raise RuntimeError(
