@@ -305,6 +305,42 @@ class TestMultiBlockContinuation:
         assert len(encoder.calls) == 2
 
 
+class TestEosEarlyStop:
+    """`eos_early_stop`'s outer-block-loop `finished.all()` break (mirrors
+    `pipeline_diffusion_gemma.py:432-435`): once a committed block contains
+    `eos_token_id`, the loop stops requesting further blocks even though
+    `gen_length` would otherwise ask for more — the SAME early-stop the
+    no-cache path already gets from the pipeline, now proven on the
+    with-cache path too."""
+
+    def test_eos_in_first_block_skips_second_blocks_reencode(self, monkeypatch):
+        # target_id == eos_token_id: the fake model's logits deterministically
+        # favor the token id `_FakeTokenizer.eos_token_id` names, so the
+        # FIRST committed block already contains EOS at every position.
+        eos_id = 5
+        model, encoder, _ = _fake_decoder_capable_model(target_id=eos_id)
+        model.processor.tokenizer.eos_token_id = eos_id
+        cache = _matching_kv_cache(model)
+
+        run_diffusion(
+            model,
+            "unused prompt",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=CANVAS_LENGTH * 3,  # would need 3 blocks absent EOS
+            kv_cache=cache,
+        )
+
+        # No re-encode call at all: block 0 already commits EOS, so the
+        # outer loop breaks BEFORE block 1's re-encode would fire.
+        assert encoder.calls == [], (
+            f"EOS in block 0 should stop the loop before any re-encode: {encoder.calls!r}"
+        )
+
+
 class TestOut3ProvenanceStamp:
     """OUT-3 (issue #62 Phase 2, LIVE code per the 2026-08-04 #62 correction):
     a with-cache run's `CanvasTrace.injected_cache_provenance` carries the
