@@ -308,6 +308,10 @@ def encode_sequence(
     bf16 CPU spill (unaffected — the encoder's own parameters already carry
     the accelerator device attention needs), and CPU-only test fakes
     (encoder parameters report `cpu`, so minted tensors stay `cpu` too).
+
+    Live-proof provenance (#228 pt.1): live-proven under bf16 CPU-spill via
+    the ComfyUI server lane (gate run 4 S-B, 2026-07-30, `a68e29d`; #145) —
+    regressed 2026-08-04, BARE lane only (#226). Standing surface: `tests/e2e/test_battery.py::test_encode_live`.
     """
     num_layers = geometry_from_model(dgemma_model)["num_hidden_layers"]
 
