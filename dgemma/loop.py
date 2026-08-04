@@ -24,6 +24,7 @@ see (PR #48 gate finding F-1), enforced instead by
 """
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Literal
 
 import torch
@@ -125,6 +126,214 @@ class DGemmaPipeline(DiffusionGemmaPipeline):
     """
 
     _callback_tensor_inputs = ["canvas", "logits", "scheduler_output"]
+
+
+def _run_pipeline_with_injected_cache(
+    pipeline: "DGemmaPipeline",
+    *,
+    kv_cache: KVCache,
+    gen_length: int,
+    num_inference_steps: int,
+    confidence_threshold: float,
+    generator: "torch.Generator | None",
+    callback_on_step_end: StepEndComposite,
+) -> tuple[Any, KVCache]:
+    """ADR-CDG-012 Phase 4 decoder-drive body (issue #62) — productionizes the
+    Q-2 smoke skeleton (`scratch/q2-skeleton-2026-08-04` @ `d67e62f`,
+    `docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/skeleton-loop.py.diff`)
+    into the full multi-block loop.
+
+    Mirrors `diffusers.DiffusionGemmaPipeline.__call__`'s own per-block loop
+    (`pipeline_diffusion_gemma.py:301-436`) line-for-line for every knob this
+    pack exposes (`confidence_threshold`/`stability_threshold`/
+    `eos_early_stop`/`generator`), since the pipeline offers no injected-cache
+    parameter to call through (the skeleton's own docstring) — this function
+    IS that call path, not a divergent reimplementation. Deltas from the
+    pipeline body, each named:
+
+    - **IN-2 skip-first-encode.** Block 0 does NOT call
+      `pipeline.model.model.encoder(...)` — `kv_cache.cache` (already a live
+      `DynamicCache`, minted by a prior `DGemmaEncode`/`encode_sequence`
+      call) is used directly as `past_key_values`, and `cached_len` is read
+      from `kv_cache.cumulative_length` rather than
+      `past_key_values.get_seq_length()` on an empty cache. Every block AFTER
+      the first re-encodes normally (the committed canvas from the previous
+      block), identical to the pipeline's own IN-3-shaped per-block encode —
+      this function does not special-case any block beyond the first.
+    - **No `prompt` re-encode.** The injected cache stands in for what would
+      otherwise be the first block's encode of `prompt` — `DGemmaDenoise`'s
+      `prompt` widget is NOT tokenized or encoded on this path (the skeleton
+      never touched it either). This is a genuine open point the governing
+      ADR does not resolve (§D.1 IN-2 names "skip the first encode" but is
+      silent on what, if anything, `prompt` conditions once a cache is
+      injected) — carried forward from the proven skeleton rather than
+      inventing new semantics under this contract; see the implementing PR's
+      "deviations" section.
+    - **OUT-1 (advanced-cache output) stays deferred**
+      (`surfaces/comfyui/denoise.py`'s named delta 2, ADR-CDG-012 §D.2): this
+      function runs every block to completion/EOS exactly like the pipeline
+      does — there is no `stop_at_block` parameter and no early-return
+      mid-loop, because `DGemmaDenoise` ships no widget to request one.
+    - **Cancellation/participant wiring reused verbatim.** `callback_on_step_end`
+      is the SAME `StepEndComposite` `run_diffusion` builds for the no-cache
+      path (capture, cancellation, pin, walker) — this function does not
+      construct its own composite or collector, so `DiffusionCancelled`
+      raised mid-block propagates to `run_diffusion`'s existing
+      `except DiffusionCancelled` handler unchanged.
+    - **`stability_threshold`/`eos_early_stop` hardcoded, at parity with the
+      no-cache path's own hardcoding.** Neither is a `run_diffusion`
+      parameter today (see that function's own docstring: "`stability_
+      threshold`/`eos_early_stop` stay at the pipeline's own defaults" —
+      `1`/`True`) — this function hardcodes the same two values
+      (`argmax_history`'s leading dim `1`, the unconditional
+      `eos_token_id is not None` check) rather than re-deriving them from a
+      caller-supplied knob that doesn't exist yet. If a future PR promotes
+      either to a `run_diffusion` parameter, this function's hardcoded
+      values must be threaded through in the same change, or the two paths
+      silently diverge — named here so that PR doesn't miss this call site.
+
+    Returns `(sequences, advanced_cache)` where `sequences` is
+    `cur_input_ids[:, 0:]` shaped like `output.sequences[0]` in the no-cache
+    path (batch size is always 1 on this path — the skeleton/ADR's tier-1
+    scope never batches an injected cache) and `advanced_cache` is the final
+    block's `past_key_values` (not emitted anywhere yet — OUT-1 is deferred,
+    per above; returned so a future OUT-1 wiring has it without a second
+    pass).
+    """
+    # Batch size 1 only (tier-1 scope, never batches an injected cache —
+    # this function's own docstring/return-value note). Asserted here
+    # rather than silently truncating to `[0]` at the `sequences =
+    # torch.cat(...)` return below, per ADR-CDG-001's fail-loud discipline:
+    # a batch>1 cache would otherwise produce a plausible-but-wrong single
+    # sequence instead of a caught precondition violation.
+    if kv_cache.cache.layers and kv_cache.cache.layers[0].keys.shape[0] != 1:
+        raise ValueError(
+            f"_run_pipeline_with_injected_cache: kv_cache has batch size "
+            f"{kv_cache.cache.layers[0].keys.shape[0]}, only batch size 1 is "
+            "supported (ADR-CDG-012 tier-1 scope never batches an injected "
+            "cache)."
+        )
+
+    model = pipeline.model
+    scheduler = pipeline.scheduler
+    device = model.device
+    # No-arg `get_text_config()` (not the skeleton's `decoder=True`) —
+    # matches every other call site in this codebase (`dgemma/kv_cache.py:75,124`)
+    # and `FakeDGemmaModelConfig`'s fake shape; behaviorally identical here
+    # since `DiffusionGemmaConfig.get_text_config()` always resolves the
+    # single `text_config` sub-config regardless of the `decoder=`/`encoder=`
+    # hint (`dgemma/kv_cache.py:66-73`'s docstring).
+    text_config = model.config.get_text_config()
+    canvas_length = model.config.canvas_length
+    num_canvases = (gen_length + canvas_length - 1) // canvas_length
+    eos_token_id = pipeline.eos_token_id
+
+    past_key_values = kv_cache.cache
+    cached_len = kv_cache.cumulative_length[0] if kv_cache.cumulative_length else 0
+
+    scheduler.set_timesteps(num_inference_steps, device=device)
+    step_param_names = set(inspect.signature(scheduler.step).parameters)
+
+    # `cur_input_ids` tracks only the committed CANVAS tokens (the injected
+    # cache already holds the donor context — there is no `prompt_ids` prefix
+    # to concatenate onto, unlike the pipeline's own `cur_input_ids =
+    # prompt_ids` seed at `pipeline_diffusion_gemma.py:301`). Each committed
+    # block is appended here for `sequences`, decode, and (for block > 0)
+    # re-encode.
+    committed_blocks: list[torch.Tensor] = []
+    finished = torch.zeros(1, dtype=torch.bool, device=device)
+    global_step = 0
+
+    for canvas_idx in range(num_canvases):
+        if canvas_idx == 0:
+            # IN-2: skip the first encode entirely — `past_key_values` is the
+            # injected cache as-is.
+            pass
+        else:
+            # Re-encode the previously committed block into the (already
+            # cache-seeded) `past_key_values` — identical in shape to the
+            # pipeline's own per-block encode
+            # (`pipeline_diffusion_gemma.py:322-333`), just operating on a
+            # cache whose starting length is the injected cache's, not 0.
+            prev_block = committed_blocks[-1]
+            block_start = cached_len + (canvas_idx - 1) * canvas_length
+            torch.compiler.cudagraph_mark_step_begin()
+            model.model.encoder(
+                input_ids=prev_block,
+                past_key_values=past_key_values,
+                position_ids=torch.arange(
+                    block_start, block_start + canvas_length, device=device
+                ).unsqueeze(0),
+            )
+
+        decoder_start = cached_len + canvas_idx * canvas_length
+        decoder_position_ids = torch.arange(
+            decoder_start, decoder_start + canvas_length, device=device
+        ).unsqueeze(0)
+
+        seq_len_now = past_key_values.get_seq_length()
+        decoder_attention_mask = torch.nn.functional.pad(
+            torch.ones((1, seq_len_now), dtype=torch.bool, device=device),
+            (0, canvas_length),
+            value=True,
+        )
+        mask_mapping = model.model.decoder.create_diffusion_decoder_attention_mask(
+            config=model.config,
+            inputs_embeds=torch.empty((1, canvas_length, 0), device=device),
+            past_key_values=past_key_values,
+            decoder_attention_mask=decoder_attention_mask,
+        )
+
+        canvas = torch.randint(
+            0, text_config.vocab_size, (1, canvas_length), device=device, generator=generator
+        )
+        self_conditioning_logits = None
+        argmax_history = torch.full((1, 1, canvas_length), -1, dtype=torch.long, device=device)
+
+        for step_idx in range(num_inference_steps):
+            torch.compiler.cudagraph_mark_step_begin()
+            logits = model(
+                decoder_input_ids=canvas,
+                past_key_values=past_key_values,
+                self_conditioning_logits=self_conditioning_logits,
+                decoder_attention_mask=mask_mapping,
+                decoder_position_ids=decoder_position_ids,
+            ).logits.clone()
+
+            step_kwargs = {"mask_token_id": None, "temperature": 0.0, "generator": generator}
+            step_kwargs = {k: v for k, v in step_kwargs.items() if k in step_param_names}
+            scheduler_output = scheduler.step(
+                model_output=logits, timestep=step_idx, sample=canvas, return_dict=True, **step_kwargs
+            )
+            canvas = scheduler_output.prev_sample
+            self_conditioning_logits = scheduler_output.pred_logits
+
+            callback_kwargs = {"canvas": canvas, "logits": logits, "scheduler_output": scheduler_output}
+            callback_outputs = callback_on_step_end(pipeline, global_step, step_idx, callback_kwargs)
+            canvas = callback_outputs.pop("canvas", canvas)
+            global_step += 1
+
+            if confidence_threshold is not None:
+                argmax_canvas = logits.argmax(dim=-1)
+                stable = (argmax_history == argmax_canvas[None]).all(dim=-1).all(dim=0)
+                argmax_history = torch.roll(argmax_history, shifts=-1, dims=0)
+                argmax_history[-1] = argmax_canvas
+                confident = torch.distributions.Categorical(logits=logits.float()).entropy().mean(-1) < (
+                    confidence_threshold
+                )
+                if bool((stable & confident).all()):
+                    canvas = argmax_canvas
+                    break
+
+        committed_blocks.append(canvas)
+
+        if eos_token_id is not None:
+            finished = finished | (canvas == eos_token_id).any(dim=-1)
+            if finished.all():
+                break
+
+    sequences = torch.cat(committed_blocks, dim=-1)[0]
+    return sequences, past_key_values
 
 
 def run_diffusion(
@@ -376,9 +585,14 @@ def run_diffusion(
     `constraints`+`logit_hook` combination fails (see
     `dgemma.ingress.validate_ingress`'s error register), or if `kv_cache` is
     given and fails `validate_kv_cache_ingress`'s V1-V6 checks (see
-    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register). Raises
-    `NotImplementedError` if `kv_cache` is given and PASSES ingress — the
-    inert-path door (issue #207); see above.
+    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register).
+
+    **Phase 4 (issue #62, ADR-CDG-012 §D.1 IN-2) — the decoder-drive body is
+    LIVE.** A well-formed `kv_cache` that passes V1-V6 drives the decoder via
+    `_run_pipeline_with_injected_cache` (skip-first-encode, full multi-block
+    loop to completion/EOS — OUT-1 stop-at-block stays deferred per
+    `surfaces/comfyui/denoise.py`) instead of the retired fail-loud door
+    (issue #207's `NotImplementedError`, removed by the implementing PR).
     """
     if t_min >= t_max:
         raise ValueError(f"t_min must be < t_max, got t_min={t_min!r} t_max={t_max!r}.")
@@ -405,31 +619,14 @@ def run_diffusion(
     # (the default) skips this entirely — zero behavior change from before
     # this parameter existed.
     #
-    # Issue #207 (operator ruling 2026-08-01): V1-V6 above only confirm the
-    # PAYLOAD is well-formed — they say nothing about whether this PATH can
-    # honor it. It cannot: the decoder-drive body that would actually consume
-    # an injected cache's tensors is issue #62 Phase 4, gated on the ADR's
-    # real-weights de-risk smoke test and NOT YET BUILT. Before this fix, a
-    # well-formed `kv_cache` passed V1-V6, got its provenance stamped onto
-    # `CanvasTrace.injected_cache_provenance` (OUT-3), and the run then
-    # proceeded exactly as an uninjected run would — the decoder silently
-    # never touched the cache. That is an accepted-and-ignored input, the
-    # trust-and-degrade failure ADR-CDG-001 / EMIT-CANONICAL/PARSE-AT-THE-DOOR
-    # forbids (rule 5): a payload that type-checks and validates but is
-    # discarded downstream is a lying door, not an honest one. Fail loud
-    # instead, naming the tracked enablement so a caller knows this is a gap
-    # to watch for landing, not a permanent rejection.
+    # Issue #62 Phase 4 (this function): V1-V6 above confirm the PAYLOAD is
+    # well-formed; the drive body below (`_run_pipeline_with_injected_cache`)
+    # is what actually honors it, replacing issue #207's fail-loud
+    # `NotImplementedError` door now that the ADR's real-weights de-risk
+    # smoke test has PASSed (ledger #240, run 2026-08-04b) per the ADR's own
+    # resolution trigger.
     if kv_cache is not None:
         validate_kv_cache_ingress(kv_cache, dgemma_model)
-        raise NotImplementedError(
-            "run_diffusion(kv_cache=...) ingress passed validation (V1-V6), but "
-            "this path cannot yet drive the decoder off an injected cache's "
-            "tensors — that live drive body is issue #62 Phase 4 "
-            "(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62), "
-            "gated on ADR-CDG-012's real-weights de-risk smoke test, and is not "
-            "built yet. Remedy: omit kv_cache= (or pass None) until Phase 4 "
-            "lands — a run with no injected cache is fully supported today."
-        )
 
     # Constraints -> the two-mechanism givens (ADR-CDG-010 Decision 1, issue
     # #64 Phase 3). Both mechanisms are built from the SAME validated
@@ -528,24 +725,44 @@ def run_diffusion(
         # installs a forward hook on the loaded model, torn down by its own
         # `finally` on every exit from this `with` block — clean return,
         # `DiffusionCancelled` below, or any other exception propagating out
-        # of `pipeline(...)`. No hook survives past this block under any of
-        # the three paths (ADR-CDG-010 Decision 5, ARCHITECTURE.md rule 6).
+        # of `pipeline(...)`/the injected-cache drive body. No hook survives
+        # past this block under any of the three paths (ADR-CDG-010 Decision
+        # 5, ARCHITECTURE.md rule 6).
         with install_logit_shaping_hook(dgemma_model.model, logit_hook):
-            output = pipeline(
-                **prompt_kwargs,
-                gen_length=gen_length,
-                num_inference_steps=num_inference_steps,
-                confidence_threshold=confidence,
-                generator=generator,
-                callback_on_step_end=step_end,
-                # "logits" (ADR-CDG-014 Decision 4, issue #14): the Tier 0
-                # entropy capture's source — already a base-pipeline
-                # `_callback_tensor_inputs` allowlist entry
-                # (`pipeline_diffusion_gemma.py:76`), so widening this list
-                # is all `run_diffusion` needs to do; `_FrameCollector.
-                # on_step_end` derives `DiffusionFrame.entropy` from it.
-                callback_on_step_end_tensor_inputs=["canvas", "logits", "scheduler_output"],
-            )
+            if kv_cache is not None:
+                # ADR-CDG-012 IN-2 (issue #62 Phase 4): drive the decoder off
+                # the injected cache instead of calling `pipeline(...)` —
+                # diffusers offers no injected-cache parameter to call
+                # through (see `_run_pipeline_with_injected_cache`'s
+                # docstring). Same composite/collector, same hook context,
+                # same `DiffusionCancelled` handling below.
+                sequences, _advanced_cache = _run_pipeline_with_injected_cache(
+                    pipeline,
+                    kv_cache=kv_cache,
+                    gen_length=gen_length,
+                    num_inference_steps=num_inference_steps,
+                    confidence_threshold=confidence,
+                    generator=generator,
+                    callback_on_step_end=step_end,
+                )
+                output = None
+            else:
+                output = pipeline(
+                    **prompt_kwargs,
+                    gen_length=gen_length,
+                    num_inference_steps=num_inference_steps,
+                    confidence_threshold=confidence,
+                    generator=generator,
+                    callback_on_step_end=step_end,
+                    # "logits" (ADR-CDG-014 Decision 4, issue #14): the Tier 0
+                    # entropy capture's source — already a base-pipeline
+                    # `_callback_tensor_inputs` allowlist entry
+                    # (`pipeline_diffusion_gemma.py:76`), so widening this list
+                    # is all `run_diffusion` needs to do; `_FrameCollector.
+                    # on_step_end` derives `DiffusionFrame.entropy` from it.
+                    callback_on_step_end_tensor_inputs=["canvas", "logits", "scheduler_output"],
+                )
+                sequences = output.sequences[0]
     except DiffusionCancelled:
         # #38 partial-return semantics: return the evidence already
         # captured rather than raising it away. Under the capture-first
@@ -593,7 +810,7 @@ def run_diffusion(
         dgemma_model=dgemma_model,
         pipeline=pipeline,
         scheduler=scheduler,
-        sequences=output.sequences[0],
+        sequences=sequences,
         collector=collector,
         entropy_bound=entropy_bound,
         t_min=t_min,

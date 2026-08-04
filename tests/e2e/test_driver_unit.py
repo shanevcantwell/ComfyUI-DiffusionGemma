@@ -587,10 +587,14 @@ def _kv_door_error_history_entry(
     status_str: str = "error",
     messages: list | None = None,
 ) -> dict:
-    """Canned `/history/{id}` entry shaped like a failed `kv-cache-tier1.api.json`
-    run: `status.status_str == "error"` plus an `execution_error` status
-    message (`server.py:handle_execution_error`'s real shape: `[event,
-    data]` pairs, `data` carrying `exception_type`/`exception_message`)."""
+    """Canned `/history/{id}` entry shaped like the RETIRED (pre-Phase-4)
+    failed `kv-cache-tier1.api.json` run: `status.status_str == "error"`
+    plus an `execution_error` status message (`server.py:
+    handle_execution_error`'s real shape: `[event, data]` pairs, `data`
+    carrying `exception_type`/`exception_message`). Kept only as the input
+    fixture for `TestAssertKvDoorContractHonest`'s "still rejects a failed
+    run" coverage — the RETIRED assertion contract this shape used to
+    satisfy is gone (issue #207's door no longer exists after Phase 4)."""
     if messages is None:
         messages = [
             [
@@ -606,6 +610,37 @@ def _kv_door_error_history_entry(
     return {
         "status": {"status_str": status_str, "completed": False, "messages": messages},
         "outputs": {},
+    }
+
+
+def _kv_door_success_history_entry(
+    status_str: str = "success",
+    string_text: str = "TEXT:3,3,3,3",
+    canvas_state_text: str = "CanvasState(converged=True, committed_fraction=1.0, steps_used=8)",
+    canvas_trace_text: str = (
+        "CanvasTrace(frames=[...], scheduler_name='EntropyBoundScheduler', "
+        "injected_cache_provenance=Provenance(minting_sequence=(1, 2, 3), "
+        "edit_script=(), model_repo_id='fake/repo', "
+        "tokenizer_fingerprint='fake/repo:32'))"
+    ),
+    include_string_output: bool = True,
+    include_canvas_state_output: bool = True,
+    include_canvas_trace_output: bool = True,
+) -> dict:
+    """Canned `/history/{id}` entry shaped like a Phase-4 SUCCESSFUL
+    `kv-cache-tier1.api.json` run: node 83 (STRING), node 84 (CanvasState),
+    node 87 (raw `canvas_trace` preview, `[PROTOCOL-CHOICE] #5` — the
+    OUT-3-readable node the Q-2 smoke's ledger #240 run added live)."""
+    outputs = {}
+    if include_string_output:
+        outputs[driver.KV_DOOR_STRING_PREVIEW_NODE_ID] = {"text": [string_text]}
+    if include_canvas_state_output:
+        outputs[driver.KV_DOOR_CANVAS_STATE_PREVIEW_NODE_ID] = {"text": [canvas_state_text]}
+    if include_canvas_trace_output:
+        outputs[driver.KV_DOOR_CANVAS_TRACE_PREVIEW_NODE_ID] = {"text": [canvas_trace_text]}
+    return {
+        "status": {"status_str": status_str, "completed": True, "messages": []},
+        "outputs": outputs,
     }
 
 
@@ -669,32 +704,46 @@ class TestAssertEncodeLiveHonest:
 
 
 class TestAssertKvDoorContractHonest:
-    def test_passes_on_todays_expected_notimplementederror(self):
+    """Phase 4 contract (issue #62): a well-formed injected `kv_cache`
+    completes via the live drive body, `steps_used > 0`, and OUT-3's
+    `injected_cache_provenance` is non-`None` on node 87's `CanvasTrace`
+    preview."""
+
+    def test_passes_on_a_well_formed_successful_run(self):
+        entry = _kv_door_success_history_entry()
+        rendered_text, canvas_state_text = driver.assert_kv_door_contract_honest(entry)
+        assert rendered_text == "TEXT:3,3,3,3"
+        assert "steps_used=8" in canvas_state_text
+
+    def test_fails_when_status_is_not_success(self):
+        # Pre-Phase-4 shape, still a valid FAILURE fixture for this
+        # assertion — a run that still errors (any reason) must not be
+        # read as satisfying the Phase 4 contract.
         entry = _kv_door_error_history_entry()
-        driver.assert_kv_door_contract_honest(entry)  # no raise
-
-    def test_fails_when_status_is_success(self):
-        # Phase 4 landing flips this to success — the calling test's
-        # xfail(strict=True) is what turns that flip into a loud signal;
-        # this unit test only proves the assertion itself would object.
-        entry = _kv_door_error_history_entry(status_str="success")
-        entry["status"]["messages"] = []
-        with pytest.raises(AssertionError, match="expected the kv_cache door to fail"):
+        with pytest.raises(AssertionError, match="expected the kv_cache door to complete"):
             driver.assert_kv_door_contract_honest(entry)
 
-    def test_fails_when_no_execution_error_message_present(self):
-        entry = _kv_door_error_history_entry(messages=[])
-        with pytest.raises(AssertionError, match="no 'execution_error' status message"):
-            driver.assert_kv_door_contract_honest(entry)
-
-    def test_fails_when_exception_type_is_not_notimplementederror(self):
-        entry = _kv_door_error_history_entry(exception_type="RuntimeError")
-        with pytest.raises(AssertionError, match="expected the kv_cache door's NotImplementedError"):
-            driver.assert_kv_door_contract_honest(entry)
-
-    def test_fails_when_message_no_longer_names_phase_4(self):
-        entry = _kv_door_error_history_entry(
-            exception_message="something else entirely, no phase reference"
+    def test_fails_when_steps_used_is_not_positive(self):
+        entry = _kv_door_success_history_entry(
+            canvas_state_text="CanvasState(converged=False, committed_fraction=0.0, steps_used=0)"
         )
-        with pytest.raises(AssertionError, match="no longer names"):
+        with pytest.raises(AssertionError, match="steps_used should be positive"):
+            driver.assert_kv_door_contract_honest(entry)
+
+    def test_fails_when_out3_provenance_stamp_is_none(self):
+        # The exact accepted-and-ignored shape issue #207 existed to catch:
+        # a run that succeeds but never actually stamped injection identity
+        # — the drive body ran uninjected despite a cache being wired.
+        entry = _kv_door_success_history_entry(
+            canvas_trace_text=(
+                "CanvasTrace(frames=[...], scheduler_name='EntropyBoundScheduler', "
+                "injected_cache_provenance=None)"
+            )
+        )
+        with pytest.raises(AssertionError, match="OUT-3 stamp missing"):
+            driver.assert_kv_door_contract_honest(entry)
+
+    def test_fails_when_canvas_trace_preview_missing(self):
+        entry = _kv_door_success_history_entry(include_canvas_trace_output=False)
+        with pytest.raises(AssertionError, match="expected CanvasTrace preview"):
             driver.assert_kv_door_contract_honest(entry)

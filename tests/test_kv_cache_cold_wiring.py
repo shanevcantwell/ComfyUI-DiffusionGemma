@@ -1,5 +1,5 @@
 """tests/test_kv_cache_cold_wiring.py — ADR-CDG-012 DV.3c (issue #62 Phase 3)
-+ issue #207 (fail-loud at the inert `kv_cache` door): the "effortless"
++ Phase 4 (issue #62, this issue's 2026-08-04 correction): the "effortless"
 guarantee, made executable.
 
 Constructs the MINIMAL `DGemmaEncode -> DGemmaDenoise` graph PROGRAMMATICALLY
@@ -10,31 +10,34 @@ fixtures by construction: this test cannot be satisfied by a hand-tuned
 example file, only by the node signatures + engine actually composing
 correctly with no tribal knowledge.
 
-Post-#207, "effortless to get valid results" (DV.3c) is served by TWO
-distinct assertions rather than one: (1) the minimal graph WITH `kv_cache`
-wired fails loud, naming issue #62 Phase 4, because that path cannot yet
-honor an injected cache (#207's fail-loud ruling supersedes DV.3c's
-pre-#207 "wire the two nodes together, get output" framing for THIS
-specific wiring); (2) the minimal `DGemmaDenoise`-alone graph (`kv_cache`
-omitted) remains legal-and-non-degenerate — DV.3c's guarantee holds in full
-for every wiring this path CAN honor today.
+Post-Phase-4, DV.3c's original framing is restored in full: "effortless to
+get valid results" holds for BOTH minimal wirings — (1) the minimal graph
+WITH `kv_cache` wired now produces a valid, non-degenerate result (the live
+drive body honors the injected cache instead of issue #207's retired
+fail-loud door); (2) the minimal `DGemmaDenoise`-alone graph (`kv_cache`
+omitted) remains legal-and-non-degenerate, unaffected by Phase 4.
 
-Deliberately builds its own minimal decode-capable fake model + fake
-scheduler/pipeline (mirrors `tests/test_kv_cache_run_diffusion.py`'s
-`_kv_capable_fake_model`/`_install_fakes` shape) rather than importing that
-module's private helpers — DV.3c's own text is explicit that this test must
-be independent of any other fixture set built for a different clause.
+This module's own fake model/pipeline (below) is intentionally lighter than
+`DGemmaEncode`'s decode-capable needs and is upgraded here (not duplicated
+from `tests/test_kv_cache_drive_body.py`, keeping DV.3c's independence
+requirement) to expose the `.model.model.encoder`/`.model.model.decoder`/
+forward surface `_run_pipeline_with_injected_cache` needs.
 """
 from __future__ import annotations
 
 import pytest
 import torch
+from transformers.models.diffusion_gemma.modeling_diffusion_gemma import (
+    DiffusionGemmaDecoderModel,
+)
 
 from dgemma.loop import DEFAULT_ENTROPY_BOUND, DEFAULT_T_MAX, DEFAULT_T_MIN
 from dgemma.types import DGemmaModel
 from surfaces.comfyui.denoise import DGemmaDenoise
 from surfaces.comfyui.encode import DGemmaEncode
 from tests.conftest import FakeDGemmaModelConfig
+
+CANVAS_LENGTH = 4
 
 
 class _FakeTokenizer:
@@ -84,24 +87,69 @@ class _FakeEncoderModel:
         from tests.conftest import FakeDynamicCache
 
         num_new_tokens = input_ids.shape[-1]
-        cache = past_key_values or FakeDynamicCache(num_layers=self.num_hidden_layers, seq_len=0)
+        cache = past_key_values if past_key_values is not None else FakeDynamicCache(
+            num_layers=self.num_hidden_layers, seq_len=0
+        )
         cache.append(num_new_tokens)
         return _FakeEncoderOutput(past_key_values=cache)
+
+
+class _FakeDecoderModule:
+    """Exposes `create_diffusion_decoder_attention_mask` — the REAL static
+    method (issue #62 Phase 4's drive body calls it directly), so this
+    cold-wiring test's minimal WITH-`kv_cache` graph can actually reach a
+    decode, not just a mint."""
+
+    create_diffusion_decoder_attention_mask = staticmethod(
+        DiffusionGemmaDecoderModel.create_diffusion_decoder_attention_mask
+    )
 
 
 class _FakeDiffusionGemmaModel:
     def __init__(self, config: FakeDGemmaModelConfig):
         self.encoder = _FakeEncoderModel(config.get_text_config().num_hidden_layers)
+        self.decoder = _FakeDecoderModule()
+
+
+class _FakeLogitsOutput:
+    def __init__(self, logits: torch.Tensor) -> None:
+        self.logits = logits
 
 
 class _FakeInnerModel:
-    def __init__(self, config: FakeDGemmaModelConfig):
+    """The `dgemma_model.model` object: exposes `.config`, `.model` (the
+    `.model.model.encoder`/`.model.model.decoder` hop `encode_sequence`/the
+    Phase 4 drive body use), AND is itself callable — mirrors
+    `DiffusionGemmaForBlockDiffusion.forward`'s `decoder_input_ids=`/
+    `past_key_values=`/... -> `.logits` shape, so a minimal WITH-`kv_cache`
+    graph can reach a real (fake) decode instead of crashing on a missing
+    `__call__`."""
+
+    def __init__(self, config: FakeDGemmaModelConfig, *, target_id: int = 3):
         self.config = config
         self.model = _FakeDiffusionGemmaModel(config)
+        self.target_id = target_id
+        self.device = torch.device("cpu")
+
+    def __call__(
+        self,
+        *,
+        decoder_input_ids,
+        past_key_values=None,
+        self_conditioning_logits=None,
+        decoder_attention_mask=None,
+        decoder_position_ids=None,
+    ):
+        batch, canvas_len = decoder_input_ids.shape
+        vocab_size = self.config.get_text_config().vocab_size
+        logits = torch.full((batch, canvas_len, vocab_size), -10.0)
+        logits[:, :, self.target_id] = 10.0
+        return _FakeLogitsOutput(logits=logits)
 
 
 def _cold_wiring_model() -> DGemmaModel:
-    config = FakeDGemmaModelConfig(num_hidden_layers=6, sliding_window=16)
+    config = FakeDGemmaModelConfig(num_hidden_layers=6, sliding_window=16, canvas_length=CANVAS_LENGTH)
+    config.text_config.vocab_size = 32  # real DiffusionGemmaTextConfig carries this; the fake doesn't by default
     return DGemmaModel(
         model=_FakeInnerModel(config),
         processor=_FakeProcessor(),
@@ -188,18 +236,18 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
     """The executable form of "effortless": `DGemmaEncode` -> `DGemmaDenoise`
     with every parameter at its node default, called programmatically."""
 
-    def test_minimal_graph_with_kv_cache_wired_fails_loud_naming_phase_4(self, monkeypatch):
-        """Issue #207 (operator ruling 2026-08-01) supersedes this test's
-        pre-#207 shape: wiring `DGemmaEncode`'s output into `DGemmaDenoise`'s
-        `kv_cache` input is precisely the inert path — the minted cache
-        passes ingress, then `run_diffusion` raises `NotImplementedError`
-        naming issue #62 Phase 4, rather than silently completing a run
-        that never actually consumed the cache. DV.3c's "effortless to get
-        valid results" guarantee is served by the OTHER minimal graph
-        (`DGemmaDenoise` alone, `kv_cache` omitted — the test below): a cold
-        user who wires the pair together gets an explicit, actionable error
-        naming the gap, not a silently degenerate or misleading success."""
-        _install_denoise_fakes(monkeypatch, num_steps=2)
+    def test_minimal_graph_with_kv_cache_wired_is_non_degenerate(self, monkeypatch):
+        """Phase 4 (issue #62, this issue's 2026-08-04 correction) restores
+        DV.3c's original framing: wiring `DGemmaEncode`'s output into
+        `DGemmaDenoise`'s `kv_cache` input now produces a valid,
+        non-degenerate result — the live drive body honors the injected
+        cache instead of issue #207's retired fail-loud
+        `NotImplementedError`. No `_install_denoise_fakes` monkeypatch here:
+        this test needs the REAL `EntropyBoundScheduler`/`DGemmaPipeline`
+        classes (unpatched), since `_run_pipeline_with_injected_cache` reads
+        `pipeline.scheduler`/`pipeline.model` directly and drives a real
+        `.step()` call — the lighter `FakePipeline.__call__`-only fake below
+        (still used by the kv_cache-omitted test) has no such surface."""
         model = _cold_wiring_model()
 
         encode_node = DGemmaEncode()
@@ -208,20 +256,23 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
         denoise_node = DGemmaDenoise()
         denoise_defaults = _widget_defaults(DGemmaDenoise.INPUT_TYPES())
 
-        with pytest.raises(NotImplementedError, match="Phase 4"):
-            denoise_node.denoise(
-                model,
-                prompt="hi",
-                seed=denoise_defaults["seed"],
-                num_inference_steps=2,
-                t_min=DEFAULT_T_MIN,
-                t_max=DEFAULT_T_MAX,
-                entropy_bound=DEFAULT_ENTROPY_BOUND,
-                confidence=denoise_defaults["confidence"],
-                gen_length=denoise_defaults["gen_length"],
-                thinking=denoise_defaults["thinking"],
-                kv_cache=kv_cache,
-            )
+        text, canvas_state, canvas_trace, frames, images, run_config = denoise_node.denoise(
+            model,
+            prompt="hi",
+            seed=denoise_defaults["seed"],
+            num_inference_steps=2,
+            t_min=DEFAULT_T_MIN,
+            t_max=DEFAULT_T_MAX,
+            entropy_bound=DEFAULT_ENTROPY_BOUND,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            thinking=denoise_defaults["thinking"],
+            kv_cache=kv_cache,
+        )
+
+        assert text
+        assert canvas_state.steps_used >= 1
+        assert canvas_trace.injected_cache_provenance is not None
 
     def test_minimal_graph_with_kv_cache_omitted_still_non_degenerate(self, monkeypatch):
         """`kv_cache=None` (the default, IN-2's "no injection" path) keeps
