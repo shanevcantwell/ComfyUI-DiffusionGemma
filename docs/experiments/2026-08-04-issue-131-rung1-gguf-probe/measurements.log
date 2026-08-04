@@ -1,0 +1,21 @@
+=== M5: Q8_0 tok/s repeat runs, seeds 7/13/21, same prompt/knobs ===
+--- seed 7 ---
+0.10.751.426 I diffusion_params: steps=128 schedule=0 algorithm=4 temperature=0.800 eps=0.001000 mask_token=4
+0.10.751.434 I diffusion_eb: max_steps=48 t=[0.400,0.800] entropy_bound=0.1000 stability=1 confidence=0.0050 kv_cache=on gpu_sampling=on sample_reduce=on
+total time: 3431.75ms, time per step: 201.87ms (17 steps over 1 blocks, entropy-bound)
+throughput: 74.6 tok/s (256 tok in 3431.75ms), in-step parallel 1268 tok/s (256-tok canvas x 17.0 steps/block)
+--- seed 13 ---
+0.09.541.371 I diffusion_params: steps=128 schedule=0 algorithm=4 temperature=0.800 eps=0.001000 mask_token=4
+0.09.541.391 I diffusion_eb: max_steps=48 t=[0.400,0.800] entropy_bound=0.1000 stability=1 confidence=0.0050 kv_cache=on gpu_sampling=on sample_reduce=on
+total time: 4609.91ms, time per step: 200.43ms (23 steps over 1 blocks, entropy-bound)
+throughput: 55.5 tok/s (256 tok in 4609.91ms), in-step parallel 1277 tok/s (256-tok canvas x 23.0 steps/block)
+--- seed 21 ---
+0.10.753.201 I diffusion_params: steps=128 schedule=0 algorithm=4 temperature=0.800 eps=0.001000 mask_token=4
+0.10.753.214 I diffusion_eb: max_steps=48 t=[0.400,0.800] entropy_bound=0.1000 stability=1 confidence=0.0050 kv_cache=on gpu_sampling=on sample_reduce=on
+total time: 3819.41ms, time per step: 201.02ms (19 steps over 1 blocks, entropy-bound)
+throughput: 67.0 tok/s (256 tok in 3819.41ms), in-step parallel 1273 tok/s (256-tok canvas x 19.0 steps/block)
+=== M4: determinism probe - seed 7 run twice ===
+diff line count: 0
+=== M4b: no-seed determinism bug check - two runs WITHOUT --seed ===
+no-seed diff line count: 0
+=== M2: visual-server frame capture ===

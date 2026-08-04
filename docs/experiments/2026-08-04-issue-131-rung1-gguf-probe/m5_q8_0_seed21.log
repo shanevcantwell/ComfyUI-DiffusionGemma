@@ -1,0 +1,27 @@
+0.00.683.360 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+0.04.028.804 I diffusion: -n 256 -> 1 blocks, n_ubatch=2304 n_batch=2304 n_ctx=2304 (canvas_length=256)
+0.04.028.806 I diffusion: --fit has no effect here; context is sized from -n and the canvas. Set -ngl / --n-cpu-moe to control device memory.
+0.04.033.639 W sched_reserve: layer 5 is assigned to device CUDA0 but the Flash Attention tensor is assigned to device CPU (usually due to missing support)
+0.04.033.640 W sched_reserve: Flash Attention was auto, set to disabled
+0.10.753.201 I diffusion_params: steps=128 schedule=0 algorithm=4 temperature=0.800 eps=0.001000 mask_token=4
+0.10.753.214 I diffusion_eb: max_steps=48 t=[0.400,0.800] entropy_bound=0.1000 stability=1 confidence=0.0050 kv_cache=on gpu_sampling=on sample_reduce=on
+0.10.754.201 W init: embeddings required but some input tokens were not marked as outputs -> overriding
+0.11.104.491 I diffusion step: 0/48 [                                                  ] 0%0.11.285.980 I diffusion step: 1/48 [=                                                 ] 2%0.11.470.768 I diffusion step: 2/48 [==                                                ] 4%0.11.657.760 I diffusion step: 3/48 [===                                               ] 6%0.11.845.178 I diffusion step: 4/48 [====                                              ] 8%0.12.033.459 I diffusion step: 5/48 [=====                                             ] 10%0.12.223.034 I diffusion step: 6/48 [======                                            ] 12%0.12.413.655 I diffusion step: 7/48 [=======                                           ] 14%0.12.603.826 I diffusion step: 8/48 [========                                          ] 16%0.12.795.431 I diffusion step: 9/48 [=========                                         ] 18%0.12.988.869 I diffusion step: 10/48 [==========                                        ] 20%0.13.183.173 I diffusion step: 11/48 [===========                                       ] 22%0.13.380.012 I diffusion step: 12/48 [============                                      ] 25%0.13.577.770 I diffusion step: 13/48 [=============                                     ] 27%0.13.776.361 I diffusion step: 14/48 [==============                                    ] 29%0.13.976.257 I diffusion step: 15/48 [===============                                   ] 31%0.14.175.719 I diffusion step: 16/48 [================                                  ] 33%0.14.375.319 I diffusion step: 17/48 [=================                                 ] 35%0.14.573.383 I diffusion step: 18/48 [==================                                ] 37%
+thought
+*   Input: "The lighthouse keeper counted every wave before dawn."
+    *   Nature: A single, evocative sentence. It sounds like the opening line of a story or a poetic fragment.
+    *   Goal: The user hasn't provided a specific instruction (like "continue the story," "analyze this," or "translate this"). Usually, such prompts invite a creative response (continuation, analysis, or expansion).
+
+    *   *Atmosphere:* Lonely, rhythmic, obsessive, perhaps a bit melancholic or peaceful.
+    *   *Character:* A lighthouse keeper (disciplined, solitary, perhaps aging).
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour).
+    *   *Action:* Counting waves (a repetitive, ritualistic task).
+
+    *   *Option A: Narrative Continuation.* Start writing the next few paragraphs.
+    *   *Option B: Poetic Expansion.* Turn it into a more descriptive poem.
+    *   *Option C: Analysis.* Break down the symbolism.
+    *   *Option D: Acknowledgment/Interactive.* Ask the user what they want to do with the sentence.
+
+    *   *Drafting
+total time: 3819.41ms, time per step: 201.02ms (19 steps over 1 blocks, entropy-bound)
+throughput: 67.0 tok/s (256 tok in 3819.41ms), in-step parallel 1273 tok/s (256-tok canvas x 19.0 steps/block)

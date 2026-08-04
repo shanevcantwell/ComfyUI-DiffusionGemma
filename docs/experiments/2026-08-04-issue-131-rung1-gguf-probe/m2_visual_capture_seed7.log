@@ -1,0 +1,427 @@
+Script started on 2026-08-04 06:52:41-06:00 [COMMAND="/tmp/llamacpp-probe/llama.cpp/build-cuda/bin/llama-diffusion-cli -m /mnt/storage/LLMs/unsloth/diffusiongemma-26B-A4B-it-GGUF/diffusiongemma-26B-A4B-it-Q8_0.gguf -ngl 99   --diffusion-eb-max-steps 48 --diffusion-eb-t-min 0.4 --diffusion-eb-t-max 0.8   --diffusion-eb-entropy-bound 0.1 --diffusion-eb-confidence 0.005   -p 'The lighthouse keeper counted every wave before dawn.'   -n 256 --seed 7 --diffusion-visual --diffusion-visual-progress --diffusion-visual-interval 1" <not executed on terminal>]
+[34m0.00.626.388[0m [35mW load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+[0m[34m0.03.978.554[0m [32mI [0mdiffusion: -n 256 -> 1 blocks, n_ubatch=2304 n_batch=2304 n_ctx=2304 (canvas_length=256)
+[34m0.03.978.557[0m [32mI [0mdiffusion: --fit has no effect here; context is sized from -n and the canvas. Set -ngl / --n-cpu-moe to control device memory.
+[34m0.03.983.210[0m [35mW sched_reserve: layer 5 is assigned to device CUDA0 but the Flash Attention tensor is assigned to device CPU (usually due to missing support)
+[0m[34m0.03.983.212[0m [35mW sched_reserve: Flash Attention was auto, set to disabled
+[0m[34m0.10.396.200[0m [32mI [0mdiffusion_params: steps=128 schedule=0 algorithm=4 temperature=0.800 eps=0.001000 mask_token=4
+[34m0.10.396.209[0m [32mI [0mdiffusion_eb: max_steps=48 t=[0.400,0.800] entropy_bound=0.1000 stability=1 confidence=0.0050 kv_cache=on gpu_sampling=on sample_reduce=on
+[?25l
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[23A[34m0.10.397.161[0m [35mW init: embeddings required but some input tokens were not marked as outputs -> overriding
+[0m[?2026hdiffusion step: 0/48 [                                                  ] 0%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single,,....*      ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,*,*,,*,******[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 1/48 [=                                                 ] 2%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single sentence evocative sentence.[K
+    *Goal::,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,********************************[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 2/48 [==                                                ] 4%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user hasn provided a a a,,,,,,,,,,,,,,,,,,,,,,*******,,,,,,,,,[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 3/48 [===                                               ] 6%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt prompt..,,, a a a, a a,,,,,,, a or.[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 4/48 [====                                              ] 8%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Input: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or a opening.. They want a continua[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 5/48 [=====                                             ] 10%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or a opening line. They likely want[K
+[K
+    *   *Atmosphere:*,,,,,,,,,,,,,.[K
+******* lighthouse lighthouse,,,,,,,,,,,**********,,,,,,,,,,,,******************[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 6/48 [======                                            ] 12%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solely, rhythmic, obsessive, perhaps, melanch or or or..[K
+    ***:* A A,, the, pre pre-dawndawndawndawndawn.[K
+****Character:* lighthouse lighthouse,,,,,,,,,,[K
+[K
+**********::: ( ( ( the the the the the the the the the the**********::etic// th[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 7/48 [=======                                           ] 14%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps a melancholic or my[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn ( (,,.[K
+    ****:* A lighthouse keeper ( (,,,,, or or or or).[K
+[K
+[K
+[K
+****OptionOption: Narrative Narrative ( ( on on Focus Focus onwhywhywhywhy he he[K
+    *   *Option B: Poetic/Atm Focus.* Focus Focus on the of the the waves the th[K
+******::////.*.*.* waves the the the??[K
+********:::::* the the the the the***********************.......[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 8/48 [========                                          ] 16%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Input: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper ( disciplined, perhaps perhaps, or or a[K
+[K
+[K
+[K
+****Option: Narrative Narrative ( (Story Focus Focus Focus on he he is counting.[K
+    *   *Option2: Poetic/Descriptive.* Focus on the rhythm of the waves and the [K
+    *   *Option 3: Mystery//.*.*.* the waves a the????[K
+*******:::::.*.* the the the the..********************........[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 9/48 [=========                                         ] 18%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone, perhaps lonely, or for a).).[K
+[K
+    *   *Option A:: Narrative (Story).*).* Focus on *why* he is.. Is he he??[K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.*.* Is he a for? the?????*******:::::.*.* th[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 10/48 [==========                                        ] 20%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or perhap[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden the the waves? I[K
+***** D:::.*.*.*.* the the the..[K
+[K
+[K
+[K
+******* ( ( ( (******.........[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 11/48 [===========                                       ] 22%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or guardi[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is[K
+    *   ** D::/.*.*.*.* the the the the..[K
+[K
+    *   *Drafting Option A (Narrative/):):** EliasElias.......[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 12/48 [============                                      ] 25%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or guardi[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is[K
+    *   *Option D: Philosophical/Reflective.* The does the of the routine.[K
+[K
+    *   *Drafting Option A (Narrative/Mystery):*[K
+        Elias didn't just for..[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 13/48 [=============                                     ] 27%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or guardi[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is[K
+    *   *Option D: Philosophical/Reflective.* The does of time and time.[K
+[K
+    *   *Drafting Option A (Narrative/Mystery):*[K
+        Elias didn't count for for fun[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 14/48 [==============                                    ] 29%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or perhap[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is[K
+    *   *Option D: Philosophical/Reflective.* The nature of time and isolation.[K
+[K
+    *   *Drafting Option A (Narrative/Mystery):*[K
+        Elias didn't count them for sport[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 15/48 [===============                                   ] 31%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or perhap[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is[K
+    *   *Option D: Philosophical/Reflective.* The nature of time and isolation.[K
+[K
+    *   *Drafting Option A (Narrative/Mystery):*[K
+        Elias didn't count them for the[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[?2026h[22Adiffusion step: 16/48 [================                                  ] 33%[K
+ thought[K
+*   Input: "The lighthouse keeper counted every wave before dawn."[K
+    *   Nature: A single, evocative sentence.[K
+    *   Goal: The user is providing a prompt or an opening line. They likely wan[K
+[K
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholi[K
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).[K
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or perhap[K
+[K
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are [K
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and th[K
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is[K
+    *   *Option D: Philosophical/Reflective.* The nature of time and isolation.[K
+[K
+    *   *Drafting Option A (Narrative/Mystery):*[K
+        Elias didn't count them for the[K
+[K
+[K
+[K
+[K
+[K
+[K[?2026l[22A[J[?25h
+thought
+*   Input: "The lighthouse keeper counted every wave before dawn."
+    *   Nature: A single, evocative sentence.
+    *   Goal: The user is providing a prompt or an opening line. They likely want a continuation, a story, a poem, or an expansion based on this sentence.
+
+    *   *Atmosphere:* Solitary, rhythmic, obsessive, perhaps slightly melancholic or mystical.
+    *   *Setting:* A lighthouse, the ocean, pre-dawn (blue hour, quiet).
+    *   *Character:* A lighthouse keeper (someone disciplined, lonely, or perhaps guarding something).
+
+    *   *Option A: Narrative expansion (Storytelling).* Focus on *why* they are counting. What is the significance?
+    *   *Option B: Poetic/Descriptive.* Focus on the imagery of the waves and the light.
+    *   *Option C: Mystery/Suspense.* Is there something hidden in the waves? Is he waiting?
+    *   *Option D: Philosophical/Reflective.* The nature of time and isolation.
+
+    *   *Drafting Option A (Narrative/Mystery):*
+        Elias didn't count them for the
+total time: 3442.08ms, time per step: 202.48ms (17 steps over 1 blocks, entropy-bound)
+throughput: 74.4 tok/s (256 tok in 3442.08ms), in-step parallel 1264 tok/s (256-tok canvas x 17.0 steps/block)
+
+Script done on 2026-08-04 06:52:55-06:00 [COMMAND_EXIT_CODE="0"]

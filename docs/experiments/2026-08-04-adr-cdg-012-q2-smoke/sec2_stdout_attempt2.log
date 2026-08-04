@@ -1,0 +1,19 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[INFO] ComfyUI-DiffusionGemma 0.4.0 — loading from 'google/diffusiongemma-26B-A4B-it' (bfloat16, quant=none)
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files: 100%|██████████| 11/11 [00:00<00:00, 32106.71it/s]
+Loading weights:   0%|          | 0/1047 [00:00<?, ?it/s]Loading weights:   2%|▏         | 25/1047 [00:00<00:08, 115.95it/s]Loading weights:   4%|▍         | 46/1047 [00:00<00:06, 148.99it/s]Loading weights:   6%|▌         | 63/1047 [00:00<00:06, 148.11it/s]Loading weights:   8%|▊         | 79/1047 [00:00<00:07, 121.24it/s]Loading weights:   9%|▉         | 92/1047 [00:00<00:09, 103.39it/s]Loading weights:  11%|█         | 112/1047 [00:00<00:08, 105.35it/s]Loading weights:  13%|█▎        | 133/1047 [00:01<00:08, 104.34it/s]Loading weights:  15%|█▍        | 155/1047 [00:01<00:07, 124.08it/s]Loading weights:  16%|█▌        | 169/1047 [00:01<00:07, 121.16it/s]Loading weights:  17%|█▋        | 182/1047 [00:01<00:08, 105.11it/s]Loading weights:  19%|█▉        | 200/1047 [00:01<00:08, 104.81it/s]Loading weights:  21%|██        | 222/1047 [00:01<00:07, 111.56it/s]Loading weights:  23%|██▎       | 244/1047 [00:02<00:06, 115.93it/s]Loading weights:  25%|██▌       | 264/1047 [00:02<00:06, 129.46it/s]Loading weights:  27%|██▋       | 278/1047 [00:02<00:06, 127.13it/s]Loading weights:  28%|██▊       | 292/1047 [00:02<00:07, 107.39it/s]Loading weights:  29%|██▉       | 308/1047 [00:02<00:07, 101.68it/s]Loading weights:  32%|███▏      | 331/1047 [00:02<00:06, 110.37it/s]Loading weights:  34%|███▎      | 352/1047 [00:03<00:06, 113.12it/s]Loading weights:  36%|███▌      | 375/1047 [00:03<00:06, 110.16it/s]Loading weights:  38%|███▊      | 396/1047 [00:03<00:05, 110.47it/s]Loading weights:  40%|███▉      | 418/1047 [00:03<00:05, 114.57it/s]Loading weights:  42%|████▏     | 440/1047 [00:03<00:05, 117.68it/s]Loading weights:  44%|████▍     | 462/1047 [00:04<00:04, 119.73it/s]Loading weights:  46%|████▌     | 484/1047 [00:04<00:04, 117.06it/s]Loading weights:  48%|████▊     | 506/1047 [00:04<00:04, 115.28it/s]Loading weights:  50%|█████     | 527/1047 [00:04<00:04, 115.05it/s]Loading weights: 100%|██████████| 1047/1047 [00:04<00:00, 226.28it/s]
+Some parameters are on the meta device because they were offloaded to the cpu.
+[INFO] ComfyUI-DiffusionGemma — model loaded on cuda:0
+[sec2] seed=7 text#1 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (1.17s)
+[sec2] seed=7 text#2 -> status=mint_error exc=IndexError sha=66ce67c982c8 (0.00s)
+[sec2] seed=7 text#3 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.99s)
+[sec2] seed=7 text#4 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.87s)
+[sec2] seed=13 text#1 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.92s)
+[sec2] seed=13 text#2 -> status=mint_error exc=IndexError sha=66ce67c982c8 (0.00s)
+[sec2] seed=13 text#3 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.97s)
+[sec2] seed=13 text#4 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.86s)
+[sec2] seed=21 text#1 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.93s)
+[sec2] seed=21 text#2 -> status=mint_error exc=IndexError sha=66ce67c982c8 (0.00s)
+[sec2] seed=21 text#3 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.97s)
+[sec2] seed=21 text#4 -> status=mint_error exc=OutOfMemoryError sha=c732788de781 (0.86s)
+[sec2] wrote /tmp/claude-1001/-srv-dev-shanevcantwell-ComfyUI-DiffusionGemma/b45c0533-d500-428c-8f71-3f5091d53471/scratchpad/sec2_results.json; n_distinct_hashes=2 all_identical=False
