@@ -21,6 +21,14 @@ declarative-ingress discipline — the node pair inherits both), Issue #47
 correction), Issue #46 / Issue #40 (research motivation — backward-asymmetry
 discriminators, AR-dominance, fossil waves)
 
+**Status note (2026-08-04):** Phase 4 (the decoder drive body) **LANDED**
+`ac3c832` (PR #242, https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/242).
+The encode→denoise KV path (IN-2) is **active** — `run_diffusion(kv_cache=...)`
+now drives the decoder off an injected cache end to end, gated on the Q-2
+real-weights smoke (PASS, run 2026-08-04b, ledger
+https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/240). See the
+IN-2 write-in below for the ratified prompt-under-injection behavior.
+
 ---
 
 ## Context
@@ -232,6 +240,26 @@ not a closure or a hook. `None` leaves rule-6 `STATELESS-CORE` trivially
 satisfied (no injected state crosses; the run mints fresh). **Failure this
 prevents:** the injection door being opened as a second executable seam (a
 surface handing in code), which rule 7 forecloses — it is a data door only.
+
+**Open-question resolution — prompt-under-injection (ratified 2026-08-04, PR
+#242 gate, https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/242):**
+IN-2 as written above is silent on what `prompt` conditions once a cache is
+injected. The landed Phase 4 drive body (`ac3c832`) **ignores `prompt` when a
+cache is injected** — it drives off `kv_cache.cache` with a fresh
+`torch.randint` canvas and no `prompt_ids` prefix. The gate ruled this a
+**gate-resolved decision, not a design fork**: the behavior is byte-identical
+in semantics to the smoke-proven skeleton (`scratch/q2-skeleton-2026-08-04` @
+`d67e62f`), which also never tokenized/encoded `prompt` and which PASSed §1
+Q-2 live on real weights, all 3 seeds (ledger
+https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/240). Ratified
+wording (verbatim, from issue #62's 2026-08-04 landing comment): *"prompt-
+under-injection = prompt ignored, drive off cache."* This is the **interim
+ratified state** — it does not answer the composition question (what happens
+when both a cache and a prompt are meant to condition the same run). That is
+issue #245 (design: prompt-under-injection composition — independent encoder
+context (KV) + denoiser turn (prompt),
+https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/245), which
+lands on top of this recorded state rather than being answered by it.
 
 **IN-3 — `KV_CACHE` → `DGemmaEncode` (advance an existing cache, cross-block
 re-encode).** The decoder→encoder committed-canvas re-encode crossing
@@ -615,12 +643,21 @@ by design.
 
 ## Open Questions
 
-- [ ] **Untested assumption: the decoder driven with a caller-built cache
-      the pipeline didn't create.** Position/mask math should hold per the
+- [x] **Untested assumption: the decoder driven with a caller-built cache
+      the pipeline didn't create.** ~~Position/mask math should hold per the
       cited source (#47 grounding), but this is unverified against real
       weights. **Resolution trigger:** the designated de-risk experiment — a
       first real-weights smoke test — MUST run before `DGemmaDenoise`
-      implementation proceeds past its skeleton.
+      implementation proceeds past its skeleton.~~
+      **Resolved 2026-08-04 (Q-2 smoke, run 2026-08-04b, ledger
+      https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/240):**
+      ran and **PASSED** — §1 gating predicate (a) satisfied for all 3 seeds
+      {7,13,21}, no averaging: 6/6 `status_str=success` live on real weights
+      from `scratch/q2-skeleton-2026-08-04` @ `d67e62f`, all with-cache runs
+      carrying identical `injected_cache_provenance`, with/without STRINGs
+      byte-different and non-empty per seed. Position/mask math held. Phase 4
+      (`DGemmaDenoise` past its skeleton) then proceeded and landed `ac3c832`
+      (PR #242, https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/242).
 - [ ] **Scope boundary, stated explicitly: in-block bidirectional attention
       severing is OUT OF SCOPE for this ADR.** Cache surgery (§5) cuts
       *context routes* only — which prior tokens' K/V a block's decoder can
