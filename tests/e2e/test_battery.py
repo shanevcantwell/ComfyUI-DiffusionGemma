@@ -30,6 +30,21 @@ means an unexpected PASS is itself reported as a failure, so the marker
 cannot silently go stale once #9 is fixed — the flip to green forces the
 marker's removal as part of that fix's own PR, banking the red-to-green
 transition as the fix's live proof (ADR-CDG-013 §4/issue #59 §4).
+
+Issue #228 part 2
+(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/228) adds
+the standing Encode scenario, promoting the ad-hoc gate-run-4 "S-B" probe
+(bare-module `encode_sequence` under bf16 CPU-spill, 2026-07-30, `a68e29d`;
+issue #145) into this battery so encode liveness has a standing enforcement
+surface rather than a result banked only in a handoff doc. Split across the
+`dgemma/loop.py` `kv_cache` door's ADR-CDG-012 Phase 4 boundary
+(`decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md`), same
+`xfail(strict=True)` convention as S3: `test_encode_live` (stable before
+and after Phase 4 — it never reaches the `kv_cache` door) and
+`test_kv_door_contract` (asserts TODAY's fail-loud contract, marked to flip
+when issue #62
+(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62)
+Phase 4 lands).
 """
 from __future__ import annotations
 
@@ -135,3 +150,76 @@ def test_s4_trace_readout(comfyui_server: ComfyUIServer) -> None:
         f"{readout['expected_heatmap_height']} — the heatmap did not "
         "capture one row per frame"
     )
+
+
+# --- #228 part 2: standing Encode E2E scenario -------------------------------
+
+# kv-cache-tier1-encode-only.api.json's OWN node id (examples/README.md's
+# provenance entry for this fixture) — deliberately NOT one of this
+# module's S1-S4 constants above (`driver.STRING_PREVIEW_NODE_ID` etc.,
+# node ids 74/75/77/78 from the unrelated ping-smoke/p3-trace fixtures).
+_ENCODE_KV_CACHE_PREVIEW_NODE_ID = "83"
+
+
+def test_encode_live(comfyui_server: ComfyUIServer) -> None:
+    """The standing Encode scenario (#228 part 2), promoting the ad-hoc
+    gate-run-4 "S-B" probe (bare-module `encode_sequence` under bf16
+    CPU-spill, 2026-07-30, `a68e29d`; issue #145) into this battery.
+    Reuses `kv-cache-tier1-encode-only.api.json` — the minimal derivative
+    that stops at `DGemmaLoader -> DGemmaEncode -> PreviewAny` on the raw
+    `kv_cache` output, never reaching `DGemmaDenoise`'s `kv_cache` door.
+
+    STABLE both before and after ADR-CDG-012 Phase 4: this scenario proves
+    Encode liveness, a claim Phase 4 landing does not change. Asserts
+    `success` and that the `KVCache` repr's `cumulative_length` parses to a
+    non-empty tuple of strictly-positive per-layer lengths — the black-box
+    signature that the encoder call actually advanced the cache."""
+    workflow = driver.load_workflow("kv-cache-tier1-encode-only.api.json")
+
+    prompt_id = driver.submit_prompt(
+        comfyui_server.base_url, comfyui_server.client_id, workflow
+    )
+    history_entry = driver.poll_history(comfyui_server.base_url, prompt_id)
+
+    driver.assert_encode_live_honest(history_entry, _ENCODE_KV_CACHE_PREVIEW_NODE_ID)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "ADR-CDG-012 Phase 4 (issue #62 "
+        "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62) "
+        "is not yet landed: dgemma/loop.py's kv_cache-is-not-None block "
+        "(currently lines 422-432) fails loud with NotImplementedError by "
+        "design (issue #207) rather than silently ignoring an injected "
+        "cache — expected RED until Phase 4's decoder-drive body lands "
+        "(same issue #228 part 2 convention as test_s3_thinking_toggle_"
+        "honest's issue #9 marker above); strict=True so an unexpected "
+        "PASS (the door quietly starting to succeed) fails loudly and "
+        "forces this marker's removal as part of Phase 4's own PR."
+    ),
+)
+def test_kv_door_contract(comfyui_server: ComfyUIServer) -> None:
+    """The KV-cache door's TODAY contract (#228 part 2): the full
+    `kv-cache-tier1.api.json` graph (`DGemmaLoader -> DGemmaEncode ->
+    DGemmaDenoise -> DGemmaTrace`) surfaces `dgemma/loop.py:422-432`'s
+    fail-loud `NotImplementedError` as a failed execution — a well-formed
+    injected `kv_cache` passes ingress validation (V1-V6) and is then
+    rejected rather than silently run uninjected (issue #207's
+    operator-ruled discipline). Asserts `status.status_str == "error"` with
+    an `execution_error` status message naming `NotImplementedError` and
+    Phase 4.
+
+    THIS TEST FLIPS at ADR-CDG-012 Phase 4: once the decoder-drive body
+    lands, this same graph reports `success` instead, and the `xfail`
+    marker above must be removed as part of that fix's own PR — the same
+    strict-xfail convention `test_s3_thinking_toggle_honest` uses for issue
+    #9."""
+    workflow = driver.load_workflow("kv-cache-tier1.api.json")
+
+    prompt_id = driver.submit_prompt(
+        comfyui_server.base_url, comfyui_server.client_id, workflow
+    )
+    history_entry = driver.poll_history(comfyui_server.base_url, prompt_id)
+
+    driver.assert_kv_door_contract_honest(history_entry)
