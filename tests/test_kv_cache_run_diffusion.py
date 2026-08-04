@@ -1,21 +1,22 @@
 """tests/test_kv_cache_run_diffusion.py — ADR-CDG-012 Phase 2 (issue #62)
-+ issue #207 (fail-loud at the inert `kv_cache` door): `run_diffusion`'s
-`kv_cache=` door (IN-2), fired against the fake pipeline (no real weights).
+`run_diffusion`'s `kv_cache=` door (IN-2): ingress + pre-construction
+ordering + payload-immutability scope, fired against the fake NO-CACHE
+pipeline (no real weights, no decode-capable fake).
 
-Scope, per the ratified Phase 2 plan (issue #62 §N) as amended by issue #207
-(operator ruling 2026-08-01): `kv_cache=None` is byte-identical to today.
-`kv_cache=<well-formed synthetic>` still ingress-validates
+Scope, per the ratified Phase 2 plan (issue #62 §N): `kv_cache=None` is
+byte-identical to today. `kv_cache=<well-formed synthetic>` ingress-validates
 (`dgemma.kv_cache.validate_kv_cache_ingress`) BEFORE the scheduler/pipeline
-are constructed, and never mutates the input `KVCache` payload — but where
-Phase 2 originally let a payload that PASSED V1-V6 fall through to a silent,
-uninjected run (stamping `CanvasTrace.injected_cache_provenance` for a cache
-the decoder then quietly ignored), #207 closes that trust-and-degrade gap:
-passing ingress now raises `NotImplementedError` naming issue #62 Phase 4 as
-the tracked enablement, because the live decoder-drive body that would
-actually honor the cache does not exist yet. These tests assert the new
-fail-loud contract; they do not, and must not, assert anything about the
-decoder actually consuming the injected cache's tensors (that remains
-Phase 4's job, unbuilt).
+are constructed, and never mutates the input `KVCache` payload. This module's
+fakes (`_install_fakes` below) are deliberately NOT decode-capable — they
+never expose `.model.model.encoder`/`.model.model.decoder`/a real forward —
+so a well-formed cache passing ingress into the LIVE drive body (Phase 4,
+issue #62, this issue's 2026-08-04 correction; `dgemma.loop.
+_run_pipeline_with_injected_cache`) is exercised by
+`tests/test_kv_cache_drive_body.py`'s decode-capable fixtures, not here.
+This module's `TestKVCacheValidIngressFailsLoudOnInertPath`-successor class
+therefore asserts only that Phase 4 dispatch is REACHED (ingress passed,
+`NotImplementedError` no longer raised) using the SAME decode-capable
+fixtures `test_kv_cache_drive_body.py` defines — imported, not duplicated.
 
 Fixture composition note: `dgemma_model_factory`/`synthetic_kv_cache_factory`
 (`tests/conftest.py` §L) build a `DGemmaModel` whose `.processor` is the bare
@@ -200,37 +201,36 @@ class TestKVCacheNoneUnchanged:
         assert trace_a.injected_cache_provenance == trace_b.injected_cache_provenance is None
 
 
-class TestKVCacheValidIngressFailsLoudOnInertPath:
-    """`kv_cache=<well-formed synthetic>` passes V1-V6 ingress, then hits the
-    inert-path door (issue #207) and raises `NotImplementedError` naming
-    issue #62 Phase 4 — never a silent pass-through to an uninjected run."""
+class TestKVCacheValidIngressDispatchesToDriveBody:
+    """`kv_cache=<well-formed synthetic>` passes V1-V6 ingress, then DISPATCHES
+    to the Phase 4 live drive body (issue #62, this issue's 2026-08-04
+    correction) — no longer the retired issue #207 inert-path door. Uses the
+    decode-capable fixtures `tests/test_kv_cache_drive_body.py` defines (not
+    this module's own no-cache `_install_fakes`, which cannot drive a real
+    forward pass) — decode-behavior coverage itself lives in that module;
+    this class only confirms Phase 4 dispatch is REACHED and the pre-Phase-4
+    guarantees (pre-construction ingress ordering, payload immutability)
+    still hold now that the destination past ingress has changed."""
 
-    def test_valid_cache_raises_not_implemented_naming_phase_4(self, monkeypatch):
-        _install_fakes(monkeypatch, num_steps=2)
-        model = _kv_capable_fake_model()
-        cache = _matching_kv_cache(model, minting_sequence=(4, 5, 6))
+    def test_valid_cache_no_longer_raises_not_implemented(self, monkeypatch):
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
 
-        with pytest.raises(NotImplementedError, match="Phase 4"):
-            run_diffusion(
-                model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache
-            )
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _decode_kv_cache(model, minting_sequence=(4, 5, 6))
 
-    def test_valid_cache_error_names_issue_62(self, monkeypatch):
-        """DV.3b-style self-remedying message (ADR-CDG-012): the raise names
-        both the gap (no live drive body) and the tracked enablement
-        (#62 Phase 4), not a bare assertion."""
-        _install_fakes(monkeypatch, num_steps=2)
-        model = _kv_capable_fake_model()
-        cache = _matching_kv_cache(model)
+        # No raise: Phase 4's drive body honors the cache instead of the
+        # retired fail-loud door.
+        text, canvas_state, trace = run_diffusion(
+            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            confidence=None, gen_length=4, kv_cache=cache,
+        )
+        assert trace.injected_cache_provenance is not None
 
-        with pytest.raises(NotImplementedError, match=r"#62 Phase 4"):
-            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
-
-    def test_valid_cache_raises_before_scheduler_or_pipeline_built(self, monkeypatch):
-        """The inert-path raise fires in the same pre-construction window as
-        ingress (rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR) — a cache this
-        path can't honor never ties up a scheduler or pipeline object
-        either, mirroring the invalid-ingress raise's own guarantee below."""
+    def test_invalid_cache_still_raises_before_scheduler_or_pipeline_built(self, monkeypatch):
+        """The V1-V6 ingress raise still fires in the pre-construction window
+        (rule 5, EMIT-CANONICAL / PARSE-AT-THE-DOOR) — a cache that FAILS
+        ingress never ties up a scheduler or pipeline object, unaffected by
+        Phase 4's dispatch change past a PASSING ingress."""
         constructed: list = []
 
         class TrackingScheduler:
@@ -245,29 +245,40 @@ class TestKVCacheValidIngressFailsLoudOnInertPath:
         monkeypatch.setattr("dgemma.loop.DGemmaPipeline", TrackingPipeline)
 
         model = _kv_capable_fake_model()
-        cache = _matching_kv_cache(model)
+        good_cache = _matching_kv_cache(model)
+        bad_cache = KVCache(
+            cache=FakeDynamicCache(num_layers=model.model.config.get_text_config().num_hidden_layers - 1),
+            cumulative_length=good_cache.cumulative_length[:-1],
+            geometry=good_cache.geometry,
+            provenance=good_cache.provenance,
+        )
 
-        with pytest.raises(NotImplementedError, match="Phase 4"):
-            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
+        with pytest.raises(ValueError, match="V1"):
+            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=bad_cache)
 
         assert constructed == []
 
-    def test_valid_cache_not_mutated_before_raise(self, monkeypatch):
-        """§3 advance-returns-new-payload discipline holds even on the raise
-        path: `run_diffusion` reads the injected payload (to validate) but
-        never writes through it before raising."""
-        _install_fakes(monkeypatch, num_steps=2)
-        model = _kv_capable_fake_model()
-        cache = _matching_kv_cache(model)
-        original_cumulative_length = cache.cumulative_length
+    def test_valid_cache_not_mutated_by_dispatch(self, monkeypatch):
+        """§3 advance-returns-new-payload discipline: `run_diffusion`
+        dispatching a valid cache into the drive body does not replace the
+        input `KVCache` dataclass's own `provenance`/`cumulative_length`
+        field identities (the underlying `DynamicCache` tensor object is
+        legitimately grown in place by transformers' own `.update()` —
+        see `tests/test_kv_cache_drive_body.py`'s dedicated coverage for
+        that distinction)."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
+
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _decode_kv_cache(model)
         original_provenance = cache.provenance
         original_cache_obj = cache.cache
 
-        with pytest.raises(NotImplementedError):
-            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache)
+        run_diffusion(
+            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            confidence=None, gen_length=4, kv_cache=cache,
+        )
 
         assert cache.cache is original_cache_obj
-        assert cache.cumulative_length == original_cumulative_length
         assert cache.provenance is original_provenance
         assert cache.provenance.minting_sequence == (1, 2, 3)
 
@@ -344,20 +355,28 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
 
         assert constructed == []
 
-    def test_tier2_cache_with_edit_script_passes_ingress_then_hits_inert_door(self, monkeypatch):
+    def test_tier2_cache_with_edit_script_passes_ingress_and_dispatches(self, monkeypatch):
         """Non-orphan tier-2 shape (`minting_sequence=None`,
         non-empty `edit_script`) is legal input to the ingress door even
         though no tier-2 surgery op exists yet (Phase 5, out of scope) — the
-        `Provenance` dataclass shape alone is what V5 checks. Passing V5
-        does not exempt it from the inert-path raise (issue #207): no
-        `kv_cache` shape — tier 1 or tier 2 — is honored by the decoder yet."""
-        _install_fakes(monkeypatch, num_steps=2)
-        model = _kv_capable_fake_model()
-        good_cache = _matching_kv_cache(model)
+        `Provenance` dataclass shape alone is what V5 checks. Passing V5 now
+        reaches Phase 4's drive body like any other well-formed cache — the
+        drive body has no tier-1-vs-tier-2 branch of its own (it only reads
+        `.cache`/`.cumulative_length`, never `.provenance.minting_sequence`),
+        so a tier-2-shaped payload with real tensors drives identically to a
+        tier-1 one; this test only confirms dispatch is reached, not a
+        tier-2-specific decode claim (still out of scope, Phase 5)."""
+        from tests.test_kv_cache_drive_body import (
+            _fake_decoder_capable_model,
+            _matching_kv_cache as _decode_kv_cache,
+        )
+
+        model, _, _ = _fake_decoder_capable_model()
+        decode_good_cache = _decode_kv_cache(model)
         tier2_cache = KVCache(
-            cache=good_cache.cache,
-            cumulative_length=good_cache.cumulative_length,
-            geometry=good_cache.geometry,
+            cache=decode_good_cache.cache,
+            cumulative_length=decode_good_cache.cumulative_length,
+            geometry=decode_good_cache.geometry,
             provenance=Provenance(
                 minting_sequence=None,
                 edit_script=(EditOp(op="ablate_full_attention", params={}),),
@@ -366,7 +385,9 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
             ),
         )
 
-        with pytest.raises(NotImplementedError, match="Phase 4"):
-            run_diffusion(
-                model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=tier2_cache
-            )
+        _, _, trace = run_diffusion(
+            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            confidence=None, gen_length=4, kv_cache=tier2_cache,
+        )
+        assert trace.injected_cache_provenance.minting_sequence is None
+        assert trace.injected_cache_provenance.edit_script

@@ -553,82 +553,58 @@ class TestEffectiveKnobTelemetryStatelessness:
 
 
 class TestKVCacheInjectionStatelessness:
-    """ADR-CDG-012 Phase 2 rider (issue #62 §K), amended by issue #207
-    (fail-loud at the inert `kv_cache` door, operator ruling 2026-08-01):
-    two identical `run_diffusion(kv_cache=...)` calls both raise the SAME
-    shape of `NotImplementedError` (naming issue #62 Phase 4) — proving the
-    raise itself carries no cross-call state — and no cache state persists
-    across calls — `run_diffusion` never caches a `kv_cache` payload on
-    `dgemma_model` or a module global (rule 6, `STATELESS-CORE`), proven by
-    a THIRD, uninjected call staying unaffected by the two prior raises.
-    Full ingress/inert-door test coverage for the `kv_cache=` door itself
-    lives in `tests/test_kv_cache_run_diffusion.py`; this class only proves
-    the same-in/same-out cross-run containment this module's sibling
-    classes already established for the pre-existing knobs, extended to the
-    new parameter."""
+    """ADR-CDG-012 Phase 2 rider (issue #62 §K), amended for Phase 4 (issue
+    #62, this issue's 2026-08-04 correction — the live drive body replaces
+    issue #207's retired fail-loud door): two identical
+    `run_diffusion(kv_cache=...)` calls both DISPATCH to the drive body and
+    complete independently — proving the dispatch itself carries no
+    cross-call state — and no cache state persists across calls —
+    `run_diffusion` never caches a `kv_cache` payload on `dgemma_model` or a
+    module global (rule 6, `STATELESS-CORE`), proven by a THIRD, uninjected
+    call staying unaffected by the two prior with-cache calls. Full
+    ingress/drive-body test coverage for the `kv_cache=` door itself lives in
+    `tests/test_kv_cache_run_diffusion.py`/`tests/test_kv_cache_drive_body.py`;
+    this class only proves the same-in/same-out cross-run containment this
+    module's sibling classes already established for the pre-existing knobs,
+    extended to the new parameter."""
 
-    def test_two_identical_kv_cache_calls_both_raise_with_no_cross_call_state(self, monkeypatch):
-        from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint
-        from dgemma.types import KVCache, Provenance
-        from tests.conftest import FakeDGemmaModelConfig, FakeDynamicCache
+    def test_two_identical_kv_cache_calls_both_complete_with_no_cross_call_state(self, monkeypatch):
+        from tests.test_kv_cache_drive_body import (
+            _fake_decoder_capable_model,
+            _matching_kv_cache as _decode_kv_cache,
+        )
 
-        registry: list = []
-        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
+        # Real EntropyBoundScheduler/DGemmaPipeline (no monkeypatch): the
+        # drive body reads `pipeline.scheduler`/`pipeline.model` directly —
+        # see `tests/test_kv_cache_cold_wiring.py`'s equivalent note.
+        model1, _, _ = _fake_decoder_capable_model()
+        model2, _, _ = _fake_decoder_capable_model()
+        cache1 = _decode_kv_cache(model1)
+        cache2 = _decode_kv_cache(model2)
 
-        def _kv_model() -> DGemmaModel:
-            config = FakeDGemmaModelConfig(num_hidden_layers=6, sliding_window=16)
+        _, _, trace1 = run_diffusion(
+            model1, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            confidence=None, gen_length=4, kv_cache=cache1,
+        )
+        _, _, trace2 = run_diffusion(
+            model2, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            confidence=None, gen_length=4, kv_cache=cache2,
+        )
 
-            class _ConfigModel:
-                def __init__(self, cfg):
-                    self.config = cfg
-
-            return DGemmaModel(
-                model=_ConfigModel(config),
-                processor=FakeProcessor(),
-                device="cpu",
-                dtype="bfloat16",
-                repo_id="fake/repo",
-                quant="none",
-            )
-
-        def _kv_cache_for(model: DGemmaModel) -> KVCache:
-            num_layers = model.model.config.get_text_config().num_hidden_layers
-            return KVCache(
-                cache=FakeDynamicCache(num_layers=num_layers),
-                cumulative_length=tuple([0] * num_layers),
-                geometry=geometry_from_model(model),
-                provenance=Provenance(
-                    minting_sequence=(1, 2, 3),
-                    edit_script=(),
-                    model_repo_id=model.repo_id,
-                    tokenizer_fingerprint=tokenizer_fingerprint(model),
-                ),
-            )
-
-        model1 = _kv_model()
-        model2 = _kv_model()
-        cache1 = _kv_cache_for(model1)
-        cache2 = _kv_cache_for(model2)
-
-        with pytest.raises(NotImplementedError, match="Phase 4"):
-            run_diffusion(
-                model1, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache1
-            )
-        with pytest.raises(NotImplementedError, match="Phase 4"):
-            run_diffusion(
-                model2, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache2
-            )
-
-        # No scheduler was ever constructed for either call — the raise
-        # fires before scheduler/pipeline construction (rule 5) — so the
-        # stateless-registry rider this module's sibling classes assert has
-        # nothing to compare here; the meaningful assertion is the THIRD,
-        # uninjected call below staying fully unaffected.
+        assert trace1.injected_cache_provenance is not None
+        assert trace2.injected_cache_provenance is not None
+        # Each call's stamped provenance is its OWN cache's identity, never
+        # the other call's — no cross-call leakage through a shared/global
+        # slot.
+        assert trace1.injected_cache_provenance is cache1.provenance
+        assert trace2.injected_cache_provenance is cache2.provenance
 
         # A THIRD call with no kv_cache at all is unaffected by the two
-        # prior (raising) injected-cache calls — no residual cache state
-        # survives on the model or anywhere `run_diffusion` could have
-        # stashed it, and this call completes normally rather than raising.
+        # prior injected-cache calls — no residual cache state survives on
+        # the model or anywhere `run_diffusion` could have stashed it, and
+        # this call completes normally with no injected provenance.
+        registry: list = []
+        _install_stateless_fakes(monkeypatch, scheduler_registry=registry, num_steps=2)
         _, _, trace3 = run_diffusion(
             _fake_model(), "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
         )
