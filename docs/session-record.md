@@ -21,10 +21,11 @@ Tracking issue: [CDG #237](https://github.com/shanevcantwell/ComfyUI-DiffusionGe
 ROADMAP and ARCHITECTURE cite it), so it's concept-doc, not session residue (ADR-CDG-022
 Decision 1's inbound-reference test).
 
-`docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/` is a **deferred** case: it stays
-public for now because it's the live arm of a pending run, not because it has earned
-citation fan-in yet. It evacuates (or graduates to concept-doc status) once the Q-2
-bracket closes — re-apply the Decision 1 test at that point.
+`docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/` was a **deferred** case: it stayed
+public as the live arm of a pending run until the Q-2 bracket closed (Phase-4 merge
+`ac3c832`). It has now followed the rest of the session residue to the annex above —
+re-applying the Decision 1 test to it did not find citation fan-in, so it evacuated
+rather than graduating to concept-doc status.
 
 `docs/postmortems/` is unaffected by this evacuation — postmortems are decision-record
 material, not session residue.
