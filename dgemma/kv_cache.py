@@ -308,8 +308,38 @@ def encode_sequence(
     bf16 CPU spill (unaffected — the encoder's own parameters already carry
     the accelerator device attention needs), and CPU-only test fakes
     (encoder parameters report `cpu`, so minted tensors stay `cpu` too).
+
+    Ingress validation (issue #227): `token_ids` empty (`len(token_ids) ==
+    0`) is rejected here, at the door, before any tensor is minted or the
+    encoder is touched. Left unguarded, an empty sequence reaches
+    transformers' `find_packed_sequence_indices` (called deep inside the
+    encoder forward) and raises an uncaught `IndexError` — a substrate
+    crash instead of a typed ingress rejection (`EMIT-CANONICAL /
+    PARSE-AT-THE-DOOR`). The empty-string case (`tokenizer("",
+    add_special_tokens=False)["input_ids"] == []`) is the concrete producer
+    of this shape (issue #227's title case); the check is on `token_ids`
+    itself so it also catches a caller handing an empty list/tuple directly,
+    not just the text-shaped path.
+
+    OOM hardening (issue #226 hardening slice, NOT the root-cause fix — see
+    `dgemma/kv_cache.py`'s `encode_sequence` OOM re-raise below): this is the
+    **bare transformers lane** — the encoder is called directly, not through
+    `DiffusionGemmaPipeline`'s own internal encode call, and OOM is a
+    possible outcome here that the pipeline's own equivalent call has not
+    been observed to hit under the same VRAM state (#226/#229). The
+    `torch.OutOfMemoryError` re-raise below only wraps that lane's own
+    forward call; it changes no happy-path behavior.
     """
     num_layers = geometry_from_model(dgemma_model)["num_hidden_layers"]
+
+    if len(token_ids) == 0:
+        raise ValueError(
+            "encode_sequence door rejected: token_ids is empty (len(token_ids) == 0). "
+            "Remedy: encode_sequence requires at least one token id — a caller "
+            "tokenizing an empty/whitespace-only string (e.g. "
+            'tokenizer("", add_special_tokens=False)) must reject that text before '
+            "calling encode_sequence, rather than minting a cache from zero tokens."
+        )
 
     if into is None:
         cache = None
@@ -327,7 +357,21 @@ def encode_sequence(
     position_ids = torch.arange(ids_tensor.shape[-1], device=encoder_device) + start_position
     position_ids = position_ids.unsqueeze(0)
 
-    outputs = encoder(input_ids=ids_tensor, past_key_values=cache, position_ids=position_ids)
+    try:
+        outputs = encoder(input_ids=ids_tensor, past_key_values=cache, position_ids=position_ids)
+    except torch.OutOfMemoryError as e:
+        if torch.cuda.is_available():
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            mem_info = f"{free_bytes / (1024 ** 3):.2f}/{total_bytes / (1024 ** 3):.2f} GiB free/total (cuda.mem_get_info)"
+        else:
+            mem_info = "torch.cuda.is_available() is False — no CUDA mem_get_info readback possible"
+        raise torch.OutOfMemoryError(
+            "encode_sequence: OutOfMemoryError in the bare transformers lane — "
+            "the encoder is called directly here, not through "
+            "DiffusionGemmaPipeline's own internal encode call, and OOM is a "
+            "possible outcome specific to this lane (see #226/#229 — root cause "
+            f"is a separate, still-open fix, not addressed by this re-raise). {mem_info}."
+        ) from e
     advanced_cache = outputs.past_key_values
 
     cumulative_length = tuple(advanced_cache.get_seq_length(layer_idx=i) for i in range(num_layers))
