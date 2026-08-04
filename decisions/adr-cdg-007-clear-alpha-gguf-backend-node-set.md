@@ -1,6 +1,6 @@
 # ADR-CDG-007 — Clear-alpha architecture: GGUF/llama.cpp-fork backend, three-node set, steering-vs-illumination socket rule
 
-**Status**: rejected (2026-07-06) — the GGUF/fork alpha is **not adopted for 0.1.0**; the pack ships on the `transformers`-bf16 path (ADR-CDG-002). See "Decision reversal" below. The GGUF design is preserved as the record of the considered-and-set-aside alpha.
+**Status**: rejected (2026-07-06), **superseded by ADR-CDG-020** (2026-08-04) — the GGUF/fork alpha is **not adopted for 0.1.0**; the pack ships on the `transformers`-bf16 path (ADR-CDG-002). See "Decision reversal" below. The GGUF *node design* (three-node set, steering-vs-illumination socket rule, state/error/failure-path model) is **carried forward as substrate** by ADR-CDG-020, re-homed from this ADR's rejected private-fork basis onto a pinned-upstream-PR posture.
 **Date**: 2026-07-06
 **Related**: ADR-CDG-002 (access path — this ADR *amends* it for the alpha: it flips 002's
 GGUF-as-primary rejection for the alpha scope), ADR-CDG-004 (drive seam — this ADR defers the
@@ -237,8 +237,9 @@ so none of its proposed amendments/deferrals fired. ADR-CDG-002 / -004 / -006 st
 untouched** — a `rejected` ADR moves no other ADR's status. The GGUF-alpha consideration is retained
 above as durable record so the quant dead-ends and the fork-dependency reasoning are not re-burned.
 
-**Superseded by:** TBD (milestone-2's native-stepping ADR may supersede the backend decision if/when
-the diffusers path loads).
+**Superseded by:** ADR-CDG-020 (2026-08-04) — the engine-sourcing decision. ADR-CDG-020 supersedes this
+ADR's private-fork engine basis while carrying its node design forward as substrate; it re-homes that
+design onto a pinned-upstream-PR posture (the obtainable-by-a-user answer this ADR's Open Question 1 lacked).
 
 ## References
 
