@@ -329,6 +329,10 @@ def encode_sequence(
     been observed to hit under the same VRAM state (#226/#229). The
     `torch.OutOfMemoryError` re-raise below only wraps that lane's own
     forward call; it changes no happy-path behavior.
+
+    Live-proof provenance (#228 pt.1): live-proven under bf16 CPU-spill via
+    the ComfyUI server lane (gate run 4 S-B, 2026-07-30, `a68e29d`; #145) —
+    regressed 2026-08-04, BARE lane only (#226). Standing surface: `tests/e2e/test_battery.py::test_encode_live`.
     """
     if len(token_ids) == 0:
         raise ValueError(

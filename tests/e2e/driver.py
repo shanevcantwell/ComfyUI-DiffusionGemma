@@ -386,3 +386,123 @@ def assert_s4_trace_readout_honest(
         "image_ref": image_ref,
         "expected_heatmap_height": summary_steps * cell_px,
     }
+
+
+def parse_kv_cache_cumulative_length(repr_text: str) -> tuple[int, ...]:
+    """Extract `KVCache.cumulative_length`'s tuple-of-int value out of the
+    dataclass's auto-generated repr (`dgemma/types.py:KVCache`, the same
+    "no custom `__repr__`" shape `CanvasState` has — see
+    `_CANVAS_STATE_FIELD_PATTERNS`'s docstring). A dedicated parser rather
+    than a `_CANVAS_STATE_FIELD_PATTERNS` entry: that table's `kind` values
+    (`bool`/`float`/`int`) are all scalar-shaped, and `cumulative_length` is
+    the one tuple-shaped field the Encode scenario needs to read back — a
+    fourth `kind` there would either widen a name-scoped-to-CanvasState
+    helper or need its own tuple-parsing branch anyway, so it is factored
+    here instead where the KV-cache scenario's own encode-liveness read
+    lives.
+
+    Raises `AssertionError` (not a plain regex-miss) if the field is absent
+    or malformed — a missing/malformed `cumulative_length` is itself the
+    unexpected-payload-shape finding, same discipline as
+    `parse_canvas_state_field`."""
+    match = re.search(r"cumulative_length=\(([^)]*)\)", repr_text)
+    assert match, f"KVCache repr missing field 'cumulative_length': {repr_text!r}"
+    raw = match.group(1).strip()
+    if not raw:
+        return ()
+    return tuple(int(part.strip()) for part in raw.split(",") if part.strip())
+
+
+def assert_encode_live_honest(
+    history_entry: dict[str, Any], kv_cache_preview_node_id: str
+) -> tuple[int, ...]:
+    """The Encode-liveness scenario's observable assertion (#228 part 2):
+    `DGemmaEncode` completes against real weights and mints a live
+    `KV_CACHE` payload. Stable both before and after ADR-CDG-012 Phase 4 —
+    unlike S1-S4's `STRING_PREVIEW_NODE_ID`/`CANVAS_STATE_PREVIEW_NODE_ID`
+    module constants (which name node ids 74/75/77/78 from the *different*
+    ping-smoke/p3-trace fixtures), this scenario's node id is passed in by
+    the caller: `kv-cache-tier1-encode-only.api.json` previews the raw
+    `kv_cache` output at node 83, a fixture-specific id that must not be
+    conflated with those unrelated constants.
+
+    Checks: `status.status_str == "success"`; the `kv_cache` preview is
+    present and non-blank; the `KVCache` repr's `cumulative_length` field
+    parses to a non-empty tuple of strictly-positive ints — one per decoder
+    layer, each having actually advanced past 0 tokens (`encode_sequence`'s
+    own docstring: "`cumulative_length`... derived fresh from the
+    encoder-advanced cache... never hand-tracked"), the black-box signature
+    that the encoder call really ran rather than the node returning some
+    inert/default `KVCache`.
+
+    Returns the parsed `cumulative_length` tuple on success."""
+    status = history_entry.get("status", {})
+    assert status.get("status_str") == "success", (
+        f"ComfyUI run did not report success: {status}"
+    )
+
+    outputs = history_entry.get("outputs", {})
+    kv_cache_text = _preview_any_text(outputs, kv_cache_preview_node_id, "KVCache")
+
+    cumulative_length = parse_kv_cache_cumulative_length(kv_cache_text)
+    assert cumulative_length, (
+        f"KVCache.cumulative_length parsed empty — expected one entry per "
+        f"decoder layer: {kv_cache_text!r}"
+    )
+    assert all(length > 0 for length in cumulative_length), (
+        "KVCache.cumulative_length has a non-positive entry — the encoder "
+        f"call should have advanced every layer past 0 tokens: {cumulative_length}"
+    )
+
+    return cumulative_length
+
+
+def assert_kv_door_contract_honest(history_entry: dict[str, Any]) -> None:
+    """The KV-cache door's TODAY contract (#228 part 2, `dgemma/loop.py`
+    `run_diffusion`'s `kv_cache is not None` block, currently lines
+    422-432): a well-formed injected `kv_cache` passes ingress validation
+    (V1-V6) and then fails loud with `NotImplementedError` naming
+    ADR-CDG-012 Phase 4 / issue #62 — the live decoder-drive body that would
+    actually honor the injected cache is not built yet (issue #207's
+    operator-ruled discipline: never silently degrade to an uninjected run).
+
+    The full `kv-cache-tier1.api.json` graph wires this: `DGemmaDenoise`
+    (node 82) is the node this raises from; the ComfyUI executor reports the
+    whole prompt as `status.status_str == "error"` and records an
+    `execution_error` status message naming the failing node and exception
+    (`server.py:handle_execution_error`) — this assertion reads exactly that
+    black-box shape, not the exception object itself (the e2e tier never
+    imports `dgemma`).
+
+    THIS TEST IS EXPECTED TO FLIP at ADR-CDG-012 Phase 4 (issue #62): once
+    the decoder-drive body lands, this same graph will report `success`
+    instead, and this assertion becomes the wrong one — the calling test in
+    `test_battery.py` marks that flip with `xfail(strict=True)`, the same
+    convention `test_s3_thinking_toggle_honest` uses for issue #9."""
+    status = history_entry.get("status", {})
+    assert status.get("status_str") == "error", (
+        "expected the kv_cache door to fail the run (ADR-CDG-012 Phase 4 "
+        f"not yet landed), but ComfyUI reported: {status}"
+    )
+
+    messages = status.get("messages", [])
+    error_messages = [
+        data
+        for event, data in messages
+        if event == "execution_error" and isinstance(data, dict)
+    ]
+    assert error_messages, (
+        f"status_str=='error' but no 'execution_error' status message found: {messages!r}"
+    )
+
+    exception_types = {msg.get("exception_type") for msg in error_messages}
+    exception_messages = " ".join(str(msg.get("exception_message", "")) for msg in error_messages)
+    assert "NotImplementedError" in exception_types, (
+        "expected the kv_cache door's NotImplementedError, got exception "
+        f"type(s) {exception_types} instead: {error_messages!r}"
+    )
+    assert "Phase 4" in exception_messages, (
+        "the NotImplementedError fired, but its message no longer names "
+        f"Phase 4 as the enablement gate — has the door's wording changed "
+        f"out from under this contract test? {exception_messages!r}"
+    )
