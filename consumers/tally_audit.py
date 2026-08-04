@@ -14,7 +14,7 @@ applied to model-generated markdown, not a data-plane socket: an unrecognized
 frame format is REPORTED (`parse_status="unrecognized"` + the raw excerpt),
 never fabricated as a plausible-looking zero or blank. The three observed
 formats (issue #84's grounding — the two `count_numerals_*` runs under
-`/srv/dev/ComfyUI/output/`, format differed between consecutive runs; issue
+`<comfyui-root>/output/`, format differed between consecutive runs; issue
 #86 added a third, first seen in a later sweep) are:
 
 1. **Inline bold-markdown list** (run 1, 2026-07-15T23-57-39): repeated

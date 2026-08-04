@@ -421,7 +421,7 @@
       },
       "widgets_values": [
         "dgemma_run_log",
-        "/srv/dev/DG-runs/"
+        "/tmp/DG-runs/"
       ],
       "color": "#233",
       "bgcolor": "#355"

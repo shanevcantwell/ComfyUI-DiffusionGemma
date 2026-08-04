@@ -310,7 +310,7 @@ verifiable when it lands. **Nothing here is executed by this decision record.**
    ### Phase 2 guidance — transcribe `semantic-kinematics-mcp`, with two corrections
 
    The ecosystem's MCP-surface exemplar is `semantic-kinematics-mcp`
-   (`/srv/dev/shanevcantwell/semantic-kinematics-mcp`); `surfaces/mcp/` should be
+   (`<dev-root>/semantic-kinematics-mcp`); `surfaces/mcp/` should be
    a transcription of its layout, not a fresh design. Its pattern
    (under `semantic_kinematics/mcp/`):
 

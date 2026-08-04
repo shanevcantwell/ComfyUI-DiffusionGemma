@@ -89,7 +89,7 @@ class TestCheckGpu:
             apps_stdout=(
                 "20276, 110, /usr/lib/xorg/Xorg\n"
                 "20546, 9, /usr/bin/gnome-shell\n"
-                "63519, 1402, /home/shane/github/llama.cpp/build/bin/llama-server\n"
+                "63519, 1402, /home/user/github/llama.cpp/build/bin/llama-server\n"
             ),
         )
         results = q2_preflight.check_gpu(run=run)
@@ -126,7 +126,7 @@ class TestCheckGpu:
         # still be flagged, not silently accepted just because of its name.
         run = self._run_stub(
             mem_line="1631, 46768, 49152",
-            apps_stdout="99999, 20000, /home/shane/github/llama.cpp/build/bin/llama-server\n",
+            apps_stdout="99999, 20000, /home/user/github/llama.cpp/build/bin/llama-server\n",
         )
         results = q2_preflight.check_gpu(run=run)
         by_name = {r.name: r for r in results}
@@ -141,8 +141,8 @@ class TestCheckGpu:
         run = self._run_stub(
             mem_line="1631, 46768, 49152",
             apps_stdout=(
-                "63519, 1402, /home/shane/github/llama.cpp/build/bin/llama-server\n"
-                "63999, 1300, /home/shane/github/llama.cpp/build/bin/llama-server\n"
+                "63519, 1402, /home/user/github/llama.cpp/build/bin/llama-server\n"
+                "63999, 1300, /home/user/github/llama.cpp/build/bin/llama-server\n"
             ),
         )
         results = q2_preflight.check_gpu(run=run)

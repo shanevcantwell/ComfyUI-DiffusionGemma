@@ -58,7 +58,7 @@ import os
 # Dual-context import, explicit package-depth gate (same discipline as the
 # root __init__.py — no blanket try/except, which masks real failures).
 # ComfyUI loads the pack as a package named after its directory path
-# (`/srv/dev/ComfyUI/nodes.py:2233,2241`) and never puts the pack root on
+# (`<comfyui-root>/nodes.py:2233,2241`) and never puts the pack root on
 # sys.path, so this module's __package__ is "<pack>.surfaces.comfyui"
 # (dotted) and only the relative import can resolve. This module now lives
 # two levels under the pack root (surfaces/comfyui/, was one level under
