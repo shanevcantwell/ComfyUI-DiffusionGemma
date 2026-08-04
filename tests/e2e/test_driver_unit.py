@@ -545,3 +545,156 @@ class TestAssertS4TraceReadoutHonest:
         entry = _trace_history_entry(include_canvas_output=False)
         with pytest.raises(AssertionError, match="expected CanvasState preview"):
             driver.assert_s4_trace_readout_honest(entry)
+
+
+# --- #228 part 2: standing Encode E2E scenario -------------------------------
+
+_ENCODE_PREVIEW_NODE_ID = "83"  # kv-cache-tier1-encode-only.api.json's own id,
+# deliberately NOT one of the S1-S4 module constants (74/75/77/78) above.
+
+
+def _encode_history_entry(
+    status_str: str = "success",
+    kv_cache_text: str = (
+        "KVCache(cache=<DynamicCache>, cumulative_length=(9, 9, 9, 9), "
+        "geometry={}, provenance=Provenance(...))"
+    ),
+    include_kv_cache_output: bool = True,
+) -> dict:
+    """Canned `/history/{id}` entry shaped like
+    `kv-cache-tier1-encode-only.api.json`: node 83 previews the raw
+    `KVCache` dataclass repr (`PreviewAny`'s `{"text": (value,)}` shape,
+    same as every other preview in this tier)."""
+    outputs = {}
+    if include_kv_cache_output:
+        outputs[_ENCODE_PREVIEW_NODE_ID] = {"text": [kv_cache_text]}
+    return {
+        "status": {"status_str": status_str, "completed": True, "messages": []},
+        "outputs": outputs,
+    }
+
+
+def _kv_door_error_history_entry(
+    exception_type: str = "NotImplementedError",
+    exception_message: str = (
+        "run_diffusion(kv_cache=...) ingress passed validation (V1-V6), but "
+        "this path cannot yet drive the decoder off an injected cache's "
+        "tensors — that live drive body is issue #62 Phase 4 "
+        "(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62), "
+        "gated on ADR-CDG-012's real-weights de-risk smoke test, and is not "
+        "built yet."
+    ),
+    status_str: str = "error",
+    messages: list | None = None,
+) -> dict:
+    """Canned `/history/{id}` entry shaped like a failed `kv-cache-tier1.api.json`
+    run: `status.status_str == "error"` plus an `execution_error` status
+    message (`server.py:handle_execution_error`'s real shape: `[event,
+    data]` pairs, `data` carrying `exception_type`/`exception_message`)."""
+    if messages is None:
+        messages = [
+            [
+                "execution_error",
+                {
+                    "node_id": "82",
+                    "node_type": "DGemmaDenoise",
+                    "exception_type": exception_type,
+                    "exception_message": exception_message,
+                },
+            ]
+        ]
+    return {
+        "status": {"status_str": status_str, "completed": False, "messages": messages},
+        "outputs": {},
+    }
+
+
+class TestParseKvCacheCumulativeLength:
+    def test_parses_a_populated_tuple(self):
+        repr_text = "KVCache(cumulative_length=(9, 9, 9, 9), geometry={})"
+        assert driver.parse_kv_cache_cumulative_length(repr_text) == (9, 9, 9, 9)
+
+    def test_parses_a_single_entry_tuple(self):
+        repr_text = "KVCache(cumulative_length=(5,), geometry={})"
+        assert driver.parse_kv_cache_cumulative_length(repr_text) == (5,)
+
+    def test_parses_an_empty_tuple(self):
+        repr_text = "KVCache(cumulative_length=(), geometry={})"
+        assert driver.parse_kv_cache_cumulative_length(repr_text) == ()
+
+    def test_raises_when_field_absent(self):
+        with pytest.raises(AssertionError, match="missing field 'cumulative_length'"):
+            driver.parse_kv_cache_cumulative_length("KVCache(geometry={})")
+
+
+class TestAssertEncodeLiveHonest:
+    def test_passes_on_a_well_formed_live_cache(self):
+        entry = _encode_history_entry()
+        cumulative_length = driver.assert_encode_live_honest(
+            entry, _ENCODE_PREVIEW_NODE_ID
+        )
+        assert cumulative_length == (9, 9, 9, 9)
+
+    def test_fails_when_status_is_not_success(self):
+        entry = _encode_history_entry(status_str="error")
+        with pytest.raises(AssertionError, match="did not report success"):
+            driver.assert_encode_live_honest(entry, _ENCODE_PREVIEW_NODE_ID)
+
+    def test_fails_when_kv_cache_preview_missing(self):
+        entry = _encode_history_entry(include_kv_cache_output=False)
+        with pytest.raises(AssertionError, match="expected KVCache preview"):
+            driver.assert_encode_live_honest(entry, _ENCODE_PREVIEW_NODE_ID)
+
+    def test_fails_when_cumulative_length_is_empty(self):
+        entry = _encode_history_entry(
+            kv_cache_text="KVCache(cumulative_length=(), geometry={})"
+        )
+        with pytest.raises(AssertionError, match="parsed empty"):
+            driver.assert_encode_live_honest(entry, _ENCODE_PREVIEW_NODE_ID)
+
+    def test_fails_when_cumulative_length_has_a_non_positive_entry(self):
+        entry = _encode_history_entry(
+            kv_cache_text="KVCache(cumulative_length=(9, 0, 9, 9), geometry={})"
+        )
+        with pytest.raises(AssertionError, match="non-positive entry"):
+            driver.assert_encode_live_honest(entry, _ENCODE_PREVIEW_NODE_ID)
+
+    def test_reads_the_caller_supplied_node_id_not_a_module_constant(self):
+        # The whole point of the parameterized signature (#228 part 2): a
+        # fixture using a different node id than S1-S4's 74/75/77/78 must
+        # still be readable, and reading the WRONG (S1-S4) id must fail.
+        entry = _encode_history_entry()
+        with pytest.raises(AssertionError, match="expected KVCache preview"):
+            driver.assert_encode_live_honest(entry, driver.STRING_PREVIEW_NODE_ID)
+
+
+class TestAssertKvDoorContractHonest:
+    def test_passes_on_todays_expected_notimplementederror(self):
+        entry = _kv_door_error_history_entry()
+        driver.assert_kv_door_contract_honest(entry)  # no raise
+
+    def test_fails_when_status_is_success(self):
+        # Phase 4 landing flips this to success — the calling test's
+        # xfail(strict=True) is what turns that flip into a loud signal;
+        # this unit test only proves the assertion itself would object.
+        entry = _kv_door_error_history_entry(status_str="success")
+        entry["status"]["messages"] = []
+        with pytest.raises(AssertionError, match="expected the kv_cache door to fail"):
+            driver.assert_kv_door_contract_honest(entry)
+
+    def test_fails_when_no_execution_error_message_present(self):
+        entry = _kv_door_error_history_entry(messages=[])
+        with pytest.raises(AssertionError, match="no 'execution_error' status message"):
+            driver.assert_kv_door_contract_honest(entry)
+
+    def test_fails_when_exception_type_is_not_notimplementederror(self):
+        entry = _kv_door_error_history_entry(exception_type="RuntimeError")
+        with pytest.raises(AssertionError, match="expected the kv_cache door's NotImplementedError"):
+            driver.assert_kv_door_contract_honest(entry)
+
+    def test_fails_when_message_no_longer_names_phase_4(self):
+        entry = _kv_door_error_history_entry(
+            exception_message="something else entirely, no phase reference"
+        )
+        with pytest.raises(AssertionError, match="no longer names"):
+            driver.assert_kv_door_contract_honest(entry)
