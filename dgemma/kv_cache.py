@@ -330,8 +330,6 @@ def encode_sequence(
     `torch.OutOfMemoryError` re-raise below only wraps that lane's own
     forward call; it changes no happy-path behavior.
     """
-    num_layers = geometry_from_model(dgemma_model)["num_hidden_layers"]
-
     if len(token_ids) == 0:
         raise ValueError(
             "encode_sequence door rejected: token_ids is empty (len(token_ids) == 0). "
@@ -340,6 +338,8 @@ def encode_sequence(
             'tokenizer("", add_special_tokens=False)) must reject that text before '
             "calling encode_sequence, rather than minting a cache from zero tokens."
         )
+
+    num_layers = geometry_from_model(dgemma_model)["num_hidden_layers"]
 
     if into is None:
         cache = None
