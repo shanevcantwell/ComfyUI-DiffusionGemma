@@ -48,12 +48,32 @@ tag.
   `main`: #119 offload-aware tied-weights guard (`f04688f`), rides the next tag.
   Banked beyond the topology bracket: #219 (salience decomposition: model.py
   map + prose evacuation).
-- **Next bracket — operator-directed 2026-08-03 (ordering decided at opening):**
-  (a) **KV-cache encoder completion** — encode→denoise consumes the injected
-  cache (ADR-CDG-012 lineage; #47, #62; ingress currently fail-loud inert per
-  #207/#209). (b) **Bespoke llama.cpp binaries in the release package** —
-  #131 rung 4, CI-built from the owned pin (`c3fb972`, build-proven), owned
-  provenance. Topology (#138) and #219 remain queued below.
+- **Next bracket — opened 2026-08-04 (run ledger: #225; ordering: KV-encoder
+  live, GGUF design beside):**
+  (a) **KV-cache encoder — in flight, gated on a re-run.** The Q-2 smoke ran
+  2026-08-04 and typed **BLOCKED**: `encode_sequence` OOMs on the bare
+  transformers lane before any decoder code (#226 — a regression, bisect
+  window `a68e29d..33551d5`; empty-string ingress gap filed as #227). The
+  ratified re-run route is **Amendment 1 on #62**: identical pre-registered
+  protocol driven through the ComfyUI API lane (S-B's lane); the with-cache
+  skeleton is banked on `scratch/q2-skeleton-2026-08-04`. GPU window is
+  operator-scheduled. Knowledge-locality fix (function-scoped live-proof
+  banking + promote an Encode scenario into the E2E battery) is #228.
+  (b) **GGUF engine/packaging — corrected per #223.** "Rung 4" was roadmap
+  shorthand, not the issue-thread sequence. Actual gate chain: rung-1 probe
+  (partial 2026-08-04: #24423 leg live at 55.5–74.6 tok/s Q8_0,
+  byte-identical seed-rerun; #24427 legs absent from host) → engine ADR
+  [ADR-CDG-020](decisions/adr-cdg-020-gguf-engine-sourcing-pinned-pr-branch.md)
+  (proposed; ratification **HOLD** until the #24427 legs run) → CI packaging.
+  Note: `c3fb972` is a pinned upstream draft-PR branch, not owned code —
+  "owned pin" language retired.
+- **Lifecycle proposal pending:**
+  [ADR-CDG-021](decisions/adr-cdg-021-per-surface-vram-tenancy-ownership.md)
+  (per-surface VRAM tenancy — MCP/transformers lane may OOM fail-loud;
+  ComfyUI surface integrates `comfy.model_management`; grown from an operator
+  observation, #229) — proposed, operator disposition open; binds the #138
+  bracket to in-process consumption if accepted. Topology (#138) and #219
+  remain queued below.
 - **Next bracket — topology (version minted at opening):**
   [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
   (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
