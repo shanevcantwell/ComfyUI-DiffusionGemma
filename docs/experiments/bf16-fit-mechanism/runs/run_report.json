@@ -1,9 +1,0 @@
-{
-  "generate_seconds": 17.7,
-  "steps_used": 8,
-  "seconds_per_step": 2.2,
-  "committed_fraction": 0.98046875,
-  "converged": false,
-  "text_head": "The sky is blue due to a phenomenon called **Rayleigh scattering**. \n\nHere is the step-by-step breakdown of why it happens:\n\n### 1. Sunlight is made of all colors\nWhile sunlight looks white to us, it is actually made up of all the colors of the rainbow (red, orange, yellow, green, blue, indigo, and ",
-  "cuda_max_memory_allocated_GB_after_run": 47.71
-}
