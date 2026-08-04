@@ -48,3 +48,15 @@ plan.md
 loose-ends.md
 test-coverage-plan.md
 
+# Session residue (ADR-CDG-022 Decision 4a): handoffs/evidence evacuate to the
+# private annex wholesale; raw-run artifacts under docs/experiments/ are
+# ignored by filename shape, not by directory, so concept-doc subtrees
+# (liquid-phase-decoding/, the deferred 2026-08-04-adr-cdg-012-q2-smoke/) are
+# never blanket-excluded.
+docs/handoffs/
+docs/evidence/
+docs/experiments/**/nvidia_smi*
+docs/experiments/**/*.log
+docs/experiments/**/*_results*.json
+docs/experiments/**/*stdout*
+
