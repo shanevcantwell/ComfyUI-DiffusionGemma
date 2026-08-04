@@ -11,6 +11,8 @@ take apart.
 > **live per-step view** of the canvas denoising as it runs, a **picture
 > flipbook** of the whole process, and a **trace node** (commit heatmap +
 > summary) to read what happened. Verified on real weights across two GPUs.
+> The KV-cache encode→denoise path is active as of 2026-08-04 (`ac3c832`,
+> PR #242).
 >
 > **VRAM footprint today: ~50GB bf16 + CPU spill (needs a ≥48GB card), or
 > ~30GB via a pre-quantized AutoRound INT4 checkpoint (`quant="autoround"`,
@@ -245,6 +247,7 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 | **ADR-CDG-005** | `CANVAS_STATE` is a resumable save-state, not a display snapshot. |
 | **[ADR-CDG-006](decisions/adr-cdg-006-advanced-sampler-step-window-resume.md)** | `DGemmaSamplerAdvanced` — step-windowed, chainable/resumable sampler (**proposed**, not yet built). |
 | **[ADR-CDG-008](decisions/adr-cdg-008-mcp-center-multi-surface-topology.md)** | MCP-center, multi-surface topology — `dgemma/` is the one contract, MCP the base surface. |
+| **[ADR-CDG-012](decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md)** | `KV_CACHE` socket + `DGemmaEncode`/`DGemmaDenoise` node pair — MITM the AR/diffusion seam. The decoder drive body is live (Phase 4, `ac3c832`, PR #242). |
 | **[ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md)** | `dgemma/loop.py` decomposed into `config`/`compat`/`capture`/`excision` behind a re-export facade (0.5.0, shipped). |
 | **[ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)** | MCP-as-contract topology remediation (primitives layer, `dgemma_mcp/` rename) — accepted, next bracket. |
 

@@ -4,6 +4,56 @@ This changelog starts at 0.3.0 — no retroactive entries for earlier releases.
 
 All notable user-facing changes to this project are documented here.
 
+## [Unreleased]
+<!-- Deliberately unversioned: the bump/tag timing decision stays open on #196. -->
+
+### Added
+- #62 / ADR-CDG-012 Phase 4 (PR #242, merge `ac3c832`) — **KV-cache decoder-drive
+  body**: `run_diffusion(kv_cache=...)` now drives the decoder off an injected
+  cache (IN-2 skip-first-encode, full multi-block loop to completion/EOS). The
+  encode→denoise KV path is **active** — 0.4.0's "the decoder does not yet drive
+  generation off an injected cache" limitation is lifted. Under injection the
+  `prompt` input is ignored (interim behavior ratified at the PR #242 gate;
+  prompt+cache composition design tracked in #245). Gated on the Q-2 real-weights
+  smoke: PASS, 3/3 seeds (run 2026-08-04b, ledger #240).
+  `test_kv_door_contract` flipped from strict-xfail to a success contract.
+- #228 (PR #234) — standing `DGemmaEncode` E2E scenario in the live battery +
+  function-scoped live-proof provenance banking.
+- `tools/q2_preflight.py` (PR #233) — push-button Q-2 window precondition check
+  with environment-provenance banking (#62, #228).
+- `tools/leak_guard.py` + CI leak-guard workflow (PR #239, ADR-CDG-022
+  Decision 4b) — generic-pattern topology-leak guard (private-IP ranges,
+  host-path shapes; never a literal denylist).
+
+### Fixed
+- #227 (PR #235) — empty-text encode is rejected with a typed `ValueError` at
+  the `encode_sequence` door instead of failing opaquely downstream; includes a
+  #226 typed-OOM hardening slice (typed re-raise at the same door).
+- #222 — publish workflow token-status checks read the secret store directly
+  (`679df6a`); publish docs state the manual-dispatch reality while the token
+  is absent pending reconstruction (`929770f`).
+
+### Changed
+- ADR-CDG-022 publish policy, accepted 2026-08-04 (PRs #238, #239, #244) —
+  the public tree carries product + decision record; session residue (handoffs,
+  evidence, raw run artifacts, the deferred q2-smoke folder) evacuated to the
+  private design-docs annex, with a `docs/session-record.md` stub naming the
+  annex location.
+
+### Documentation
+- ADR-CDG-020 (proposed, PR #224) — GGUF engine sourcing via pinned upstream PR
+  branch; ADR-CDG-007 supersession flip.
+- ADR-CDG-021 (proposed, PR #230; provenance correction PR #231) — per-surface
+  VRAM tenancy ownership; operator disposition open.
+- Doc-staleness sweep (PR #246) — ROADMAP.md, ADR-CDG-012 (ratified
+  prompt-under-injection write-in + Phase-4 status + resolved smoke OQ),
+  ADR-CDG-010 OQ2 cross-ref, README/CHANGELOG/ADR-CDG-009 accuracy annotations
+  re-grounded to the post-Phase-4 reality.
+- 2026-08-04 session records: live-window banking (`8649166`), roadmap refresh +
+  handoffs (PRs #232, #236), 2026-07 evidence compendium (`f92e558`), legacy
+  session records restored (`ae78968`) — subsequently evacuated to the annex
+  per ADR-CDG-022.
+
 ## [0.5.1] - 2026-08-03
 0.5.1 — documentation release + field fix. ARCHITECTURE.md re-grounded against the decomposed tree (#220 audit); README/CLAUDE/AGENTS refreshed; fix(#119): offload-aware tied-weights integrity guard (first tagged release carrying it).
 

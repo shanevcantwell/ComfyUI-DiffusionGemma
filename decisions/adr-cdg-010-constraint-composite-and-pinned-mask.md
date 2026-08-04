@@ -274,13 +274,20 @@ convention.
       composite *ordering*; it does not fix the wire shape of the `CONSTRAINTS`
       dataclass. **Resolution trigger:** settle when R2's mint module is
       authored, before any node wires a `constraints=` UI widget.
-- [ ] **Does β-renoise ever need to run more than once per step (e.g. a
+- [x] **Does β-renoise ever need to run more than once per step (e.g. a
       multi-region renoise pass), and does that change the "β-rebuild before
-      pin" ordering to "all β-rebuild passes before any pin pass"?** Current
+      pin" ordering to "all β-rebuild passes before any pin pass"?** ~~Current
       wording assumes a single β-rebuild phase per step. **Resolution
       trigger:** revisit if the liquid-phase-decoding bench's β-renoise
       participant (`docs/experiments/liquid-phase-decoding/concept.md`) turns
-      out to need multiple ordered sub-phases.
+      out to need multiple ordered sub-phases.~~
+      **Resolved narrowly at the design level by
+      [ADR-CDG-017](adr-cdg-017-neighborhood-remelt-kernel.md) (accepted
+      2026-07-20):** the neighborhood-remelt kernel does not need multiple
+      *ordered sub-phases* per step for this kernel — single β-rebuild phase
+      stands. Implementation not yet landed; issue #115
+      (https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/115)
+      carries the β-rebuild body candidate.
 - [ ] **Interaction between a mask-only constraint (no re-assertion desired,
       e.g. a soft bias) and this ADR's "constraints always use both
       mechanisms" clause.** Decision 1 assumes every constraint wants both

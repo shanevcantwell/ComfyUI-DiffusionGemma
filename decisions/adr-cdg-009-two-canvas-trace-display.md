@@ -1,6 +1,7 @@
 # ADR-CDG-009 — Make the N-canvas (block) structure legible in the flipbook and heatmap
 
-**Status**: proposed
+**Status**: proposed (caption shipped — `frames_image.py:241` matches §2
+verbatim; heatmap sentinel + divider frames remain design-only)
 **Date**: 2026-07-13 (revised 2026-07-13: reframed two-canvas → N-canvas per
 operator ratification feedback — see "Revision 2026-07-13" at the foot of this
 ADR)

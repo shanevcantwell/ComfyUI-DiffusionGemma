@@ -13,9 +13,9 @@ program). It is deliberately pointer-heavy and holds no content of its own:
   built to ask, each tagged `[established]` / `[hypothesis]` / `[open]`.
 - **[`decisions/`](decisions/)** holds the *decided* — the ADRs, the load-bearing
   choices and their trade-offs.
-- **`plan.md`** holds the *closed-phase evidence* — phases P0–P3, each with its
-  per-phase PASS record. That ledger is done and stays put (it lives in the working
-  tree, not the published tree); this file does not restate it.
+- **`plan.md`** is a **tombstone** — retired 2026-07-31 (operator direction);
+  its phases P0–P3 per-phase PASS record is archived on closed issue #199,
+  not in a live working-tree file. This file does not restate it.
 
 Two independent `R`-namespaces appear below and must not be conflated:
 **Track A's R1–R6 are engineering refactors** (issue #35); **Track B's R0–R6 are
@@ -36,7 +36,9 @@ tag.
   #187 (encode device pin under whole-fit), #188 (live-view single mint), #169
   (F0 test baseline), #151 (mcp<2.0 verification), #161 (CI actions bump), #175
   (node explanations, draft tier), plus the Encode/Denoise visibility disposition
-  (operator call pending — the kv_cache door is inert until the seam bracket).
+  (operator call pending — the kv_cache door is LIVE: the Phase 4 drive body
+  landed `ac3c832` (PR #242, 2026-08-04) and `run_diffusion(kv_cache=...)`
+  now drives off the injected cache).
   Ship discipline per #195 (gate integrity axis) and #196 (version/tag timing).
 - **0.5.0 — the refactor version, and only that** — **shipped 2026-08-03**, tag
   `v0.5.0` @ `c4beb3e`.
@@ -49,16 +51,17 @@ tag.
   Banked beyond the topology bracket: #219 (salience decomposition: model.py
   map + prose evacuation).
 - **Next bracket — opened 2026-08-04 (run ledger: #225; ordering: KV-encoder
-  live, GGUF design beside):**
-  (a) **KV-cache encoder — in flight, gated on a re-run.** The Q-2 smoke ran
-  2026-08-04 and typed **BLOCKED**: `encode_sequence` OOMs on the bare
-  transformers lane before any decoder code (#226 — a regression, bisect
-  window `a68e29d..33551d5`; empty-string ingress gap filed as #227). The
-  ratified re-run route is **Amendment 1 on #62**: identical pre-registered
-  protocol driven through the ComfyUI API lane (S-B's lane); the with-cache
-  skeleton is banked on `scratch/q2-skeleton-2026-08-04`. GPU window is
-  operator-scheduled. Knowledge-locality fix (function-scoped live-proof
-  banking + promote an Encode scenario into the E2E battery) is #228.
+  live, GGUF design beside): CLOSED.** (a) **KV-cache encoder — done.** Q-2
+  smoke re-run (Amendment 1 on #62, run 2026-08-04b, ledger #240) PASSed
+  3/3 seeds live on real weights; Phase 4 (the decoder drive body) then
+  landed `ac3c832` (PR #242). The `run_diffusion(kv_cache=...)` door now
+  drives the decoder off an injected cache end to end. Next open work reads
+  from that reality, not from the prior in-flight state: #47's
+  cache-perturbation experiments are unlocked; #245 (prompt-under-injection
+  composition design, `auto:draft`) is queued; #243 tracks `loop.py`'s
+  size drift past ADR-CDG-018's 5k threshold. Knowledge-locality fix
+  (function-scoped live-proof banking + promote an Encode scenario into the
+  E2E battery) is #228.
   (b) **GGUF engine/packaging — corrected per #223.** "Rung 4" was roadmap
   shorthand, not the issue-thread sequence. Actual gate chain: rung-1 probe
   (partial 2026-08-04: #24423 leg live at 55.5–74.6 tok/s Q8_0,
@@ -79,12 +82,11 @@ tag.
   (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
   finding I1) → topology remediation (#138), import-gate consolidation (#57),
   and the interrupt fix (#140, rides the restructure per operator 2026-08-01).
-- **The seam (post-refactor).**
+- **The seam (post-refactor) — done.**
   [ADR-CDG-012](decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md)
-  Phase 4: the Q-2 real-weights de-risk smoke, then the decoder genuinely driven
-  off injected caches (#62). #187 is a precondition; the fixed-seed encoder-text
-  sweep (byte-identical canvases predicted pre-Phase-4) is the liveness gate.
-  Then #47's known-provenance cache-perturbation experiments open.
+  Phase 4 landed `ac3c832` (PR #242): the Q-2 real-weights de-risk smoke
+  PASSed (#62), and the decoder is now genuinely driven off injected caches.
+  #47's known-provenance cache-perturbation experiments are open.
 - **Research arc.** The capture instrument is complete (Tiers 0–2 + display
   consumers, [ADR-CDG-014](decisions/adr-cdg-014-frame-capture-discipline.md)).
   Queued: #186 (bf16-vs-INT4 trace comparison), #28 (flagship global-constraint
@@ -238,7 +240,8 @@ Parallel and conditional tracks:
   011 (accepted, ratified 2026-07-13 — the constraint + control seams),
   ADR-CDG-015 / 016 (accepted, ratified 2026-07-18 — the F-track field fork and
   the G-track crystalline CA).
-- **`plan.md`** — closed-phase evidence, P0–P3 (working-tree only, not published).
+- **`plan.md`** — tombstone (retired 2026-07-31); closed-phase evidence P0–P3
+  archived on closed issue #199, not a live working-tree file.
 - **Issues** — engineering: #35 (architecture review + R1–R6). Research and
   grounding: #23 (per-step control / mod-matrix), #28 (Sudoku-class flagship +
   logit-mask seam), #36 (loop-cache sweep hazard), #14 / #11 (the DISTRIBUTION
