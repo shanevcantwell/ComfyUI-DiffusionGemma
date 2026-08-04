@@ -180,6 +180,17 @@ def _run_pipeline_with_injected_cache(
       construct its own composite or collector, so `DiffusionCancelled`
       raised mid-block propagates to `run_diffusion`'s existing
       `except DiffusionCancelled` handler unchanged.
+    - **`stability_threshold`/`eos_early_stop` hardcoded, at parity with the
+      no-cache path's own hardcoding.** Neither is a `run_diffusion`
+      parameter today (see that function's own docstring: "`stability_
+      threshold`/`eos_early_stop` stay at the pipeline's own defaults" —
+      `1`/`True`) — this function hardcodes the same two values
+      (`argmax_history`'s leading dim `1`, the unconditional
+      `eos_token_id is not None` check) rather than re-deriving them from a
+      caller-supplied knob that doesn't exist yet. If a future PR promotes
+      either to a `run_diffusion` parameter, this function's hardcoded
+      values must be threaded through in the same change, or the two paths
+      silently diverge — named here so that PR doesn't miss this call site.
 
     Returns `(sequences, advanced_cache)` where `sequences` is
     `cur_input_ids[:, 0:]` shaped like `output.sequences[0]` in the no-cache
@@ -189,6 +200,20 @@ def _run_pipeline_with_injected_cache(
     per above; returned so a future OUT-1 wiring has it without a second
     pass).
     """
+    # Batch size 1 only (tier-1 scope, never batches an injected cache —
+    # this function's own docstring/return-value note). Asserted here
+    # rather than silently truncating to `[0]` at the `sequences =
+    # torch.cat(...)` return below, per ADR-CDG-001's fail-loud discipline:
+    # a batch>1 cache would otherwise produce a plausible-but-wrong single
+    # sequence instead of a caught precondition violation.
+    if kv_cache.cache.layers and kv_cache.cache.layers[0].keys.shape[0] != 1:
+        raise ValueError(
+            f"_run_pipeline_with_injected_cache: kv_cache has batch size "
+            f"{kv_cache.cache.layers[0].keys.shape[0]}, only batch size 1 is "
+            "supported (ADR-CDG-012 tier-1 scope never batches an injected "
+            "cache)."
+        )
+
     model = pipeline.model
     scheduler = pipeline.scheduler
     device = model.device

@@ -544,3 +544,34 @@ class TestKVCacheNotMutatedInPlaceBeyondRealCacheSemantics:
 
         assert cache.provenance is original_provenance
         assert cache.geometry is original_geometry
+
+
+class TestBatchSizeGuard:
+    """Tier-1 scope never batches an injected cache (this module's/the
+    drive body's own docstring) — a batch>1 cache is rejected fail-loud
+    rather than silently truncated to one sequence at the final
+    `torch.cat(...)[0]` (ADR-CDG-001's plausible-but-wrong-output
+    discipline)."""
+
+    def test_batch_size_two_cache_raises(self, monkeypatch):
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model)
+        # Widen every layer's batch dim from 1 to 2 in place — the cheapest
+        # way to produce a batch>1 `DynamicCache` from the existing fixture
+        # without hand-rolling a second fake cache constructor.
+        for layer in cache.cache.layers:
+            layer.keys = layer.keys.expand(2, -1, -1, -1).contiguous()
+            layer.values = layer.values.expand(2, -1, -1, -1).contiguous()
+
+        with pytest.raises(ValueError, match="batch size"):
+            run_diffusion(
+                model,
+                "unused prompt",
+                entropy_bound=0.1,
+                t_min=0.4,
+                t_max=0.8,
+                num_inference_steps=2,
+                confidence=None,
+                gen_length=CANVAS_LENGTH,
+                kv_cache=cache,
+            )
