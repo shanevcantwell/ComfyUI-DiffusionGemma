@@ -133,6 +133,30 @@ class TestCheckGpu:
         assert by_name["gpu.tenancy"].warning is True
         assert "99999" in by_name["gpu.tenancy"].detail
 
+    def test_two_llama_servers_second_is_flagged_as_non_resident(self):
+        # "Known-resident services" (#145 waiver) names ONE llama-server, not
+        # an arbitrary count. Two small same-named processes must not both pass
+        # as "the resident embedding server" — exactly one is accepted; the
+        # second is named as a non-resident tenant (warn, not fail).
+        run = self._run_stub(
+            mem_line="1631, 46768, 49152",
+            apps_stdout=(
+                "63519, 1402, /home/shane/github/llama.cpp/build/bin/llama-server\n"
+                "63999, 1300, /home/shane/github/llama.cpp/build/bin/llama-server\n"
+            ),
+        )
+        results = q2_preflight.check_gpu(run=run)
+        by_name = {r.name: r for r in results}
+        tenancy = by_name["gpu.tenancy"]
+        # The second llama-server is named (warn-not-fail posture preserved).
+        assert tenancy.warning is True
+        assert "63999" in tenancy.detail
+        # The lower-memory llama-server (pid 63519) is the accepted resident
+        # and must NOT be named as an "other" tenant.
+        assert "63519" not in tenancy.detail
+        # Warn does not flip the aggregate; the >=35 GiB floor is the backstop.
+        assert q2_preflight.aggregate_pass(results) is True
+
     def test_unparseable_memory_line_fails(self):
         def _fake_run(cmd, timeout=None):
             return FakeCompletedProcess(0, stdout="garbage\n")

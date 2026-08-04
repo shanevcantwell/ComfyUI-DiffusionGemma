@@ -5,6 +5,12 @@
 Standalone dev tool. Does NOT import into, or get imported by, the
 ComfyUI-DiffusionGemma node pack (same discipline as `tools/flipbook/`).
 
+Dependencies: stdlib + subprocess + huggingface_hub (the runsheet-specified
+`scan_cache_dir` scan for the DGemma weights-cache check — see
+`check_weights_cache`). Not stdlib-and-subprocess-only: the weights check
+imports `huggingface_hub` to measure the HF cache the same way
+`tests/e2e/conftest.py`'s `_weights_cached` convention does.
+
 Runsheet SSoT: the 2026-08-04 "Amendment 1" comment on issue #62
 (https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62),
 §3-amended ("Runsheet deltas for the ComfyUI-server lane"). Read it with:
@@ -32,7 +38,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -210,23 +215,38 @@ def check_gpu(run=_run) -> list[CheckResult]:
             continue
         tenants.append((pid, mem_mib, name))
 
-    def _is_accepted_baseline(name: str, mem_mib: float) -> bool:
+    def _is_desktop_baseline(name: str) -> bool:
         # Desktop compositor processes (Xorg/gnome-shell) are accepted
         # unconditionally — they are not a GPU-window "tenant" in the sense
         # #145's waiver means, and are present in every banked clean baseline.
-        if any(sub in name for sub in DESKTOP_BASELINE_NAME_SUBSTRINGS):
-            return True
-        # The resident embedding server: accepted only if it looks like
-        # llama-server AND stays under the waiver ceiling. An oversized
-        # llama-server is NOT silently accepted just because of its name.
-        if RESIDENT_SERVER_NAME_SUBSTRING in name and mem_mib <= RESIDENT_TENANT_MAX_MIB:
-            return True
-        return False
+        return any(sub in name for sub in DESKTOP_BASELINE_NAME_SUBSTRINGS)
+
+    # The resident embedding server is a SINGLE process: "known-resident
+    # services" (#145 waiver) names one llama-server, not an arbitrary count of
+    # them. Accept at most ONE llama-server-named process, and cap the ACCEPTED
+    # total at the waiver ceiling — a second same-named process (or an oversized
+    # first one) is a non-resident tenant, named (warn-not-fail); the >=35 GiB
+    # free floor remains the hard backstop. Per-process acceptance would let two
+    # small same-named processes both pass as "the resident embedding server."
+    llama_servers = [
+        (pid, mem_mib, name)
+        for pid, mem_mib, name in tenants
+        if RESIDENT_SERVER_NAME_SUBSTRING in name and not _is_desktop_baseline(name)
+    ]
+    accepted_llama_pids: set[str] = set()
+    if llama_servers:
+        # The FIRST llama-server in the process listing is the resident-embedding
+        # candidate; accept it only if it stays under the waiver ceiling on its
+        # own. Any later same-named process is a second tenant, named as
+        # non-resident — never silently accepted alongside the first.
+        candidate = llama_servers[0]
+        if candidate[1] <= RESIDENT_TENANT_MAX_MIB:
+            accepted_llama_pids.add(candidate[0])
 
     non_resident = [
         (pid, mem_mib, name)
         for pid, mem_mib, name in tenants
-        if not _is_accepted_baseline(name, mem_mib)
+        if not _is_desktop_baseline(name) and pid not in accepted_llama_pids
     ]
     named_other_tenants = [
         f"{name} (pid {pid}, {mem_mib:.0f} MiB)" for pid, mem_mib, name in non_resident
@@ -538,9 +558,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     out_path = Path(args.out) if args.out else Path(f"/tmp/q2-preflight-{args.label}.json")
 
-    if not shutil.which("git"):
-        print("FAIL: git not found on PATH — cannot run the skeleton-branch check", file=sys.stderr)
-
+    # No pre-flight git-on-PATH print here: a missing git surfaces as a failed
+    # `skeleton.branch_at_origin` CheckResult — subprocess.run raises
+    # FileNotFoundError (an OSError), which check_skeleton_branch catches and
+    # degrades to FAIL. That path fails safe and sets the exit code; a separate
+    # stderr print would be redundant and would not affect the go/no-go result.
     results = run_all_checks()
     provenance = collect_environment_provenance()
 
