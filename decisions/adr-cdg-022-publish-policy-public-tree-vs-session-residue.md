@@ -1,6 +1,6 @@
 # ADR-CDG-022 — Publish policy: public tree carries product + decision record; session residue evacuates to the private annex
 
-**Status**: `proposed` — **ratification authority: the OPERATOR** (operator-ruled 2026-08-04; this ADR records the ruling precisely, it does not re-litigate it). Decisions 1–4 below are the operator's call as stated; this document's job is internal consistency, doctrine conformance, and naming the enforcement surface honestly — not re-opening the policy question.
+**Status**: `accepted` (Opus design-gate PASS 2026-08-04) — **ratification authority: the OPERATOR** (operator-ruled 2026-08-04; this ADR records the ruling precisely, it does not re-litigate it). Decisions 1–4 below are the operator's call as stated; this document's job is internal consistency, doctrine conformance, and naming the enforcement surface honestly — not re-opening the policy question. **Gate resolution (2026-08-04):** the remediation-issue citation, still carrying a "number pending" placeholder in the Context, Decision 3, and Implementation-Notes prose, is repointed to [CDG #237](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/237) — the issue now exists and is the tracking issue for this ADR's downstream work; all seam citations (OD#17, HT#199, CDG#163/#201/#237, ADR-CDG-020's 3 handoff lines, ARCHITECTURE/ROADMAP liquid-phase citations) verified against the live issues and files.
 **Date**: 2026-08-04
 **Related**:
 - [operating-doctrine#17](https://github.com/shanevcantwell/operating-doctrine/issues/17) — `design-docs/` write-scope-to-the-pools-seat doctrine; the operator's 2026-08-04 carve-out ruling (an agent-writable, per-repo annex under `design-docs/experiments/<repo>/`, outside the frozen embedding corpus) is what makes Decision 2 below possible without contradicting the corpus-freeze default that issue states
@@ -13,7 +13,7 @@
 Grounding reads (verify the current-system claims by following these):
 - GitHub traffic API, 14-day window ending 2026-08-04: 748 clones, 261 unique cloners, 173 views; top-referenced content issue #131.
 - The 78-file docs push (7,703 insertions) — `docs/handoffs/` (27 files), `docs/evidence/` (17 files, 2.4 MB PNGs), raw experiment runs (logs/JSON/`nvidia-smi` dumps) under `docs/experiments/`.
-- The 2026-08-04 leak sweep (banked on the remediation issue, number pending): no credentials found; IP↔hostname↔hardware↔OS topology mapping in handoffs (e.g. `192.168.137.x` lines), hostnames in experiment docs, operator system username in absolute paths across 12 files including live script constants.
+- The 2026-08-04 leak sweep (banked on the remediation issue, [#237](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/237)): no credentials found; IP↔hostname↔hardware↔OS topology mapping in handoffs (e.g. `192.168.137.x` lines), hostnames in experiment docs, operator system username in absolute paths across 12 files including live script constants.
 - Inbound-reference audit: `docs/evidence/` 0 refs; `docs/handoffs/` 1 ADR citation (ADR-CDG-020, 3 lines, cited above); `docs/experiments/` unreferenced except `liquid-phase-decoding/` (4 ADRs + ROADMAP + ARCHITECTURE cite it).
 - `.gitignore:45-49` — the existing "Agent-ops residue (kept locally, never shipped in the public tree)" stanza this ADR's Decision 4a extends.
 
@@ -41,7 +41,7 @@ Product code, tests, examples, `decisions/` (ADRs), `ROADMAP.md`/`ARCHITECTURE.m
 
 ### 3. History is disclosed, not rewritten
 
-261 cloners already hold the git history containing the leaked material. Running `git filter-repo` (or equivalent history rewrite) would break every one of those 261 clones on next pull and would **not** un-disclose anything already fetched — the topology data is already in hands outside this repo's control. HEAD is scrubbed (the residue is removed going forward, per Decision 2). The disclosure window is named on the remediation issue (number pending). Network-side mitigation — e.g. rotating anything topology-adjacent that a leaked IP/hostname mapping could inform — is the operator's call and is out of this repo's scope; this ADR does not decide it.
+261 cloners already hold the git history containing the leaked material. Running `git filter-repo` (or equivalent history rewrite) would break every one of those 261 clones on next pull and would **not** un-disclose anything already fetched — the topology data is already in hands outside this repo's control. HEAD is scrubbed (the residue is removed going forward, per Decision 2). The disclosure window is named on the remediation issue ([#237](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/237)). Network-side mitigation — e.g. rotating anything topology-adjacent that a leaked IP/hostname mapping could inform — is the operator's call and is out of this repo's scope; this ADR does not decide it.
 
 ### 4. Enforcement surface
 
@@ -106,7 +106,7 @@ Encode the specific leaked values (the actual `192.168.137.x` range, the actual 
 
 ## Implementation Notes
 
-Downstream work, tracked on the remediation issue (number pending — implementing PR fills this citation); **not performed by this ADR.**
+Downstream work, tracked on the remediation issue ([#237](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/237)); **not performed by this ADR.**
 
 | File | Change Type | Description |
 |------|-------------|-------------|
