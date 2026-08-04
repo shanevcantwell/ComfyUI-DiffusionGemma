@@ -1,0 +1,24 @@
+name: leak-guard
+
+# Generic-pattern topology leak guard (ADR-CDG-022 Decision 4b), tied into
+# the release gate (#163) rather than run as a standalone concern — catches
+# private-IP / /home/ / /srv/dev/ path residue landing in the public tree,
+# without ever encoding a literal hostname/IP denylist (Alternative D
+# rejected — a tracked denylist of the actual sensitive values would itself
+# re-leak them the moment this workflow file is public).
+on:
+  push:
+  pull_request:
+
+jobs:
+  leak-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Run leak guard
+        run: python tools/leak_guard.py

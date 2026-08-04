@@ -29,7 +29,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Grounded defaults (see CLAUDE.md task brief / decisions/ for provenance)
 # ---------------------------------------------------------------------------
-DEFAULT_BINARY = "/srv/dev/llama.cpp-diffusiongemma/build/bin/llama-diffusion-cli"
+DEFAULT_BINARY = "<dev-root>/llama.cpp-diffusiongemma/build/bin/llama-diffusion-cli"
 DEFAULT_GGUF = (
     "/mnt/storage/LLMs/unsloth/diffusiongemma-26B-A4B-it-GGUF/"
     "diffusiongemma-26B-A4B-it-Q8_0.gguf"

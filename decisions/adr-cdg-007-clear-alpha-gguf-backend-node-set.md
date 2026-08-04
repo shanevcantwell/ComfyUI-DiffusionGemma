@@ -23,7 +23,7 @@ load seam) — the runtime with two verified integration PASSes on the 48 GB RTX
 **Why the reversal (decisive → supporting):**
 
 1. **Fork dependency is disqualifying for a public pack.** The GGUF backend is a *private, unpublished*
-   llama.cpp fork (`/srv/dev/llama.cpp-diffusiongemma`). This ADR's own **Open Question 1** flagged the
+   llama.cpp fork (`<dev-root>/llama.cpp-diffusiongemma`). This ADR's own **Open Question 1** flagged the
    fork's public/buildable status as a **blocking prerequisite, not a follow-up.** A ComfyUI-Manager
    listing cannot depend on a fork a user cannot obtain; the transformers path depends only on public HF
    weights + public `transformers`. **OQ1 is hereby resolved in the honest direction:** rather than block
@@ -67,7 +67,7 @@ has since hit a wall that only became visible when the quant options were exhaus
   same-era third-party quant, MXFP4 included. `bitsandbytes` is walled and NVFP4 is Blackwell-only.
 
 Meanwhile a different runtime **is proven running this session**: the DiffusionGemma **llama.cpp
-fork** (`/srv/dev/llama.cpp-diffusiongemma`, CLI `build/bin/llama-diffusion-cli`, entropy-bound
+fork** (`<dev-root>/llama.cpp-diffusiongemma`, CLI `build/bin/llama-diffusion-cli`, entropy-bound
 decoder in `examples/diffusion/diffusion.cpp`). Q4_K_M GGUF is ~15.6 GB — consumer-Blackwell-fittable,
 with A4B-MoE `-ngl`/`-cmoe` offload covering a 16 GB card. `tools/flipbook/flipbook.py` already drives
 it into a navigable per-step flip-book. The alpha can ship on a runtime that *works today* instead of
@@ -205,7 +205,7 @@ steering pays, stock (`IMAGE`/`STRING`) where broad composition pays.
 ## Open Questions
 
 - [ ] **(1) Is the DiffusionGemma llama.cpp fork public/buildable by a user today, or does it need
-  publishing?** The alpha's backend is `/srv/dev/llama.cpp-diffusiongemma`, a fork, not stock llama.cpp.
+  publishing?** The alpha's backend is `<dev-root>/llama.cpp-diffusiongemma`, a fork, not stock llama.cpp.
   **Resolution trigger — decides alpha shippability:** confirm the fork's public/buildable status
   before declaring the alpha shippable; if not public, publishing it (or upstreaming) is a blocking
   prerequisite, not a follow-up.
@@ -245,7 +245,7 @@ design onto a pinned-upstream-PR posture (the obtainable-by-a-user answer this A
 
 - `handoffs/2026-07-05-flipbook-and-sampler-theory.md` — the decision arc (committed)
 - `tools/flipbook/flipbook.py` — proven whole-run per-step capture over the fork CLI
-- `/srv/dev/llama.cpp-diffusiongemma` — the fork; CLI `build/bin/llama-diffusion-cli`; entropy-bound
+- `<dev-root>/llama.cpp-diffusiongemma` — the fork; CLI `build/bin/llama-diffusion-cli`; entropy-bound
   decoder `examples/diffusion/diffusion.cpp`
 - ADR-CDG-001 (socket types), ADR-CDG-002 (access path), ADR-CDG-004 (drive seam), ADR-CDG-006
   (advanced step-window sampler)

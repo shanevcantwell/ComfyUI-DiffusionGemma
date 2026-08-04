@@ -8,7 +8,7 @@ so provenance lives here instead, one section per file.
 
 ## `count_numerals_2026-07-15T23-57-39_0000.txt`
 
-- **Source:** `/srv/dev/ComfyUI/output/count_numerals_2026-07-15T23-57-39_0000.txt`
+- **Source:** `<comfyui-root>/output/count_numerals_2026-07-15T23-57-39_0000.txt`
 - **Copied:** 2026-07-16
 - **Run settings:** `EntropyBoundScheduler`, `entropy_bound=0.05`, `t_min=0.4`,
   `t_max=0.8`, `num_inference_steps_requested=48`,
@@ -20,7 +20,7 @@ so provenance lives here instead, one section per file.
 
 ## `count_numerals_2026-07-15T23-59-14_0000.txt`
 
-- **Source:** `/srv/dev/ComfyUI/output/count_numerals_2026-07-15T23-59-14_0000.txt`
+- **Source:** `<comfyui-root>/output/count_numerals_2026-07-15T23-59-14_0000.txt`
 - **Copied:** 2026-07-16
 - **Run settings:** `EntropyBoundScheduler`, `entropy_bound=0.05`, `t_min=0.4`,
   `t_max=0.8`, `num_inference_steps_requested=48`,
@@ -37,7 +37,7 @@ so provenance lives here instead, one section per file.
 
 ## `count_numerals_2026-07-16T00-36-18_0000.txt`
 
-- **Source:** `/srv/dev/ComfyUI/output/count_numerals_2026-07-16T00-36-18_0000.txt`
+- **Source:** `<comfyui-root>/output/count_numerals_2026-07-16T00-36-18_0000.txt`
 - **Copied:** 2026-07-16
 - **Run settings:** `EntropyBoundScheduler`, `entropy_bound=0.01`, `t_min=0.4`,
   `t_max=0.8`, `num_inference_steps_requested=48`,
@@ -53,7 +53,7 @@ so provenance lives here instead, one section per file.
 
 ## `count_numerals_2026-07-16T00-36-18_0009.txt`
 
-- **Source:** `/srv/dev/ComfyUI/output/count_numerals_2026-07-16T00-36-18_0009.txt`
+- **Source:** `<comfyui-root>/output/count_numerals_2026-07-16T00-36-18_0009.txt`
 - **Copied:** 2026-07-16
 - **Run settings:** `EntropyBoundScheduler`, `entropy_bound=0.1`, `t_min=0.4`,
   `t_max=0.8`, `num_inference_steps_requested=48`,

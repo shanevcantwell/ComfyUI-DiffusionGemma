@@ -55,7 +55,7 @@ dataclass, passed through untouched.
 ### Negative Consequences
 - Indirection the idiomatic inline-everything pattern avoids.
 - Two import surfaces to keep coherent. **Observed, not just anticipated
-  (2026-07-05):** ComfyUI's loader (`/srv/dev/ComfyUI/nodes.py:2226-2246`) puts
+  (2026-07-05):** ComfyUI's loader (`<comfyui-root>/nodes.py:2226-2246`) puts
   `custom_nodes/` — never the pack root — on `sys.path` and loads the pack
   under a directory-derived module name, so `nodes/`'s bare `from dgemma...`
   imports failed in production (`ModuleNotFoundError`) despite passing every

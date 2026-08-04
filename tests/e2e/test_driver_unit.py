@@ -16,7 +16,7 @@ This is deliberately separate from `test_battery.py` (the `e2e`-marked
 scenario tests, which DO need the real subprocess): here we prove the
 driver's own honesty-assertion logic is correct against known-shape
 payloads (mirroring the real `PreviewAny.main()` return shape confirmed
-against `/srv/dev/ComfyUI/comfy_extras/nodes_preview_any.py`), independent
+against `<comfyui-root>/comfy_extras/nodes_preview_any.py`), independent
 of whether a live ComfyUI is reachable.
 
 Battery P2 (issue #59, ADR-CDG-013) adds unit coverage for S2/S3/S4's

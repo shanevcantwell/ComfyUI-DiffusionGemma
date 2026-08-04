@@ -52,7 +52,7 @@ answer. The `-thinking` variant reproduces the issue #9 empty-answer signature l
 
 ## p3-trace-annotated.ui.json (2026-07-06, post-#18)
 
-Copied from `/srv/dev/ComfyUI/user/default/workflows/p3-trace-smoke_2.api.json` (the
+Copied from `<comfyui-root>/user/default/workflows/p3-trace-smoke_2.api.json` (the
 same P3 chain, valid widget arity/links/layout) and transformed in place: node titles
 renumbered (`1 - Load...`, `2 - Entropy-Bound Sampler`, `3 - Trace / Instrumentation`),
 the `DGemmaLoader` node updated to the current `INPUT_TYPES` (`repo_id`, `quant` now

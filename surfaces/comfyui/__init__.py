@@ -4,7 +4,7 @@ per-module files. Relocated from `nodes/` per ADR-CDG-008 Phase 1 (issue #52).
 Loader-context note — anticipated at scaffold time, OBSERVED 2026-07-05
 (graph smoke test failed at custom-node import; `loose-ends.md`): ComfyUI
 loads this pack as a package named after its directory path
-(`/srv/dev/ComfyUI/nodes.py:2233,2241`) and puts `custom_nodes/` — never the
+(`<comfyui-root>/nodes.py:2233,2241`) and puts `custom_nodes/` — never the
 pack root — on sys.path. Two consequences bind this package:
 
 - ComfyUI's own process has a root-level `nodes.py`; nothing here may do a

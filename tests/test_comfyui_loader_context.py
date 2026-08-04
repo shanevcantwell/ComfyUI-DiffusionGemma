@@ -7,7 +7,7 @@ the real loader while every in-repo test stayed green (pytest runs with the
 repo root on sys.path, which masks exactly this).
 
 This test simulates ComfyUI's actual load path, mirroring
-`/srv/dev/ComfyUI/nodes.py:2226-2246` mechanics precisely:
+`<comfyui-root>/nodes.py:2226-2246` mechanics precisely:
 
 - module name = the directory path with `.` → `_x_` (`nodes.py:2233`) — an
   absolute path string containing a hyphen (`ComfyUI-DiffusionGemma`), not an
@@ -43,7 +43,7 @@ module_path = {module_path!r}
 repo = os.path.abspath(module_path)
 sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != repo]
 
-# Mirror /srv/dev/ComfyUI/nodes.py:2233,2241,2244-2246 exactly.
+# Mirror <comfyui-root>/nodes.py:2233,2241,2244-2246 exactly.
 sys_module_name = module_path.replace(".", "_x_")
 spec = importlib.util.spec_from_file_location(
     sys_module_name, os.path.join(module_path, "__init__.py")

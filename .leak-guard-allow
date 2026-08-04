@@ -1,0 +1,30 @@
+# .leak-guard-allow — allowlist for tools/leak_guard.py (ADR-CDG-022 Decision 4b)
+#
+# Two forms, one per line:
+#   path:<prefix>          — suppress any hit whose file path starts with <prefix>
+#   placeholder:<string>   — suppress any hit whose matched text equals <string>
+#
+# Do NOT add real hostnames/IPs/usernames here — the allowlist itself is
+# tracked and public. Only path-prefixes and sanctioned placeholder strings
+# belong in this file.
+
+# Deferred folder — the live arm of a pending Q-2 run (ADR-CDG-022, stays
+# public until the Q-2 bracket closes; see docs/session-record.md and
+# docs/experiments/README.md). Trigger to remove this line: CDG #237
+# (https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/237)
+# marks the Q-2 bracket closed.
+path:docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/
+
+# Sanctioned placeholder used in synthetic test fixtures (tests/test_q2_preflight.py,
+# tests/test_install_script.py) — not a real path.
+placeholder:/home/user
+
+# tests/test_leak_guard.py's own positive-detection fixtures: synthetic
+# pattern-match example strings written as Python string literals to prove
+# the guard's regexes fire — none of these are real leaked values, but they
+# are structurally indistinguishable from a real leak to the generic-pattern
+# scan, so the whole file is allowlisted by path rather than value. (This
+# comment deliberately avoids repeating the literal example strings — see
+# the test file itself for what they are — since this allowlist file is
+# itself scanned and its comments are not exempt.)
+path:tests/test_leak_guard.py

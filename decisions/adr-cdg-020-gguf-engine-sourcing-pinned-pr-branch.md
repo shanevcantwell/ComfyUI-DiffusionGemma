@@ -9,7 +9,7 @@ Grounding reads (verify the current-system claims by following these):
 - #131 conformance-matrix comment (2026-08-03): core semantics identical across CDG / #24423 / #24427; divergence axis = self-conditioning signal fidelity.
 - #15 operator ruling (2026-07-06): "never a fork this project compiles and hosts."
 - `decisions/adr-cdg-007-*.md:82-145` — the preserved three-node GGUF design + its error/state/failure-path model.
-- `docs/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21` — the three packaging design questions.
+- `https://github.com/shanevcantwell/design-docs/blob/main/experiments/ComfyUI-DiffusionGemma/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21` — the three packaging design questions.
 - `ROADMAP.md:51-56` — the "rung 4" shorthand this ADR replaces with the #131 thread sequence.
 
 ---
@@ -52,7 +52,7 @@ The choice between pin candidates **#24423** (danielhanchen/Unsloth, `llama-diff
 
 ### 3. Packaging shape — the three handoff questions, decided where rung-1-independent
 
-From `docs/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21`:
+From `https://github.com/shanevcantwell/design-docs/blob/main/experiments/ComfyUI-DiffusionGemma/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21`:
 
 - **(a) Platform matrix — DECIDED (rung-1-independent).** Ship for the target population's center of mass: **CUDA on sm_75+ (Turing and up)**, source-built in CI from the pin. Rung-0 proved sm_75 CUDA build-green in 9m46s; the audience table (#131) centers on 3090/4090/4080-16GB (Ampere/Ada, sm_86/sm_89). CPU build is the fallback/CI-smoke tier (rung-0-green, 1m27s). Apple Metal and ROCm are **out of the initial matrix** — deferred to observed demand, named as an anticipated-failure boundary in §5, not built speculatively.
 - **(b) Release-asset vs registry packaging — DECIDED (rung-1-independent): release-asset, not registry-bundled.** The binary is a **checksummed GitHub Release artifact** the pack *fetches and verifies*, not a blob committed to the repo or the ComfyUI registry. Reasoning: (i) the registry/pip path is source-distribution-shaped — a ~140 KB CLI is fine but its ~15 GB model dependency and platform-specific CUDA binary are not registry idioms; (ii) a Release artifact carries its own checksum and provenance line (this is the mechanism that makes the completion-bell "replicated beyond this working tree" property true, per the curator note); (iii) it keeps the engine *fetchable-and-verifiable* rather than *vendored*, which is the §5 no-fork invariant in packaging form. The pack degrades loud if the artifact is absent or checksum-mismatched (never a silent source-build fallback that pulls unpinned upstream).
@@ -60,7 +60,7 @@ From `docs/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21`:
 
 ### 4. Supersession — ADR-CDG-007's TBD is flipped to point here
 
-This ADR **supersedes ADR-CDG-007**. Per the writing-adrs bidirectional-supersession convention, ADR-CDG-007's header `Superseded by: TBD` is edited to `Superseded by: ADR-CDG-020` (the one companion edit the convention itself authorizes; see §Implementation Notes). ADR-CDG-007's *node design* (three-node set, steering-vs-illumination socket rule, state/error/failure-path model at its lines 82–145) is **carried forward as substrate**, not discarded — what changes is the *engine-sourcing basis*: CDG-007 assumed a private local fork (`/srv/dev/llama.cpp-diffusiongemma`) and was rejected on that fork's un-obtainability (its OQ1); this ADR re-homes the same node design onto the **pinned-upstream-PR** posture, which is the obtainable-by-a-user answer OQ1 lacked.
+This ADR **supersedes ADR-CDG-007**. Per the writing-adrs bidirectional-supersession convention, ADR-CDG-007's header `Superseded by: TBD` is edited to `Superseded by: ADR-CDG-020` (the one companion edit the convention itself authorizes; see §Implementation Notes). ADR-CDG-007's *node design* (three-node set, steering-vs-illumination socket rule, state/error/failure-path model at its lines 82–145) is **carried forward as substrate**, not discarded — what changes is the *engine-sourcing basis*: CDG-007 assumed a private local fork (`<dev-root>/llama.cpp-diffusiongemma`) and was rejected on that fork's un-obtainability (its OQ1); this ADR re-homes the same node design onto the **pinned-upstream-PR** posture, which is the obtainable-by-a-user answer OQ1 lacked.
 
 ### 5. Greenfield-invariant discipline — every invariant names its anticipated failure
 
@@ -144,7 +144,7 @@ This ADR authorizes exactly two file touches at authoring time — itself, and t
 - #223 (the divergence this ADR resolves) — https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/223
 - [ggml-org/llama.cpp#24423](https://github.com/ggml-org/llama.cpp/pull/24423) (pin candidate, `c3fb972`), [#24427](https://github.com/ggml-org/llama.cpp/pull/24427) (competing candidate)
 - ADR-CDG-007 (preserved node design), ADR-CDG-002/-004 (transformers-primary posture), ADR-CDG-014 (`DiffusionFrame` wire-format / abandonability seam), ADR-CDG-018 (`loop.py` decomposition)
-- `docs/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21` (the three packaging questions)
+- `https://github.com/shanevcantwell/design-docs/blob/main/experiments/ComfyUI-DiffusionGemma/handoffs/2026-08-03-v0.5.0-released-next-kv-or-gguf.md:21` (the three packaging questions)
 
 
 ## Gate findings resolved (2026-08-04)

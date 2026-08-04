@@ -1,26 +1,0 @@
-0.00.655.952 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
-0.04.027.107 I diffusion: -n 256 -> 1 blocks, n_ubatch=2304 n_batch=2304 n_ctx=2304 (canvas_length=256)
-0.04.027.109 I diffusion: --fit has no effect here; context is sized from -n and the canvas. Set -ngl / --n-cpu-moe to control device memory.
-0.04.031.300 W sched_reserve: layer 5 is assigned to device CUDA0 but the Flash Attention tensor is assigned to device CPU (usually due to missing support)
-0.04.031.302 W sched_reserve: Flash Attention was auto, set to disabled
-0.09.541.371 I diffusion_params: steps=128 schedule=0 algorithm=4 temperature=0.800 eps=0.001000 mask_token=4
-0.09.541.391 I diffusion_eb: max_steps=48 t=[0.400,0.800] entropy_bound=0.1000 stability=1 confidence=0.0050 kv_cache=on gpu_sampling=on sample_reduce=on
-0.09.542.335 W init: embeddings required but some input tokens were not marked as outputs -> overriding
-0.09.891.383 I diffusion step: 0/48 [                                                  ] 0%0.10.073.374 I diffusion step: 1/48 [=                                                 ] 2%0.10.259.621 I diffusion step: 2/48 [==                                                ] 4%0.10.445.808 I diffusion step: 3/48 [===                                               ] 6%0.10.632.719 I diffusion step: 4/48 [====                                              ] 8%0.10.820.880 I diffusion step: 5/48 [=====                                             ] 10%0.11.009.607 I diffusion step: 6/48 [======                                            ] 12%0.11.198.839 I diffusion step: 7/48 [=======                                           ] 14%0.11.389.699 I diffusion step: 8/48 [========                                          ] 16%0.11.582.677 I diffusion step: 9/48 [=========                                         ] 18%0.11.777.286 I diffusion step: 10/48 [==========                                        ] 20%0.11.972.256 I diffusion step: 11/48 [===========                                       ] 22%0.12.167.083 I diffusion step: 12/48 [============                                      ] 25%0.12.362.288 I diffusion step: 13/48 [=============                                     ] 27%0.12.559.535 I diffusion step: 14/48 [==============                                    ] 29%0.12.757.434 I diffusion step: 15/48 [===============                                   ] 31%0.12.955.016 I diffusion step: 16/48 [================                                  ] 33%0.13.154.271 I diffusion step: 17/48 [=================                                 ] 35%0.13.353.641 I diffusion step: 18/48 [==================                                ] 37%0.13.553.068 I diffusion step: 19/48 [===================                               ] 39%0.13.752.464 I diffusion step: 20/48 [====================                              ] 41%0.13.952.364 I diffusion step: 21/48 [=====================                             ] 43%0.14.151.995 I diffusion step: 22/48 [======================                            ] 45%
-thought
-*   Input: "The lighthouse keeper counted every wave before dawn."
-    *   Nature: A single, evocative sentence.
-    *   Goal: The user is likely looking for a story continuation, an expansion, a poem, or simply a creative response based on this prompt. Since no specific instruction was given, I should provide a compelling creative response that builds on this atmosphere.
-
-    *   *Atmosphere:* Melancholic, lonely, rhythmic, obsessive, peaceful yet mysterious.
-    *   *Character:* A lighthouse keeper (dedicated, perhaps aging, solitary, observant).
-    *   *Setting:* A lighthouse, the ocean, pre-dawn blue hour.
-    *   *Action:* Counting waves (ritual, compulsion, timekeeping).
-
-    *   **Option 1: Narrative Continuation (Storytelling).** Focus on *why* they are counting. Is it a ritual? A warning? A memory?
-    *   **Option 2: Descriptive/Poetic.** Focus on the sensory details of the sea, the light, the salt.
-    *   **Option 3: Mystery/Suspense.** What happens if the waves stop? Or if the keeper misses one?
-
-       **
-total time: 4609.91ms, time per step: 200.43ms (23 steps over 1 blocks, entropy-bound)
-throughput: 55.5 tok/s (256 tok in 4609.91ms), in-step parallel 1277 tok/s (256-tok canvas x 23.0 steps/block)

@@ -1,2 +1,0 @@
-memory.used [MiB], memory.free [MiB]
-1631 MiB, 46768 MiB

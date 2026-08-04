@@ -8,7 +8,7 @@ enforcement surface for that invariant is `test_e2e_import_guard.py`, not
 this docstring; keep it that way when editing this file.
 
 Three operator-scheduled preconditions are named in issue #59 §5 / ADR-CDG-013:
-1. `/srv/dev/ComfyUI/custom_nodes/ComfyUI-DiffusionGemma` must load *this*
+1. `<comfyui-root>/custom_nodes/ComfyUI-DiffusionGemma` must load *this*
    pack's code — either a symlink resolving into this source clone, or a
    real, independent git checkout whose HEAD matches this source clone's
    HEAD (`_pack_identity()`, issue #122 — the original symlink-only check
@@ -39,7 +39,7 @@ import pytest
 
 # Overridable so this isn't hardcoded to one box's layout (the E2E-run box
 # happens to be this one, per ADR-CDG-013/issue #59's grounding pass).
-COMFYUI_ROOT = Path(os.environ.get("DGEMMA_E2E_COMFYUI_ROOT", "/srv/dev/ComfyUI"))
+COMFYUI_ROOT = Path(os.environ.get("DGEMMA_E2E_COMFYUI_ROOT", "/opt/ComfyUI"))
 COMFYUI_VENV_PYTHON = COMFYUI_ROOT / ".venv" / "bin" / "python"
 PACK_ROOT = Path(__file__).resolve().parent.parent.parent
 CUSTOM_NODES_LINK = COMFYUI_ROOT / "custom_nodes" / "ComfyUI-DiffusionGemma"

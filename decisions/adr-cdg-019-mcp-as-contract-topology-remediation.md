@@ -28,7 +28,7 @@ Extract a **primitives layer** (`dgemma_mcp/primitives.py`) that is the callable
 
 ### Package name: `dgemma_mcp/`, NOT `mcp/` (gate-ruled 2026-08-03 — VERDICT: SHADOWS)
 
-The original draft placed the primitives package at top-level `mcp/`. The design gate reproduced a **fatal package-shadow** in the repo's actual venv (`/srv/dev/shanevcantwell/ComfyUI-DiffusionGemma/.venv`, MCP SDK **v1.28.1** confirmed installed at `.venv/lib/python3.12/site-packages/mcp/`), using the exact symbols `server.py` imports and the repo's real pytest invocation (`--import-mode=importlib`, `python -m pytest` from pack root, per `pyproject.toml`'s `[tool.pytest.ini_options]`):
+The original draft placed the primitives package at top-level `mcp/`. The design gate reproduced a **fatal package-shadow** in the repo's actual venv (`<dev-root>/ComfyUI-DiffusionGemma/.venv`, MCP SDK **v1.28.1** confirmed installed at `.venv/lib/python3.12/site-packages/mcp/`), using the exact symbols `server.py` imports and the repo's real pytest invocation (`--import-mode=importlib`, `python -m pytest` from pack root, per `pyproject.toml`'s `[tool.pytest.ini_options]`):
 
 A top-level `mcp/` package at the pack root **fully shadows the installed MCP SDK** in every context that matters (pytest, `python -m` process entry point, and plain script invocation with cwd on `sys.path`).
 
