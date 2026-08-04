@@ -1,0 +1,22 @@
+{
+  "80": {
+    "inputs": {
+      "quant": "none"
+    },
+    "class_type": "DGemmaLoader",
+    "_meta": { "title": "DiffusionGemma Loader" }
+  },
+  "81": {
+    "inputs": {
+      "text": "Why do birds suddenly appear?",
+      "model": ["80", 0]
+    },
+    "class_type": "DGemmaEncode",
+    "_meta": { "title": "DiffusionGemma Encode (KV Cache) — mint" }
+  },
+  "83": {
+    "inputs": { "source": ["81", 0] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "Preview KVCache (mint-only, no Denoise door)" }
+  }
+}

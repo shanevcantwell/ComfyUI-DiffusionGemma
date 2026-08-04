@@ -92,3 +92,15 @@ Open Question #1); running it before then is expected to fail with that
 error, not to produce a (silently uninjected) result. Tier-2
 (`kv-cache-tier2.api.json`, per-layer cache surgery) is deferred (issue #62
 Q-1: out of first-implementation scope), not shipped here.
+
+## kv-cache-tier1-encode-only.api.json (issue #228 part 2)
+
+A minimal derivative of `kv-cache-tier1.api.json` that stops at the mint:
+`DGemmaLoader → DGemmaEncode → PreviewAny` on the raw `kv_cache` output
+(node 81 → node 83), omitting `DGemmaDenoise`/`DGemmaTrace` entirely. The
+full tier-1 graph's `DGemmaEncode` output has no direct preview — every
+downstream node sits behind `DGemmaDenoise`'s fail-loud `kv_cache` door
+(issue #207), so it cannot exercise Encode-only liveness independent of that
+door's contract. This graph is the standing E2E battery's `test_encode_live`
+fixture (`tests/e2e/test_battery.py`) — stable both before and after
+ADR-CDG-012 Phase 4, since it never reaches the door at all.
