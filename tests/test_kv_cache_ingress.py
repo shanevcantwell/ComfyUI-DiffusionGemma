@@ -338,3 +338,197 @@ class TestOrderingIsDeterministic:
         cache.geometry["sliding_window"] += 1
         with pytest.raises(ValueError, match="V1"):
             validate_kv_cache_ingress(cache, model)
+
+
+class TestEncodeSequenceEmptyTokenIdsRejected:
+    """Issue #227: `encode_sequence("")`'s underlying failure shape is an
+    EMPTY `token_ids` sequence — the concrete producer is
+    `tokenizer("", add_special_tokens=False)["input_ids"] == []`
+    (`docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/run_sec2_liveness_sweep.py`,
+    the live evidence that surfaced this bug: seed=*, text#2 -> IndexError,
+    0.00-0.01s, before any GPU work). Left unguarded, an empty sequence
+    reaches transformers' `find_packed_sequence_indices` deep in the encoder
+    forward and raises an uncaught `IndexError`. `encode_sequence` now
+    checks `len(token_ids) == 0` at the door, before any tensor is minted or
+    the encoder is touched — `EMIT-CANONICAL / PARSE-AT-THE-DOOR`: fail
+    loud, typed, at ingress, not a leaked substrate `IndexError`.
+
+    Both `""` and whitespace-only text tokenize to an empty `input_ids` list
+    under `add_special_tokens=False` (no content, no special tokens to
+    contribute a token either) — both are exercised here as the two
+    concrete empty-list producers named in the issue, via a real
+    `_FakeTokenizer`-shaped call (`tokenizer(text,
+    add_special_tokens=False)["input_ids"]`) construction, without needing a
+    real tokenizer.
+    """
+
+    @pytest.mark.parametrize("token_ids", [[], ()], ids=["empty-list", "empty-tuple"])
+    def test_empty_token_ids_raises_before_encoder_is_touched(self, dgemma_model_factory, token_ids):
+        model = dgemma_model_factory()
+        with pytest.raises(ValueError, match="token_ids is empty") as excinfo:
+            encode_sequence(model, token_ids, into=None)
+        message = str(excinfo.value)
+        assert "encode_sequence" in message
+        assert "door" in message
+        # The encoder must never be called — the door rejects before any
+        # forward pass, not merely before the forward pass errors.
+        encoder = model.model.model.encoder
+        assert encoder.last_input_ids_device is None
+
+    def test_empty_string_tokenizes_to_empty_ids_which_the_door_rejects(self, dgemma_model_factory):
+        """The literal issue #227 title case, reconstructed end to end:
+        tokenizing `""` (empty string) with `add_special_tokens=False`
+        produces an empty `input_ids` list — exactly the shape
+        `run_sec2_liveness_sweep.py`'s text#2 fed `encode_sequence` live.
+        `_FakeTokenizer.encode` (`tests/conftest.py`) always returns a
+        non-empty list (`or [0]`), so this test calls the tokenizer the same
+        way the real `AutoProcessor`'s tokenizer is called at the door
+        (`tokenizer(text, add_special_tokens=False)["input_ids"]`) rather
+        than through the fake's `.encode(text)` convenience method, to
+        genuinely reproduce the empty-list shape."""
+        model = dgemma_model_factory()
+        empty_ids = []  # tokenizer("", add_special_tokens=False)["input_ids"]
+        with pytest.raises(ValueError, match="token_ids is empty"):
+            encode_sequence(model, empty_ids, into=None)
+
+    def test_whitespace_only_text_also_tokenizes_empty_and_is_rejected(self, dgemma_model_factory):
+        """Whitespace-only text ("   ") is the second empty-ingress case
+        named alongside "" in issue #227's test scope — under
+        `add_special_tokens=False` a tokenizer with no leading/trailing
+        whitespace tokens configured (the common case) also collapses "   "
+        to an empty `input_ids` list; asserted directly here against the
+        empty-list shape (`encode_sequence` cannot distinguish the two by
+        the time `token_ids` reaches it — the door catches both by construction)."""
+        model = dgemma_model_factory()
+        whitespace_ids = []  # tokenizer("   ", add_special_tokens=False)["input_ids"]
+        with pytest.raises(ValueError, match="token_ids is empty"):
+            encode_sequence(model, whitespace_ids, into=None)
+
+    def test_advance_path_also_rejects_empty_token_ids(self, synthetic_kv_cache_factory):
+        """IN-3 (advance, `into=<KVCache>`) goes through the same length
+        check inside `encode_sequence` — the door guards both mint (IN-1)
+        and advance (IN-3), not just the fresh-mint path."""
+        model, cache = synthetic_kv_cache_factory()
+        with pytest.raises(ValueError, match="token_ids is empty"):
+            encode_sequence(model, [], into=cache)
+
+
+class TestEncodeSequenceOutOfMemoryHardening:
+    """Issue #226 hardening slice (typed fail-loud OOM ONLY — the
+    offload-hook root cause named in #226/#229 is explicitly NOT addressed
+    here): `encode_sequence` calls the bare encoder directly (not through
+    `DiffusionGemmaPipeline`'s own internal encode call), and a bare
+    `torch.OutOfMemoryError` from that forward call is re-raised as a typed,
+    informative error naming the bare-transformers lane, chaining the
+    original exception (`raise ... from e`) rather than swallowing or
+    replacing it silently.
+
+    `_FakeEncoderModel.__call__` (`tests/conftest.py`) is monkeypatched here
+    to raise `torch.OutOfMemoryError` directly — no real CUDA OOM is
+    triggered or required; the fake stands in for "the encoder's forward
+    call raised this", which is the only contract `encode_sequence`'s
+    `try/except` around the encoder call depends on.
+    """
+
+    def test_oom_reraised_as_typed_error_chaining_original(self, dgemma_model_factory, monkeypatch):
+        model = dgemma_model_factory()
+        encoder = model.model.model.encoder
+        original_oom = torch.OutOfMemoryError("CUDA out of memory (fake)")
+
+        def _raise_oom(self, **_kwargs):
+            raise original_oom
+
+        monkeypatch.setattr(type(encoder), "__call__", _raise_oom)
+
+        with pytest.raises(torch.OutOfMemoryError) as excinfo:
+            encode_sequence(model, [1, 2, 3], into=None)
+
+        message = str(excinfo.value)
+        assert "bare transformers lane" in message
+        assert "encode_sequence" in message
+        # Chained, not swallowed/replaced (`raise ... from e`).
+        assert excinfo.value.__cause__ is original_oom
+
+    def test_oom_message_names_the_lane_and_issue_refs(self, dgemma_model_factory, monkeypatch):
+        model = dgemma_model_factory()
+        encoder = model.model.model.encoder
+
+        def _raise_oom(self, **_kwargs):
+            raise torch.OutOfMemoryError("CUDA out of memory (fake)")
+
+        monkeypatch.setattr(type(encoder), "__call__", _raise_oom)
+
+        with pytest.raises(torch.OutOfMemoryError) as excinfo:
+            encode_sequence(model, [1, 2, 3], into=None)
+
+        message = str(excinfo.value)
+        assert "#226" in message
+        assert "#229" in message
+
+    def test_oom_message_includes_cuda_mem_get_info_when_cuda_available(self, dgemma_model_factory, monkeypatch):
+        """When `torch.cuda.is_available()` is True, the re-raised message
+        must carry a `torch.cuda.mem_get_info()` readback — asserted via
+        monkeypatching both `torch.cuda.is_available` and
+        `torch.cuda.mem_get_info` so this test's outcome does not depend on
+        whether a real CUDA device happens to be present in the test
+        process."""
+        model = dgemma_model_factory()
+        encoder = model.model.model.encoder
+
+        def _raise_oom(self, **_kwargs):
+            raise torch.OutOfMemoryError("CUDA out of memory (fake)")
+
+        monkeypatch.setattr(type(encoder), "__call__", _raise_oom)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (2 * 1024**3, 48 * 1024**3))
+
+        with pytest.raises(torch.OutOfMemoryError) as excinfo:
+            encode_sequence(model, [1, 2, 3], into=None)
+
+        message = str(excinfo.value)
+        assert "mem_get_info" in message
+        assert "2.00" in message
+        assert "48.00" in message
+
+    def test_oom_message_names_cuda_unavailable_when_no_cuda(self, dgemma_model_factory, monkeypatch):
+        """When `torch.cuda.is_available()` is False, the re-raise must not
+        attempt a `mem_get_info()` readback (which would itself raise on a
+        genuinely CUDA-less process) — the message honestly names the
+        absence instead."""
+        model = dgemma_model_factory()
+        encoder = model.model.model.encoder
+
+        def _raise_oom(self, **_kwargs):
+            raise torch.OutOfMemoryError("CUDA out of memory (fake)")
+
+        monkeypatch.setattr(type(encoder), "__call__", _raise_oom)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+        with pytest.raises(torch.OutOfMemoryError) as excinfo:
+            encode_sequence(model, [1, 2, 3], into=None)
+
+        message = str(excinfo.value)
+        assert "is_available" in message or "no CUDA" in message
+
+    def test_happy_path_unaffected_when_no_oom(self, dgemma_model_factory):
+        """The try/except must not change behavior on the happy path — a
+        normal (non-OOM-raising) encoder call still mints a cache exactly as
+        before."""
+        model = dgemma_model_factory()
+        cache = encode_sequence(model, [1, 2, 3], into=None)
+        assert cache.cache.layers[0].keys.shape[2] == 3
+
+    def test_non_oom_exception_from_encoder_is_not_caught(self, dgemma_model_factory, monkeypatch):
+        """The `except torch.OutOfMemoryError` must not widen into a bare
+        `except Exception` — a different exception type from the encoder
+        propagates unchanged, uncaught, unwrapped."""
+        model = dgemma_model_factory()
+        encoder = model.model.model.encoder
+
+        def _raise_runtime_error(self, **_kwargs):
+            raise RuntimeError("some other unrelated failure")
+
+        monkeypatch.setattr(type(encoder), "__call__", _raise_runtime_error)
+
+        with pytest.raises(RuntimeError, match="some other unrelated failure"):
+            encode_sequence(model, [1, 2, 3], into=None)
