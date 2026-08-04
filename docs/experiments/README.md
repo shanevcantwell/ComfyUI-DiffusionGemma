@@ -14,9 +14,9 @@ citation fan-in evacuated to the private annex,
 | directory | one-line finding | status/date |
 |---|---|---|
 | `liquid-phase-decoding/` | reframes DiffusionGemma's sharp commit threshold as a missing liquid phase between steam (renoised) and frozen (committed) states; 5 H0s (control/observe/project/substrate/cache) | untested, minted 2026-07-12 |
-| `2026-08-04-adr-cdg-012-q2-smoke/` | Q-2 window preflight / live smoke run | **deferred** — stays public until the Q-2 bracket closes (live arm of a pending run), then reassessed under the same citation-fan-in test |
 
 Evacuated (raw-run residue, no inbound citations — now in the annex): the 2026-08-04 issue-131
 rung-1 GGUF probe, the 2026-07-30 AutoRound unified-path split check, the bf16-fit-mechanism
-run, and three DiffusionGemma numeral/KV-authorship H0 sweeps (2026-07-14, 2026-07-15,
-2026-07-16).
+run, three DiffusionGemma numeral/KV-authorship H0 sweeps (2026-07-14, 2026-07-15,
+2026-07-16), and the Q-2 window preflight / live smoke run (`2026-08-04-adr-cdg-012-q2-smoke/`,
+deferred until the Q-2 bracket closed at Phase-4 merge `ac3c832`, then evacuated per CDG #237).

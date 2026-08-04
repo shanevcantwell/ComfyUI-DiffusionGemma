@@ -8,13 +8,6 @@
 # tracked and public. Only path-prefixes and sanctioned placeholder strings
 # belong in this file.
 
-# Deferred folder — the live arm of a pending Q-2 run (ADR-CDG-022, stays
-# public until the Q-2 bracket closes; see docs/session-record.md and
-# docs/experiments/README.md). Trigger to remove this line: CDG #237
-# (https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/237)
-# marks the Q-2 bracket closed.
-path:docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/
-
 # Sanctioned placeholder used in synthetic test fixtures (tests/test_q2_preflight.py,
 # tests/test_install_script.py) — not a real path.
 placeholder:/home/user
