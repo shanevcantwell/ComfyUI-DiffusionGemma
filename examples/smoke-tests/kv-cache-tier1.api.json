@@ -50,5 +50,10 @@
     "inputs": { "source": ["85", 1] },
     "class_type": "PreviewAny",
     "_meta": { "title": "Preview Trace Summary" }
+  },
+  "87": {
+    "inputs": { "source": ["82", 2] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "Preview canvas_trace (injected_cache_provenance readback)" }
   }
 }

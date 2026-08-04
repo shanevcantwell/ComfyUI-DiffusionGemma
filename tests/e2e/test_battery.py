@@ -38,13 +38,14 @@ the standing Encode scenario, promoting the ad-hoc gate-run-4 "S-B" probe
 issue #145) into this battery so encode liveness has a standing enforcement
 surface rather than a result banked only in a handoff doc. Split across the
 `dgemma/loop.py` `kv_cache` door's ADR-CDG-012 Phase 4 boundary
-(`decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md`), same
-`xfail(strict=True)` convention as S3: `test_encode_live` (stable before
-and after Phase 4 — it never reaches the `kv_cache` door) and
-`test_kv_door_contract` (asserts TODAY's fail-loud contract, marked to flip
-when issue #62
-(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62)
-Phase 4 lands).
+(`decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md`): `test_encode_live`
+(stable before and after Phase 4 — it never reaches the `kv_cache` door,
+`xfail(strict=True)`-free, same S1/S2/S4 shape) and `test_kv_door_contract`
+(pre-Phase-4: asserted the fail-loud contract under the same
+`xfail(strict=True)` convention as S3; issue #62
+(https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62) Phase 4
+landing — this module's own PR — flips it to assert the drive body's
+`success` contract instead and removes that marker).
 """
 from __future__ import annotations
 
@@ -184,37 +185,26 @@ def test_encode_live(comfyui_server: ComfyUIServer) -> None:
     driver.assert_encode_live_honest(history_entry, _ENCODE_KV_CACHE_PREVIEW_NODE_ID)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ADR-CDG-012 Phase 4 (issue #62 "
-        "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62) "
-        "is not yet landed: dgemma/loop.py's kv_cache-is-not-None block "
-        "(currently lines 422-432) fails loud with NotImplementedError by "
-        "design (issue #207) rather than silently ignoring an injected "
-        "cache — expected RED until Phase 4's decoder-drive body lands "
-        "(same issue #228 part 2 convention as test_s3_thinking_toggle_"
-        "honest's issue #9 marker above); strict=True so an unexpected "
-        "PASS (the door quietly starting to succeed) fails loudly and "
-        "forces this marker's removal as part of Phase 4's own PR."
-    ),
-)
 def test_kv_door_contract(comfyui_server: ComfyUIServer) -> None:
-    """The KV-cache door's TODAY contract (#228 part 2): the full
-    `kv-cache-tier1.api.json` graph (`DGemmaLoader -> DGemmaEncode ->
-    DGemmaDenoise -> DGemmaTrace`) surfaces `dgemma/loop.py:422-432`'s
-    fail-loud `NotImplementedError` as a failed execution — a well-formed
-    injected `kv_cache` passes ingress validation (V1-V6) and is then
-    rejected rather than silently run uninjected (issue #207's
-    operator-ruled discipline). Asserts `status.status_str == "error"` with
-    an `execution_error` status message naming `NotImplementedError` and
-    Phase 4.
+    """The KV-cache door's Phase 4 contract (issue #62
+    https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/62,
+    ADR-CDG-012 §D.1 IN-2 / §D.2 OUT-3): the full `kv-cache-tier1.api.json`
+    graph (`DGemmaLoader -> DGemmaEncode -> DGemmaDenoise -> DGemmaTrace`)
+    now completes via the live decoder-drive body
+    (`dgemma.loop._run_pipeline_with_injected_cache`) instead of surfacing
+    the retired `dgemma/loop.py` fail-loud `NotImplementedError` (issue
+    #207) — a well-formed injected `kv_cache` passes ingress validation
+    (V1-V6) and is genuinely consumed. Asserts `status.status_str ==
+    "success"`, `CanvasState.steps_used > 0`, and the OUT-3 stamp
+    (`CanvasTrace.injected_cache_provenance`) is non-`None` — the black-box
+    signature that this run actually drove off the injected cache, not
+    merely that it happened to succeed.
 
-    THIS TEST FLIPS at ADR-CDG-012 Phase 4: once the decoder-drive body
-    lands, this same graph reports `success` instead, and the `xfail`
-    marker above must be removed as part of that fix's own PR — the same
-    strict-xfail convention `test_s3_thinking_toggle_honest` uses for issue
-    #9."""
+    THIS TEST FLIPPED at ADR-CDG-012 Phase 4 (this PR): the pre-Phase-4
+    `xfail(strict=True)` marker (issue #228 part 2, same convention as
+    `test_s3_thinking_toggle_honest`'s issue #9 marker above) is removed
+    here as part of the Phase 4 drive body's own PR, per that marker's own
+    documented flip discipline."""
     workflow = driver.load_workflow("kv-cache-tier1.api.json")
 
     prompt_id = driver.submit_prompt(

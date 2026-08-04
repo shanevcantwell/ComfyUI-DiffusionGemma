@@ -457,52 +457,77 @@ def assert_encode_live_honest(
     return cumulative_length
 
 
-def assert_kv_door_contract_honest(history_entry: dict[str, Any]) -> None:
-    """The KV-cache door's TODAY contract (#228 part 2, `dgemma/loop.py`
-    `run_diffusion`'s `kv_cache is not None` block, currently lines
-    422-432): a well-formed injected `kv_cache` passes ingress validation
-    (V1-V6) and then fails loud with `NotImplementedError` naming
-    ADR-CDG-012 Phase 4 / issue #62 — the live decoder-drive body that would
-    actually honor the injected cache is not built yet (issue #207's
-    operator-ruled discipline: never silently degrade to an uninjected run).
+# `kv-cache-tier1.api.json`'s own node ids (examples/README.md's provenance
+# entry, also the amended Q-2 smoke protocol's artifact-capture mapping,
+# `docs/experiments/2026-08-04-adr-cdg-012-q2-smoke/`): 83 previews the
+# STRING text output, 84 the CanvasState repr, 86 the DGemmaTrace summary
+# (`DGemmaTrace`'s own rendered analysis — does NOT surface
+# `injected_cache_provenance`, which is a `CanvasTrace` dataclass field, not
+# part of that node's summary text). Node 87 (the smoke protocol's
+# `[PROTOCOL-CHOICE] #5` fallback, exercised live in ledger #240 run
+# 2026-08-04b) previews `DGemmaDenoise`'s raw `canvas_trace` output (index
+# 2) directly — its auto-generated dataclass repr is where OUT-3's
+# `injected_cache_provenance` is actually cold-reader-parseable. Deliberately
+# NOT `STRING_PREVIEW_NODE_ID`/`CANVAS_STATE_PREVIEW_NODE_ID` above — those
+# are bound to the unrelated ping-smoke/p3-trace fixtures (same discipline
+# `assert_encode_live_honest`'s docstring already states for this fixture
+# family).
+KV_DOOR_STRING_PREVIEW_NODE_ID = "83"
+KV_DOOR_CANVAS_STATE_PREVIEW_NODE_ID = "84"
+KV_DOOR_TRACE_SUMMARY_PREVIEW_NODE_ID = "86"
+KV_DOOR_CANVAS_TRACE_PREVIEW_NODE_ID = "87"
 
-    The full `kv-cache-tier1.api.json` graph wires this: `DGemmaDenoise`
-    (node 82) is the node this raises from; the ComfyUI executor reports the
-    whole prompt as `status.status_str == "error"` and records an
-    `execution_error` status message naming the failing node and exception
-    (`server.py:handle_execution_error`) — this assertion reads exactly that
-    black-box shape, not the exception object itself (the e2e tier never
-    imports `dgemma`).
 
-    THIS TEST IS EXPECTED TO FLIP at ADR-CDG-012 Phase 4 (issue #62): once
-    the decoder-drive body lands, this same graph will report `success`
-    instead, and this assertion becomes the wrong one — the calling test in
-    `test_battery.py` marks that flip with `xfail(strict=True)`, the same
-    convention `test_s3_thinking_toggle_honest` uses for issue #9."""
+def assert_kv_door_contract_honest(history_entry: dict[str, Any]) -> tuple[str, str]:
+    """The KV-cache door's Phase 4 contract (issue #62, ADR-CDG-012 §D.1
+    IN-2 / §D.2 OUT-3): a well-formed injected `kv_cache` passes ingress
+    validation (V1-V6) and the live decoder-drive body
+    (`dgemma.loop._run_pipeline_with_injected_cache`) honors it —
+    `DGemmaDenoise` (node 82) completes rather than raising issue #207's
+    retired `NotImplementedError`.
+
+    The full `kv-cache-tier1.api.json` graph wires this:
+    `DGemmaLoader -> DGemmaEncode -> DGemmaDenoise -> DGemmaTrace`. Checks:
+    `status.status_str == "success"`; the STRING preview (node 83) is
+    present (may legitimately be empty/incoherent — the Q-2 smoke's own
+    recorded-not-gating observation, ledger #240 run 2026-08-04b, is that
+    with-cache coherence is mixed; this contract only asserts the run
+    COMPLETED and the cache was genuinely consumed, not answer quality); the
+    `CanvasState` repr's `steps_used` (node 84) is positive; and the
+    `DGemmaTrace` summary (node 86) shows a non-`None`
+    `injected_cache_provenance` — the OUT-3 stamp, the black-box signature
+    that this run actually carries injected-cache identity, not merely that
+    it happened to succeed.
+
+    THIS ASSERTION REPLACED the pre-Phase-4 fail-loud contract (issue #228
+    part 2) once the decoder-drive body landed — the calling test in
+    `test_battery.py` un-marks that flip (removes the `xfail(strict=True)`
+    issue #207/#62 marker), the same convention `test_s3_thinking_toggle_
+    honest` documents for issue #9's eventual fix.
+
+    Returns `(rendered_string_text, canvas_state_repr)` on success."""
     status = history_entry.get("status", {})
-    assert status.get("status_str") == "error", (
-        "expected the kv_cache door to fail the run (ADR-CDG-012 Phase 4 "
-        f"not yet landed), but ComfyUI reported: {status}"
+    assert status.get("status_str") == "success", (
+        "expected the kv_cache door to complete via the Phase 4 drive body, "
+        f"but ComfyUI reported: {status}"
     )
 
-    messages = status.get("messages", [])
-    error_messages = [
-        data
-        for event, data in messages
-        if event == "execution_error" and isinstance(data, dict)
-    ]
-    assert error_messages, (
-        f"status_str=='error' but no 'execution_error' status message found: {messages!r}"
+    outputs = history_entry.get("outputs", {})
+    rendered_text = _preview_any_text(outputs, KV_DOOR_STRING_PREVIEW_NODE_ID, "STRING")
+    canvas_state_text = _preview_any_text(
+        outputs, KV_DOOR_CANVAS_STATE_PREVIEW_NODE_ID, "CanvasState"
+    )
+    canvas_trace_text = _preview_any_text(
+        outputs, KV_DOOR_CANVAS_TRACE_PREVIEW_NODE_ID, "CanvasTrace"
     )
 
-    exception_types = {msg.get("exception_type") for msg in error_messages}
-    exception_messages = " ".join(str(msg.get("exception_message", "")) for msg in error_messages)
-    assert "NotImplementedError" in exception_types, (
-        "expected the kv_cache door's NotImplementedError, got exception "
-        f"type(s) {exception_types} instead: {error_messages!r}"
+    steps_used = parse_canvas_state_field(canvas_state_text, "steps_used", "int")
+    assert steps_used > 0, f"steps_used should be positive: {canvas_state_text!r}"
+
+    assert "injected_cache_provenance=None" not in canvas_trace_text, (
+        "OUT-3 stamp missing: CanvasTrace reports injected_cache_provenance="
+        "None on a WITH-cache run — the drive body ran but did not stamp "
+        f"injection identity: {canvas_trace_text!r}"
     )
-    assert "Phase 4" in exception_messages, (
-        "the NotImplementedError fired, but its message no longer names "
-        f"Phase 4 as the enablement gate — has the door's wording changed "
-        f"out from under this contract test? {exception_messages!r}"
-    )
+
+    return rendered_text, canvas_state_text

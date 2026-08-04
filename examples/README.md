@@ -70,26 +70,28 @@ the operator's to run.
 in the ComfyUI canvas (Workflow → Open) before `p2-knobs-smoke`/`p3-trace-smoke` — it's
 annotated to teach the graph, not just to smoke-test it.
 
-## kv-cache-tier1.api.json (ADR-CDG-012, issue #62 Phase 3)
+## kv-cache-tier1.api.json (ADR-CDG-012, issue #62 Phase 3/4)
 
 The `KV_CACHE` seam's DV.2 minimum: the tier-1 honest-cache path —
 `DGemmaLoader → DGemmaEncode` (mints a `DGEMMA_KV_CACHE` from a prompt) `→
 DGemmaDenoise` (consumes the injected cache) `→ DGemmaTrace` (reads back
 `injected_cache_provenance`, OUT-3), with `PreviewAny` on the decoded text
-and `CanvasState`. Statically validated by `tests/test_kv_cache_workflows.py`
-(class_type resolution, required-input completeness, wired-socket-type
-round-trip against the live node definitions).
+and `CanvasState` (nodes 83/84), plus a `PreviewAny` directly on
+`DGemmaDenoise`'s raw `canvas_trace` output (node 87 — OUT-3's
+`injected_cache_provenance` is a `CanvasTrace` dataclass field, not part of
+`DGemmaTrace`'s own rendered summary at node 86, so node 87 is the
+cold-reader-parseable readback for it). Statically validated by
+`tests/test_kv_cache_workflows.py` (class_type resolution, required-input
+completeness, wired-socket-type round-trip against the live node
+definitions).
 
-**Running this graph against a live ComfyUI instance today raises by
-design** (issue #207, operator ruling 2026-08-01): `DGemmaDenoise`'s
-`kv_cache` door validates the injected cache, then fails loud with a
-`NotImplementedError` naming issue #62 Phase 4 — the live decoder-drive body
-that would actually honor an injected cache is not built yet, so the pack
-never lets a well-formed `KV_CACHE` payload pass through to a silently
-uninjected run. This graph stays shipped as the DV.2 reference wiring for
-when Phase 4 lands (gated on ADR-CDG-012's real-weights de-risk smoke test,
-Open Question #1); running it before then is expected to fail with that
-error, not to produce a (silently uninjected) result. Tier-2
+**Phase 4 landed** (issue #62): `DGemmaDenoise`'s `kv_cache` door validates
+the injected cache, then drives the decoder off it via the live drive body
+(`dgemma.loop._run_pipeline_with_injected_cache`) instead of issue #207's
+retired fail-loud `NotImplementedError`. Running this graph against a live
+ComfyUI instance now produces a result conditioned by the injected cache
+(coherence not guaranteed — see ADR-CDG-012's Q-2 smoke recorded-not-gating
+observation, ledger #240 run 2026-08-04b). Tier-2
 (`kv-cache-tier2.api.json`, per-layer cache surgery) is deferred (issue #62
 Q-1: out of first-implementation scope), not shipped here.
 
