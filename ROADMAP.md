@@ -132,8 +132,8 @@ tag.
 - **Next bracket — topology (version minted at opening):**
   [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
   (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
-  finding I1) → topology remediation (#138), import-gate consolidation (#57),
-  and the interrupt fix (#140, rides the restructure per operator 2026-08-01).
+  finding I1) → topology remediation (#138), import-gate consolidation (#57).
+  The interrupt fix (#140) is **closed** (2026-08-05) — no longer rides here.
 - **Lifecycle proposal pending:**
   [ADR-CDG-021](decisions/adr-cdg-021-per-surface-vram-tenancy-ownership.md)
   (per-surface VRAM tenancy — MCP/transformers lane may OOM fail-loud;
@@ -144,16 +144,18 @@ tag.
   [ADR-CDG-012](decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md)
   Phase 4 landed `ac3c832` (PR #242): the Q-2 real-weights de-risk smoke
   PASSed (#62), and the decoder is now genuinely driven off injected caches,
-  composed with a templated prompt turn per ADR-CDG-024 above. #47's
-  known-provenance cache-perturbation experiments are open, unlocked by
-  the closed composition bracket.
-- **Release line — v0.6.0.** Snaps after PR #270 (the #263/#265 interim
-  guards) merges, through #163's release gate: a seat-run fresh-install +
-  live smoke on the dev host before the operator sees a version. #196's
-  version-bump/tag-timing question resolves in that same act (mint the
-  literal and the tag at gate PASS). The release's known limitations are
-  exactly the guarded #263/#265 pair above plus the standing quant/GGUF
-  state (#264-gated AutoRound, #131-parked GGUF, bf16-only working path).
+  composed with a templated prompt turn per ADR-CDG-024 above. #47
+  (known-provenance cache-perturbation) is **closed** (2026-08-05); its
+  Tier-2 remainder is tracked by #260, parked above.
+- **Release line — v0.5.2** (operator ruling: "0.5.0 was refactor and this
+  is activating latent functionality"). Snaps after PR #270 (the #263/#265
+  interim guards) merges, through #163's release gate: a seat-run
+  fresh-install + live smoke on the dev host before the operator sees a
+  version. #196's version-bump/tag-timing question resolves in that same
+  act (mint the literal and the tag at gate PASS). The release's known
+  limitations are exactly the guarded #263/#265 pair above plus the
+  standing quant/GGUF state (#264-gated AutoRound, #131-parked GGUF,
+  bf16-only working path).
 - **#175 — in-UI node explanations.** Substantially delivered by PR #270's
   tooltip/`DESCRIPTION` build-out (the `DGemmaDenoise` prompt/kv_cache
   composition-vs-exclusivity language, the guard-rejection naming) —
