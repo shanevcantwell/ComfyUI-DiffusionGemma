@@ -281,6 +281,93 @@ class TestQuantAutoroundWithUnquantizedCheckpoint:
 
 
 # ---------------------------------------------------------------------------
+# Mismatch direction 3 (issue #210): checkpoint declares a DIFFERENT
+# quant backend than the one requested — not just "quantized vs not".
+# ---------------------------------------------------------------------------
+
+class TestBackendAwareMismatch:
+    """The pre-#210 guard only tested `quant_method is None` vs not-None.
+    A checkpoint declaring a non-AutoRound `quant_method` (e.g. "gptq" —
+    note AutoRound itself can also export GPTQ-format checkpoints) passed
+    the old guard under quant='autoround' and crashed unhandled deep in
+    from_pretrained. The guard must compare the declared method against the
+    accepted set for the requested mode, not just check for presence."""
+
+    def test_gptq_checkpoint_under_quant_autoround_raises(self, monkeypatch):
+        """A GPTQ-format checkpoint is not an AutoRound checkpoint — the
+        autoround patch path does not know how to deserialize it."""
+        _patch_autoconfig(monkeypatch, quantization_config={"quant_method": "gptq"})
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _check_quant_checkpoint_match("some/gptq-checkpoint", "autoround", False)
+
+        message = str(excinfo.value)
+        assert "gptq" in message
+        assert "quant='autoround'" in message
+        assert "some/gptq-checkpoint" in message
+
+    def test_gptq_checkpoint_under_quant_autoround_names_accepted_set(
+        self, monkeypatch
+    ):
+        _patch_autoconfig(monkeypatch, quantization_config={"quant_method": "gptq"})
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _check_quant_checkpoint_match(DEFAULT_REPO_ID, "autoround", False)
+
+        message = str(excinfo.value)
+        assert "auto-round" in message  # the accepted set is named
+
+    def test_gptq_checkpoint_under_quant_autoround_via_object_config(
+        self, monkeypatch
+    ):
+        """Object-shaped quantization_config (some transformers versions),
+        mirroring TestQuantizedCheckpointWithQuantNone's coverage."""
+        _patch_autoconfig(monkeypatch, quantization_config=_FakeQuantConfig("gptq"))
+
+        with pytest.raises(RuntimeError, match="gptq"):
+            _check_quant_checkpoint_match(DEFAULT_REPO_ID, "autoround", False)
+
+    def test_gptq_checkpoint_under_non_matching_quant_none_raises(
+        self, monkeypatch
+    ):
+        """The mirror direction: a checkpoint declaring a non-AutoRound
+        backend (here "gptq") loaded with a non-matching request — quant='none'
+        — still raises via direction 1, which is backend-agnostic (any
+        non-None declared_method + quant='none' is a mismatch). The gptq
+        literal (not "auto-round") is what makes this satisfy #210's "both
+        directions with a non-AutoRound quant_method" acceptance criterion —
+        proving the none-direction guard is backend-agnostic, not AutoRound-
+        specific."""
+        _patch_autoconfig(
+            monkeypatch, quantization_config={"quant_method": "gptq"}
+        )
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _check_quant_checkpoint_match(DEFAULT_REPO_ID, "none", False)
+
+        message = str(excinfo.value)
+        assert "gptq" in message
+        assert "quant='none'" in message
+
+    def test_full_load_model_raises_before_from_pretrained(self, monkeypatch):
+        """End-to-end: load_model() itself raises via the guard on a
+        backend mismatch, never reaching from_pretrained (issue #210's
+        named failure mode: an unhandled crash deep inside the load)."""
+        _patch_autoconfig(monkeypatch, quantization_config={"quant_method": "gptq"})
+
+        def unreachable_from_pretrained(repo_id, **kwargs):
+            pytest.fail("from_pretrained must not be called past a guard raise")
+
+        monkeypatch.setattr(
+            "dgemma.model.DiffusionGemmaForBlockDiffusion.from_pretrained",
+            unreachable_from_pretrained,
+        )
+
+        with pytest.raises(RuntimeError, match="gptq"):
+            load_model(repo_id="some/gptq-checkpoint", quant="autoround")
+
+
+# ---------------------------------------------------------------------------
 # Matched configs: pass-through, no raise
 # ---------------------------------------------------------------------------
 

@@ -95,6 +95,14 @@ AUTOROUND_REPO_ID = "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound"
 
 _QUANT_CHOICES = ("none", "autoround")
 
+# ONE-MINT: the accepted checkpoint-declared `quantization_config.quant_method`
+# values for each `quant=...` mode (issue #210). `quant="autoround"` accepts
+# ONLY "auto-round" — a checkpoint declaring any other backend (e.g. "gptq",
+# which AutoRound itself can also export) is a mismatch, not a silent pass.
+_ACCEPTED_QUANT_METHODS = {
+    "autoround": frozenset({"auto-round"}),
+}
+
 # ONE-MINT: the widget default (nodes/loader.py) and this function's own
 # default both source from here, so there is exactly one place that decides
 # what a fresh graph starts with.
@@ -365,15 +373,19 @@ def _checkpoint_quant_method(repo_id: str, local_files_only: bool) -> tuple[bool
 def _check_quant_checkpoint_match(
     repo_id: str, quant: str, local_files_only: bool
 ) -> None:
-    """PRE-FLIGHT guard (issue #141): reject a `quant=...` / checkpoint
-    mismatch BEFORE the blocking `from_pretrained` call.
+    """PRE-FLIGHT guard (issue #141; backend-aware per issue #210): reject a
+    `quant=...` / checkpoint mismatch BEFORE the blocking `from_pretrained`
+    call.
 
     Root cause this prevents: an AutoRound INT4 checkpoint loaded with
     quant="none" hangs permanently — transformers deserializes INT4 data
     (`qweight`/`qzeros`) as bf16 tensors with no error surface, just a
     freeze that requires killing ComfyUI. Symmetric in the other direction
-    too: quant="autoround" against an unquantized checkpoint is also a
-    silent-wrong-load risk, not just the INT4-into-bf16 hang.
+    too: quant="autoround" against a checkpoint whose declared
+    `quant_method` is not in `_ACCEPTED_QUANT_METHODS["autoround"]` — either
+    absent entirely, or a *different* declared backend (e.g. "gptq", which
+    AutoRound itself can also export) — is also a silent-wrong-load risk,
+    not just the no-config case.
 
     Best-effort by construction: `_checkpoint_quant_method` never blocks or
     raises on its own account (an unreadable config returns
@@ -398,16 +410,31 @@ def _check_quant_checkpoint_match(
             "or choose an unquantized checkpoint."
         )
 
-    if declared_method is None and quant == "autoround":
-        raise RuntimeError(
-            f"quant='autoround' was passed but checkpoint {repo_id!r} has no "
-            "quantization_config (confirmed absent, not just unread). Loading an "
-            "unquantized checkpoint under the autoround path applies patches meant "
-            "for INT4 W4A16 weights to bf16 weights, which is not a supported "
-            "combination. "
-            "Remedy: pass quant='none' for this checkpoint, or point repo_id at a "
-            "pre-quantized AutoRound checkpoint (e.g. AUTOROUND_REPO_ID)."
-        )
+    if quant == "autoround":
+        accepted = _ACCEPTED_QUANT_METHODS["autoround"]
+        if declared_method not in accepted:
+            if declared_method is None:
+                raise RuntimeError(
+                    f"quant='autoround' was passed but checkpoint {repo_id!r} has no "
+                    "quantization_config (confirmed absent, not just unread). Loading "
+                    "an unquantized checkpoint under the autoround path applies "
+                    "patches meant for INT4 W4A16 weights to bf16 weights, which is "
+                    "not a supported combination. "
+                    "Remedy: pass quant='none' for this checkpoint, or point repo_id "
+                    "at a pre-quantized AutoRound checkpoint (e.g. AUTOROUND_REPO_ID)."
+                )
+            raise RuntimeError(
+                f"quant='autoround' was passed but checkpoint {repo_id!r} declares "
+                f"quantization_config.quant_method={declared_method!r}, not one of "
+                f"the accepted methods {sorted(accepted)!r} for the autoround load "
+                "path. The autoround patches target AutoRound-produced INT4 W4A16 "
+                f"weights specifically; a checkpoint quantized with {declared_method!r} "
+                "is a different on-disk format the autoround path does not know how "
+                "to deserialize. "
+                "Remedy: pass quant='none' if this checkpoint has its own supported "
+                "load path, or point repo_id at a pre-quantized AutoRound checkpoint "
+                "(e.g. AUTOROUND_REPO_ID)."
+            )
 
 
 def _retie_lm_head(model) -> None:
