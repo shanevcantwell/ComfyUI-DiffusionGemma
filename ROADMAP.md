@@ -116,12 +116,25 @@ tag.
   considering. **bf16 (`quant="none"`) remains the only working load path**
   today — see #269 (merged, `0d348ea`) for the full corrected quant/GGUF
   ground state on `README.md`/`AGENTS.md`.
-- **#131 — GGUF rung-1: parked until an operator-scheduled GPU window.**
-  Read as parked, not in-flight: rung-0 build is green (`c3fb972`, pinned
-  upstream draft-PR branch off ggml-org/llama.cpp#24423, not owned code),
-  but the rung-1 inference/telemetry probe has not run. [ADR-CDG-020](decisions/adr-cdg-020-gguf-engine-sourcing-pinned-pr-branch.md)
-  stays **proposed** — ratification and the #24423-vs-#24427 pin choice
-  wait on that probe's readback, which waits on the GPU window.
+- **#131 — GGUF is the audience path and a necessity, not an option.**
+  Operator ruling, 2026-08-03 (#131), reaffirmed 2026-08-05, quoted verbatim:
+  *"GGUF is necessary, even if it will be awkward."* The demand evidence is
+  concrete, not assumed: repo-traffic over the 14-day window ending
+  2026-08-05 shows `/issues/131` as the **most-read content in the repo** —
+  45 views / 33 unique visitors, ~4× the Overview page's uniques — the
+  audience is queued at exactly this gate, on top of the standing 52.7k
+  monthly Unsloth-GGUF download figure already logged on the issue.
+  The awkwardness is named, not papered over: the engine is consumed as a
+  **pinned upstream draft-PR branch** (ggml-org/llama.cpp#24423 lineage,
+  checksummed build, never an owned fork, per
+  [ADR-CDG-020](decisions/adr-cdg-020-gguf-engine-sourcing-pinned-pr-branch.md)),
+  GPU tenancy on the single dev card means rung-1 needs a scheduled window
+  (nothing else may hold the card during the probe), and the build carries
+  `sm_75` legs. The honest gate stands as-is: rung-0 build is green
+  (`c3fb972`), but the rung-1 inference/telemetry probe has not run, and
+  ADR-CDG-020 stays **proposed** — ratification and the #24423-vs-#24427 pin
+  choice wait on that probe's readback. Net posture: **queued as
+  necessary — the next GPU window claims it**, not parked.
 - **Salience debt — reconciled as sibling ungated items.** #243 (`dgemma/loop.py`
   drifted to ~908 lines / ~12k tokens, past ADR-CDG-018's 5k threshold) and
   #219 (decompose `model.py` + evacuate prose from `loop.py`/`types.py`,
