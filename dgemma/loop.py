@@ -82,8 +82,8 @@ from .excision import (  # noqa: E402
     resolve_vocab_size,
 )
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
-from .ingress import reject_prompt_and_kv_cache, validate_ingress  # noqa: E402
-from .kv_cache import validate_kv_cache_ingress  # noqa: E402
+from .ingress import validate_ingress  # noqa: E402
+from .kv_cache import prefill_templated_turn, validate_kv_cache_ingress  # noqa: E402
 from .participants import PinParticipant, WalkerParticipant  # noqa: E402
 from .payloads import Constraints, ControlSignals  # noqa: E402
 from .types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame, KVCache, Provenance  # noqa: E402
@@ -137,6 +137,7 @@ def _run_pipeline_with_injected_cache(
     confidence_threshold: float,
     generator: "torch.Generator | None",
     callback_on_step_end: StepEndComposite,
+    prompt_kwargs: "dict | None" = None,
 ) -> tuple[Any, KVCache]:
     """ADR-CDG-012 Phase 4 decoder-drive body (issue #62) — productionizes the
     Q-2 smoke skeleton (`scratch/q2-skeleton-2026-08-04` @ `d67e62f`,
@@ -160,15 +161,29 @@ def _run_pipeline_with_injected_cache(
       the first re-encodes normally (the committed canvas from the previous
       block), identical to the pipeline's own IN-3-shaped per-block encode —
       this function does not special-case any block beyond the first.
-    - **No `prompt` re-encode.** The injected cache stands in for what would
-      otherwise be the first block's encode of `prompt` — `DGemmaDenoise`'s
-      `prompt` widget is NOT tokenized or encoded on this path (the skeleton
-      never touched it either). This is a genuine open point the governing
-      ADR does not resolve (§D.1 IN-2 names "skip the first encode" but is
-      silent on what, if anything, `prompt` conditions once a cache is
-      injected) — carried forward from the proven skeleton rather than
-      inventing new semantics under this contract; see the implementing PR's
-      "deviations" section.
+    - **Composed prefill (ADR-CDG-024, issue #257).** `prompt_kwargs` empty/
+      `None` degrades to the original skeleton's behavior byte-for-byte: the
+      injected cache stands in for what would otherwise be the first block's
+      encode, `DGemmaDenoise`'s `prompt` widget is not tokenized, and block
+      0's `decoder_start` derives from `kv_cache`'s own pre-call
+      `cumulative_length` (unchanged). A non-empty `prompt_kwargs` (the SAME
+      dict `run_diffusion`'s no-cache path builds at `:736-744` — one
+      template-construction site, two consumers) is chat-templated and
+      prefilled onto `kv_cache.cache` via `dgemma.kv_cache.
+      prefill_templated_turn` BEFORE block 0's decode setup, in place of the
+      skipped re-encode; block 0's `decoder_start` is then rebound to the
+      cache's own POST-prefill `past_key_values.get_seq_length()` (never a
+      hand-computed length — ADR-CDG-024 §4's named failure-mode
+      prevention), mirroring how the block>0 re-encode below already derives
+      its own splice from the cache's advanced state. **OPEN (ADR-CDG-024,
+      not resolved by this ADR):** block>0's `block_start`/`decoder_start`
+      arithmetic still derives from the ORIGINAL pre-prefill `cached_len`
+      captured before this function's loop starts — the ADR's §1 layout
+      commits to block 0 only and does not walk through whether a
+      templated-turn prefill needs a compensating shift for block>0 offsets;
+      this is carried forward as a verify-during-implementation item, not
+      silently resolved here (see the implementing PR's deviations
+      section).
     - **OUT-1 (advanced-cache output) stays deferred**
       (`surfaces/comfyui/denoise.py`'s named delta 2, ADR-CDG-012 §D.2): this
       function runs every block to completion/EOS exactly like the pipeline
@@ -246,9 +261,23 @@ def _run_pipeline_with_injected_cache(
 
     for canvas_idx in range(num_canvases):
         if canvas_idx == 0:
-            # IN-2: skip the first encode entirely — `past_key_values` is the
-            # injected cache as-is.
-            pass
+            if prompt_kwargs:
+                # ADR-CDG-024 §1 (issue #257): a non-empty `prompt` alongside
+                # `kv_cache` is the current-turn text — chat-template it
+                # (SAME `prompt_kwargs` dict the no-cache path builds) and
+                # prefill it onto the injected cache, in place of the
+                # skipped IN-2 re-encode. `decoder_start`'s base is rebound
+                # below to the cache's own POST-prefill `get_seq_length()`,
+                # not the pre-prefill `cached_len` — ADR §4's named
+                # position-id-drift prevention.
+                past_key_values = prefill_templated_turn(pipeline, past_key_values, prompt_kwargs)
+                decoder_start_base = past_key_values.get_seq_length()
+            else:
+                # IN-2: skip the first encode entirely — `past_key_values` is
+                # the injected cache as-is. `prompt_kwargs` empty/`None`
+                # degrades to this exact byte-for-byte behavior
+                # (ADR-CDG-024 §1's additive-optional framing).
+                decoder_start_base = cached_len
         else:
             # Re-encode the previously committed block into the (already
             # cache-seeded) `past_key_values` — identical in shape to the
@@ -266,7 +295,15 @@ def _run_pipeline_with_injected_cache(
                 ).unsqueeze(0),
             )
 
-        decoder_start = cached_len + canvas_idx * canvas_length
+        # Block 0's base is `decoder_start_base` (cache's post-prefill
+        # `get_seq_length()` when a prefill ran, else the pre-loop
+        # `cached_len` unchanged). Block>0 still derives from the ORIGINAL
+        # `cached_len` (OPEN, ADR-CDG-024 — the ADR commits to block 0's
+        # splice only; a compensating shift for block>0 once a prefill has
+        # run is unresolved, not silently assumed here).
+        decoder_start = (
+            decoder_start_base if canvas_idx == 0 else cached_len + canvas_idx * canvas_length
+        )
         decoder_position_ids = torch.arange(
             decoder_start, decoder_start + canvas_length, device=device
         ).unsqueeze(0)
@@ -560,14 +597,17 @@ def run_diffusion(
     loud rather than silently no-op): an optional injected `KVCache` payload
     (§62's `dgemma/types.py` dataclass).
 
-    **Exclusivity (issue #248):** `kv_cache` and a non-empty `prompt` are
-    mutually exclusive — a connected cache with `prompt` also supplied is
-    rejected at ingress (`reject_prompt_and_kv_cache`, below) rather than
-    silently ignoring `prompt`, since the with-cache drive body never
-    tokenizes it. Empty/absent `prompt` alongside a cache is the intended
-    injection-only shape and stays valid; this is interim posture until
-    #245's prompt+cache composition design lands and (per that issue)
-    explicitly supersedes this invariant if it composes the two.
+    **Composition (ADR-CDG-024, issue #257 — supersedes issue #248's
+    interim exclusivity):** `kv_cache` and a non-empty `prompt` are jointly
+    permitted. When both are supplied, `prompt` is treated as the current
+    model-turn: chat-templated exactly as the no-cache path templates it
+    (same `prompt_kwargs` construction, below) and prefilled onto
+    `kv_cache.cache` before the decode loop begins, via
+    `dgemma.kv_cache.prefill_templated_turn`. Empty/absent `prompt` alongside
+    a cache stays the pure injection-only shape, byte-for-byte unchanged.
+    `dgemma.ingress.reject_prompt_and_kv_cache`, which rejected this pair
+    under issue #248's interim posture, is tombstoned (no-op) — see that
+    function's docstring for the supersession.
 
     `None` (default) is today's EXACT
     behavior, byte-for-byte unchanged — the run mints its own cache
@@ -594,12 +634,12 @@ def run_diffusion(
     `EntropyBoundScheduler` a nonsensical temperature trajectory), if
     ingress validation of `constraints`/`control_signals`/`capture`/the
     `constraints`+`logit_hook` combination fails (see
-    `dgemma.ingress.validate_ingress`'s error register), if a non-empty
-    `prompt` is given together with a non-`None` `kv_cache` (issue #248 —
-    exactly one of the denoiser prompt or an injected KV_CACHE is permitted;
-    see `dgemma.ingress.reject_prompt_and_kv_cache`), or if `kv_cache` is
+    `dgemma.ingress.validate_ingress`'s error register), or if `kv_cache` is
     given and fails `validate_kv_cache_ingress`'s V1-V6 checks (see
-    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register).
+    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register). A
+    non-empty `prompt` given together with a non-`None` `kv_cache` no longer
+    raises (ADR-CDG-024, issue #257 — supersedes issue #248's exclusivity);
+    the pair composes instead, per above.
 
     **Phase 4 (issue #62, ADR-CDG-012 §D.1 IN-2) — the decoder-drive body is
     LIVE.** A well-formed `kv_cache` that passes V1-V6 drives the decoder via
@@ -640,13 +680,13 @@ def run_diffusion(
     # smoke test has PASSed (ledger #240, run 2026-08-04b) per the ADR's own
     # resolution trigger.
     #
-    # Issue #248: exclusivity door — a non-empty `prompt` alongside a
-    # connected `kv_cache` is rejected BEFORE the (otherwise well-formed)
-    # cache's own V1-V6 checks run, same ordering discipline as every other
-    # pre-construction ingress check in this function (rule 5,
-    # EMIT-CANONICAL / PARSE-AT-THE-DOOR — reject the conflicting pair before
-    # either input's own validation ties up further resources).
-    reject_prompt_and_kv_cache(prompt, kv_cache)
+    # ADR-CDG-024 (issue #257): the issue #248 exclusivity door that used to
+    # sit here (`reject_prompt_and_kv_cache(prompt, kv_cache)`) is removed —
+    # `prompt` + `kv_cache` is now the composed/prefill path (see this
+    # function's docstring and `_run_pipeline_with_injected_cache`'s
+    # `prompt_kwargs` branch below). `dgemma.ingress.reject_prompt_and_kv_cache`
+    # is tombstoned, not deleted, so a reader grepping issue #248 lands on
+    # live code explaining the reversal.
 
     if kv_cache is not None:
         validate_kv_cache_ingress(kv_cache, dgemma_model)
@@ -759,6 +799,15 @@ def run_diffusion(
                 # through (see `_run_pipeline_with_injected_cache`'s
                 # docstring). Same composite/collector, same hook context,
                 # same `DiffusionCancelled` handling below.
+                #
+                # ADR-CDG-024 (issue #257): pass the SAME `prompt_kwargs`
+                # dict the no-cache branch below uses (built once above,
+                # regardless of `kv_cache`) — but only when `prompt` is
+                # non-empty; `None`/empty degrades to pure injection
+                # (`prompt_kwargs=None` default). Same empty-prompt
+                # definition `reject_prompt_and_kv_cache` used before its
+                # tombstone (`prompt is None or not prompt.strip()`).
+                composed_prompt_kwargs = prompt_kwargs if (prompt is not None and prompt.strip()) else None
                 sequences, _advanced_cache = _run_pipeline_with_injected_cache(
                     pipeline,
                     kv_cache=kv_cache,
@@ -767,6 +816,7 @@ def run_diffusion(
                     confidence_threshold=confidence,
                     generator=generator,
                     callback_on_step_end=step_end,
+                    prompt_kwargs=composed_prompt_kwargs,
                 )
                 output = None
             else:

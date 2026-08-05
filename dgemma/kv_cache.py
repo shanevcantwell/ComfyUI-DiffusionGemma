@@ -34,6 +34,15 @@ landed:
   (`pipeline_diffusion_gemma.py`'s own per-block encode), not a novel drive
   shape.
 
+**ADR-CDG-024** (issue #257, prompt-under-injection composition):
+
+- `prefill_templated_turn` — chat-templates a `prompt_kwargs` dict (the SAME
+  dict `dgemma/loop.py`'s no-cache path builds) and prefills the resulting
+  turn onto an already-injected cache, generalizing `encode_sequence`'s
+  encoder-call shape to a templated turn instead of raw token ids. Consumed
+  by `_run_pipeline_with_injected_cache`'s composed branch (`dgemma/loop.py`)
+  when a non-empty `prompt` accompanies `kv_cache=`.
+
 **Explicitly NOT in this module yet** (later phases, not silently folded in):
 `save_kv_cache`/`load_kv_cache` (IN-4's disk crossing) and any tier-2 surgery
 op (`dgemma/kv_surgery.py`) are both Phase 5, conditional on operator scope
@@ -406,3 +415,78 @@ def encode_sequence(
         geometry=geometry,
         provenance=provenance,
     )
+
+
+def prefill_templated_turn(
+    pipeline: Any,
+    cache: Any,
+    prompt_kwargs: dict,
+    *,
+    add_generation_prompt: bool = True,
+):
+    """ADR-CDG-024 §1: chat-template `prompt_kwargs` exactly as the no-cache
+    path does (`dgemma/loop.py`'s `prompt_kwargs` construction — the SAME
+    dict, handed here instead of to `pipeline(...)`) and prefill the
+    resulting turn onto an already-injected `cache` (a live `DynamicCache`,
+    e.g. `KVCache.cache`), in place of `_run_pipeline_with_injected_cache`'s
+    skipped "no `prompt` re-encode" (IN-2).
+
+    Takes `pipeline` (a `DiffusionGemmaPipeline`/`DGemmaPipeline` instance,
+    NOT the bare `DGemmaModel` wrapper `encode_sequence` above takes) because
+    that is what `_run_pipeline_with_injected_cache` already has in scope —
+    `pipeline.processor`/`pipeline.model` are the same objects
+    `register_modules` wired at pipeline-construction time from the loaded
+    `DGemmaModel`'s own `.processor`/`.model`.
+
+    Mirrors the diffusers reference shape this composition generalizes:
+    `pipeline_diffusion_gemma.py`'s own `_prepare_inputs` (`:119-125`) —
+    `processor.apply_chat_template(messages, add_generation_prompt=...,
+    tokenize=True, return_tensors="pt", return_dict=True)` — and
+    `encode_sequence`'s own `encoder(input_ids=..., past_key_values=...,
+    position_ids=...)` call shape (above), generalized to run once, before
+    block 0's decode, for the templated turn instead of a committed canvas
+    block (mechanically the same as the block>0 re-encode at
+    `dgemma/loop.py:261-267`).
+
+    `position_ids` continue from `cache`'s CURRENT length
+    (`cache.get_seq_length()`, read once, immediately before this call) —
+    same "continue from the cache's own advanced length" discipline
+    `encode_sequence` uses for its `into=<KVCache>` advance case.
+
+    Returns the advanced `cache` (the SAME object, grown in place by the
+    real `DynamicCache.update`, matching `encode_sequence`'s
+    `outputs.past_key_values` identity — mutated, not replaced). The caller
+    (`_run_pipeline_with_injected_cache`) re-derives the templated-turn
+    length via `cache.get_seq_length()` AFTER this call, per ADR-CDG-024 §4's
+    named failure-mode prevention (position-id drift at the splice) — this
+    function deliberately does not also return a separate token count, so
+    there is no second length-tracking value that could drift from the
+    cache's own state.
+
+    `prompt_kwargs` is never re-derived or re-templated here — it is the
+    exact dict `dgemma/loop.py`'s `run_diffusion` already builds once
+    (`{"messages": [...]}` under `thinking=True`, `{"prompt": prompt}`
+    otherwise) for the no-cache path, per ADR-CDG-024 §4's "one
+    template-construction site, two consumers" failure-mode prevention
+    (double-templating / silent divergence from the no-cache template
+    shape)."""
+    encoded = pipeline.processor.apply_chat_template(
+        **prompt_kwargs,
+        add_generation_prompt=add_generation_prompt,
+        tokenize=True,
+        return_tensors="pt",
+        return_dict=True,
+    )
+    input_ids = encoded["input_ids"]
+
+    encoder = pipeline.model.model.encoder
+    encoder_device = next(encoder.parameters()).device
+    input_ids = input_ids.to(device=encoder_device)
+
+    start_position = cache.get_seq_length()
+    position_ids = torch.arange(
+        start_position, start_position + input_ids.shape[-1], device=encoder_device
+    ).unsqueeze(0)
+
+    outputs = encoder(input_ids=input_ids, past_key_values=cache, position_ids=position_ids)
+    return outputs.past_key_values
