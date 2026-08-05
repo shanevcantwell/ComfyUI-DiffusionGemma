@@ -14,14 +14,17 @@ take apart.
 > The KV-cache encode→denoise path is active as of 2026-08-04 (`ac3c832`,
 > PR #242).
 >
-> **VRAM footprint today: ~50GB bf16 + CPU spill (needs a ≥48GB card), or
-> ~30GB via a pre-quantized AutoRound INT4 checkpoint (`quant="autoround"`,
-> issue #128).** bitsandbytes can't touch this model's fused MoE experts —
-> see "What works today" below; `quant="none"` (bf16) and `quant="autoround"`
-> (INT4) are the two load paths. The model card's ~18GB quantized /
+> **VRAM footprint today: ~50GB bf16 + CPU spill (needs a ≥48GB card) —
+> the only working load path.** A pre-quantized AutoRound INT4 checkpoint
+> (`quant="autoround"`, ~29–30GB measured, issue #128) exists but is
+> currently **non-functional end-to-end**: every load crashes post-load in
+> `_assert_tie_integrity` (issue #264), tracked inside the quantized-engine
+> bracket (issue #211). bitsandbytes can't touch this model's fused MoE
+> experts — see "What works today" below. The model card's ~18GB quantized /
 > consumer-GPU footprint below the ~24GB offload floor is **not yet reachable
 > through this pack**. A smaller-card load path is tracked in
-> [issue #4](../../issues/4).
+> [issue #4](../../issues/4); GGUF (issue #131) is the audience path for
+> that footprint — see the Hardware section below.
 >
 > Where it's headed lives in the [roadmap](ROADMAP.md).
 
@@ -54,14 +57,22 @@ You can't catch that by reading the final text. You can watch it happen here.
 ## What works today
 
 - **`DGemmaLoader`** — loads `google/diffusiongemma-26B-A4B-it` via transformers,
-  drives via the Diffusers pipeline (ADR-CDG-004). `quant` offers `none` (bf16
-  with CPU spill — fits a 48 GB card) or `autoround` (pre-quantized INT4
-  W4A16 checkpoint, ~30 GB VRAM, requires the `auto-round` extra — issue
-  #128). bitsandbytes `nf4`/`int8` were removed (issue #18): they can't touch
+  drives via the Diffusers pipeline (ADR-CDG-004). `quant="none"` (bf16 with
+  CPU spill — fits a 48 GB card) is the only load path that works
+  end-to-end today. `quant="autoround"` (pre-quantized INT4 W4A16
+  checkpoint, ~29–30 GB measured, requires the `auto-round` extra — issue
+  #128) landed 2026-07-23 but every load now crashes post-load in
+  `_assert_tie_integrity` (`QuantLinear` exposes `.qweight`, not `.weight`) —
+  issue #264, tracked inside the quantized-engine bracket, issue #211.
+  bitsandbytes `nf4`/`int8` were removed (issue #18): they can't touch
   this model's fused 3D MoE experts — bnb only swaps `nn.Linear`, silently
   skipping ~22.84 B of 26 B params, so the "quantized" load is still ~46 GB
-  and mislabeled as 4-bit on *any* card. A real
-  quantized path for smaller cards is tracked in issue #4.
+  and mislabeled as 4-bit on *any* card; AWQ/MXFP4 hit the same fused-MoE
+  wall and are dead, unrevivable — externally corroborated by Unsloth's
+  DiffusionGemma docs (the 128 MoE experts, ~46GB, stay bf16; 4-bit can't
+  shrink them). A real quantized path for smaller cards is tracked in issue
+  #4; GGUF (issue #131) is the audience path, not a dev-backend substitute
+  — see the Hardware section below.
 - **`DGemmaSampler`** — all knobs as widgets, defaults from grounded live runs:
   `num_inference_steps=48`, `t=[0.4, 0.8]`, `entropy_bound=0.1`,
   `confidence=0.005`, `gen_length=256`, `seed`, and a **`thinking` toggle**
@@ -179,10 +190,19 @@ path/to/ComfyUI/venv/bin/python install.py
 ### Hardware & memory — the honest requirements
 
 This is a **large model**: bitsandbytes can't quantize its fused MoE experts
-(issue #4), so `quant="none"` loads full bf16, ~54 GB. A pre-quantized
-AutoRound INT4 checkpoint (`quant="autoround"`, ~30 GB VRAM, issue #128) is
-the working quantized path today — a smaller-card path below the ~24 GB
-offload floor is still open. The model card asks for a ≥ 60 GB GPU for a
+(issue #4), so `quant="none"` (full bf16, ~54 GB) is the **only working load
+path today**. A pre-quantized AutoRound INT4 checkpoint (`quant="autoround"`,
+~29–30 GB VRAM measured, issue #128) landed 2026-07-23 but is currently
+**non-functional end-to-end** — every load crashes post-load in
+`_assert_tie_integrity` (issue #264), tracked inside the quantized-engine
+bracket (issue #211); the VRAM numbers above are historical measurements,
+not a usable path right now. In-torch bnb/AWQ/MXFP4 are dead and
+unrevivable against this model's fused 3D MoE experts, externally
+corroborated by Unsloth's DiffusionGemma docs. GGUF is the accessibility
+path for smaller cards, sourced as a pinned upstream-PR consumer per
+ADR-CDG-020 (issue #131) — see below. A smaller-card path below the ~24 GB
+offload floor via the transformers/diffusers lane is still open. The model
+card asks for a ≥ 60 GB GPU for a
 naïve full-VRAM bf16 load — but **you do not need one**, because **ComfyUI's
 memory management carries it**: it offloads weights to system RAM and
 streams them to the GPU as needed.
@@ -205,8 +225,16 @@ streams them to the GPU as needed.
 - **Speed — offload costs time:** ~2.3 s/step on the 48 GB card with CPU spill,
   slower as VRAM shrinks. More VRAM → less offload → faster. (Instrumentability,
   not speed — as ever.)
-- **Below ~24 GB VRAM:** not yet — a quantized / GGUF path for 8–16 GB cards is
-  still open (issues #4, #15).
+- **Below ~24 GB VRAM:** not on the transformers/diffusers lane — that's
+  GGUF's job. GGUF is the **audience path** (operator ruling 2026-08-03,
+  issue #131 — ~52.7k monthly Unsloth-GGUF downloads), sourced as a pinned
+  upstream-PR consumer per ADR-CDG-020 (never an owned/hosted fork,
+  supersedes ADR-CDG-007's rejection), inference-only-secondary to this
+  pack's transformers-bf16 primary path. Prebuilt artifacts exist
+  (`unsloth/diffusiongemma-26B-A4B-it-GGUF`, Q4_K_M ~18 GB documented) but
+  need a DG-specific llama.cpp build; ratification is gated on the #131
+  rung-1 probe (rung-0 build green at `c3fb972`, rung-1 un-run,
+  GPU-window-gated).
 
 **Example graphs** ([examples/](examples/)): start with
 **`p3-trace-annotated.ui.json`** — the annotated canvas graph that *teaches* the
@@ -226,13 +254,18 @@ widgets), `p3-trace-smoke` (full instrumentation chain, + a `-thinking` variant)
 - Raw pre-excision canvas ids are captured engine-side as of 0.3.0, not yet
   exposed on any socket (issue #11) — wanted for token-level trace analysis.
 - Quantized loading for consumer cards **below the ~24 GB offload floor**
-  (8–16 GB) is unresolved
+  (8–16 GB) is unresolved on the transformers/diffusers lane
   (issue #4) — the AWQ-INT4/compressed-tensors candidate surveyed there was
   smoke-tested and found incompatible with this pack's pinned `transformers`
   version (a real architecture-revision mismatch, not a config error); no
-  viable candidate is currently identified. GGUF/llama.cpp (issue #15) is the
-  most promising remaining direction on accessibility grounds, but is parked
-  pending a design bridge for the live-view/trace instrumentation gap.
+  viable in-torch candidate is currently identified, and AWQ/MXFP4 are dead
+  against this model's fused MoE experts (externally corroborated by
+  Unsloth's DiffusionGemma docs). The AutoRound INT4 path (`quant="autoround"`,
+  issue #128) also does not currently work end-to-end — issue #264, tracked
+  inside issue #211. GGUF (issue #131) is the accessibility answer instead:
+  the **audience path** per operator ruling 2026-08-03, sourced as a pinned
+  upstream-PR consumer per ADR-CDG-020 (supersedes ADR-CDG-007's rejection),
+  ratification gated on the #131 rung-1 probe (GPU-window-gated, un-run).
 
 ## Where the design lives
 

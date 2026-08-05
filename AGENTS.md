@@ -163,10 +163,25 @@ Full provenance: [`KNOB_DOCS`](dgemma/loop.py) in `dgemma/loop.py`.
 
 | Mode | VRAM | Load time | Notes |
 |------|------|-----------|-------|
-| `quant='autoround'` (INT4) | ~30 GB | ~27 s | Pre-quantized checkpoint, working forward pass |
-| `quant='none'` (bf16) | ~50 GB | slower | Full precision, CPU spill via ComfyUI offload |
+| `quant='none'` (bf16) | ~50 GB | slower | Full precision, CPU spill via ComfyUI offload — **the only working load path today** |
+| `quant='autoround'` (INT4) | ~29–30 GB measured | ~27 s to load | Pre-quantized checkpoint, landed 2026-07-23 (#128), but **non-functional end-to-end**: every load crashes post-load in `_assert_tie_integrity` (`QuantLinear` exposes `.qweight`, not `.weight`) — issue #264, tracked inside the quantized-engine bracket, issue #211. VRAM figure is historical, not currently reachable. |
 
-System RAM matters more than VRAM under heavy offload. Below ~24 GB VRAM: not yet supported.
+In-torch bnb/AWQ/MXFP4 are dead and unrevivable against this model's fused
+3D MoE experts — externally corroborated by Unsloth's DiffusionGemma docs
+("128 MoE experts ~46GB stay bf16; 4-bit can't shrink them").
+
+System RAM matters more than VRAM under heavy offload. Below ~24 GB VRAM on
+this transformers/diffusers lane: not supported. **GGUF is the audience
+path instead** (operator ruling 2026-08-03, issue #131 — ~52.7k monthly
+Unsloth-GGUF downloads), sourced as a pinned upstream-PR consumer per
+ADR-CDG-020 (a checksummed build of a named SHA off the
+`ggml-org/llama.cpp#24423` lineage; never an owned/hosted fork — supersedes
+ADR-CDG-007's rejection), inference-only-secondary to this pack's
+transformers-bf16 primary path (INV-5). Prebuilt artifacts exist
+(`unsloth/diffusiongemma-26B-A4B-it-GGUF`, Q4_K_M ~18 GB documented) but
+need a DG-specific llama.cpp build. Ratification gate: the #131 rung-1
+probe (visibility tax, pin choice #24423 vs #24427, Q4 tok/s) — rung-0
+build green (`c3fb972`), rung-1 un-run, GPU-window-gated.
 
 ---
 
