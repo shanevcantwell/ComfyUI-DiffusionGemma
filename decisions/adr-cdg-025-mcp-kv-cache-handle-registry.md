@@ -1,6 +1,6 @@
 # ADR-CDG-025 — MCP KV-path parity via a server-side cache-handle registry
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-08-05
 **Related**: ADR-CDG-012 (`KV_CACHE` socket + encode/denoise nodes — primitives
 1+2 of the data-boundary discipline this ADR instances on a live object
@@ -395,6 +395,75 @@ reviewable there without reopening this ADR.
 
 **Supersedes:** none.
 **Superseded by:** TBD.
+
+## Ratification
+
+Ratified 2026-08-05 by an independent Opus design-gate review (a reviewer that
+did not author this ADR), per the repo's strict-waterfall process convention
+(CLAUDE.md, "Process conventions"). PASS. Every load-bearing claim was checked
+against origin/main ground truth, not accepted on prose.
+
+**Doctrine conformance — verified:**
+
+- **Rule 2 (canonical surface tracks the contract):** The rule-2 inversion is
+  real and correctly diagnosed — the ComfyUI KV path landed at Phase 4
+  (`ac3c832`, PR #242) while `surfaces/mcp/commands/generate.py` still declines
+  `kv_cache` (verified: the docstring at `generate.py:43-54` names the
+  by-value-serialization premise this ADR dissolves by pointer-passing).
+  Option B's rejection (§Alternatives) guards the repair from re-opening rule 2
+  from the other direction (MCP made strictly less capable than ComfyUI).
+- **Rule 6 tension RESOLVED, not waved at:** §1 amends rule 6 with the exact
+  before-text quoted from ARCHITECTURE.md and a lifecycle-complete after-text —
+  the second persisted class is faced honestly with eviction (§4:
+  evict-entire-registry on `StateManager.load()`), invalidation
+  (identity-checked-at-resolve against the currently-loaded model), and
+  boundedness. Per-session scoping is the *considered-and-rejected* alternative
+  (Option A), grounded in a verified fact: there is no connection/session object
+  anywhere in `surfaces/mcp/`, and the sole precedent for call-scoped state,
+  `_active_runs` (`generate.py:110`), is process-global and caller-keyed, not
+  connection-scoped. Either resolution the design brief permitted (amended
+  clause with lifecycle, or per-session scoping faced honestly) is present; this
+  ADR takes the first with the second explicitly weighed.
+- **Rule 7 ingress:** The resolved handle is a JSON-safe string parameter, not a
+  surface-supplied closure — rule 7's declarative-payload door is preserved. The
+  resolved `KVCache` still passes the existing `validate_kv_cache_ingress`
+  (V1–V6, verified present in `dgemma/kv_cache.py`); §3's handle-resolve is a
+  new, earlier door, not a replacement for the existing one.
+- **Pointer + identity sidecar:** Verified — `Provenance`
+  (`model_repo_id`/`tokenizer_fingerprint`) exists on every `KVCache` and is
+  checked at resolve time (§4), instancing data-boundary primitive (1)
+  mint-identity guard on a live object rather than a disk-crossing tensor.
+- **EMIT-CANONICAL (dangling handle = designed rejection):** §2/§3 state
+  fail-on-unknown with no silent fallback to a fresh cache; matches the
+  `require_model()` loud-RuntimeError posture (`state_manager.py:71-81`,
+  verified).
+- **Greenfield anticipated-failure rule:** §4 opens by naming
+  cache-outlives-model as the anticipated failure it prevents.
+
+**Requirements — verified:** parity is framed as rule-2 invariant repair per the
+#103 operator ruling, not a feature-add; composition-compatibility with
+ADR-CDG-024 (Accepted, verified to supersede #248's exclusivity) is by
+construction — the tool hands `prompt`+`kv_cache` unconditionally to
+`run_diffusion` and defers to whatever its ingress accepts, re-implementing no
+exclusivity check at the MCP layer (and the ADR accurately notes
+`dgemma/ingress.py:238`'s interim #248 rejection still stands on main until #257
+lands); no dependency on Phase-3 disk serialization (§5 keeps it deferred and
+orthogonal).
+
+**Cross-artifact seams — verified:** #103 (OPEN, driving evidence), #255 (OPEN,
+falsifiable acceptance via MCP-only repro), #257 (OPEN, ADR-CDG-024's
+implementation — accurately flagged as pre-fix at time of writing), ADR-CDG-012
+primitives (`encode_sequence(into=...)`, `Provenance`, V1–V6 all verified to
+exist), and the rule-6 text change named with an exact quote.
+
+**Resolved recommendations:** none blocking. The three Open Questions (registry
+bound mechanism, handle format, `test_mcp_statelessness.py` update shape) are
+genuine implementation-detail choices within the fixed contract
+(handle-in/handle-out, fail-on-unknown, evict-on-reload,
+identity-checked-at-resolve) and resolve in the implementing PR, reviewable
+there — the gate confirms the contract invariants are held fixed and the
+statelessness test's intent (catch a *third*, unbounded, unevicted persisted
+class) must survive its update.
 
 ## References
 
