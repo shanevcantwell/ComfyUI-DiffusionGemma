@@ -23,7 +23,7 @@ from consumers.run_log import (
     frame_to_record,
 )
 from dgemma.loop import run_diffusion
-from dgemma.types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame
+from dgemma.types import CanvasState, CanvasTrace, DGemmaModel, DiffusionFrame, EditOp, Provenance
 
 
 def _run_config(**overrides) -> RunConfig:
@@ -155,6 +155,101 @@ class TestBuildRunLogHeader:
         header_a = build_run_log_header(_run_config(), _trace())
         header_b = build_run_log_header(_run_config(), _trace())
         assert header_a["run_id"] != header_b["run_id"]
+
+
+class TestInjectionProvenanceHeaderFields:
+    """Issue #266: the run-log header must say whether a KV cache was
+    injected (`injection_present`) and, when so, carry OUT-3's provenance
+    identity compactly (`injected_cache_provenance`). Unit-level coverage
+    against hand-built `CanvasTrace`/`Provenance` dataclass instances (real
+    types, not mocks of the writer's input) — the real-`run_diffusion`
+    round-trip variants live in `TestInjectionProvenanceRealRoundTrip`
+    below."""
+
+    def test_no_cache_trace_reports_injection_absent(self):
+        """AIO-shaped run (no `kv_cache` ever threaded through
+        `run_diffusion`): `CanvasTrace.injected_cache_provenance` stays at
+        its dataclass default (`None`) — `injection_present` must read
+        `False` and the stamp must be `null`, never fabricated."""
+        header = build_run_log_header(_run_config(), _trace())
+        assert header["injection_present"] is False
+        assert header["injected_cache_provenance"] is None
+
+    def test_injected_trace_reports_injection_present_with_tier1_stamp(self):
+        """A composed (encode->denoise) run: the trace's OUT-3 field carries
+        a tier-1 `Provenance` (`minting_sequence` present, `edit_script`
+        empty per `dgemma.types.Provenance`'s own tiering) — the header
+        stamp must be the compact length/identity form, never the raw
+        minting-sequence tuple."""
+        provenance = Provenance(
+            minting_sequence=(4, 5, 6, 7),
+            edit_script=(),
+            model_repo_id="fake/repo",
+            tokenizer_fingerprint="fp-abc123",
+        )
+        trace = _trace(injected_cache_provenance=provenance)
+
+        header = build_run_log_header(_run_config(), trace)
+
+        assert header["injection_present"] is True
+        stamp = header["injected_cache_provenance"]
+        assert stamp == {
+            "minting_sequence_length": 4,
+            "edit_script_length": 0,
+            "model_repo_id": "fake/repo",
+            "tokenizer_fingerprint": "fp-abc123",
+        }
+
+    def test_injected_trace_with_empty_prompt_still_stamps_and_prompt_is_derivable(self):
+        """Pure-injection run (empty `prompt`, cache attached, ADR-CDG-024):
+        `injection_present`/stamp behave identically to the non-empty-prompt
+        composed case, and the header's existing `prompt` field alone
+        already lets a reader derive emptiness (`header["prompt"] == ""`) —
+        the basis for not adding a redundant third boolean (module
+        docstring deviation note)."""
+        provenance = Provenance(
+            minting_sequence=(1, 2, 3),
+            edit_script=(),
+            model_repo_id="fake/repo",
+            tokenizer_fingerprint="fp-xyz",
+        )
+        trace = _trace(injected_cache_provenance=provenance)
+
+        header = build_run_log_header(_run_config(prompt=""), trace)
+
+        assert header["prompt"] == ""
+        assert header["injection_present"] is True
+        assert header["injected_cache_provenance"]["minting_sequence_length"] == 3
+
+    def test_tier2_edited_cache_stamps_null_minting_length_with_edit_script_count(self):
+        """Tier-2 (`minting_sequence is None`, `edit_script` non-empty per
+        `Provenance`'s own docstring): the stamp must serialize
+        `minting_sequence_length: null`, never a fabricated `0` standing in
+        for "no minting sequence at all" — mirrors this module's own
+        honest-absence discipline for `entropy_summary`/`pinned_positions`."""
+        provenance = Provenance(
+            minting_sequence=None,
+            edit_script=(EditOp(op="ablate", params={"layer": 3}),),
+            model_repo_id="fake/repo",
+            tokenizer_fingerprint="fp-tier2",
+        )
+        trace = _trace(injected_cache_provenance=provenance)
+
+        header = build_run_log_header(_run_config(), trace)
+
+        assert header["injection_present"] is True
+        stamp = header["injected_cache_provenance"]
+        assert stamp["minting_sequence_length"] is None
+        assert stamp["edit_script_length"] == 1
+
+    def test_new_keys_are_additive_schema_version_unchanged(self):
+        """Additive-keys-same-schema decision (issue #266, named in the
+        header builder's docstring): adding these fields does not bump
+        `SCHEMA_VERSION` — no in-repo reader asserts a closed key set
+        against `dg-runlog/1`, only the `schema` string itself."""
+        header = build_run_log_header(_run_config(), _trace())
+        assert header["schema"] == "dg-runlog/1"
+        assert SCHEMA_VERSION == "dg-runlog/1"
 
 
 class TestFrameToRecord:
@@ -366,6 +461,12 @@ class TestRealPipelineRoundTrip:
         assert header["schema"] == SCHEMA_VERSION
         assert header["seed"] == 42
         assert header["scheduler_name"] == canvas_trace.scheduler_name
+        # Issue #266 AIO specimen: an AIO (no-cache) real `run_diffusion`
+        # call never threads `kv_cache=`, so `injected_cache_provenance`
+        # stays at the `CanvasTrace` dataclass default (`None`) all the way
+        # through to the header.
+        assert header["injection_present"] is False
+        assert header["injected_cache_provenance"] is None
 
         from dgemma.loop import decode_frames
 
@@ -385,3 +486,112 @@ class TestRealPipelineRoundTrip:
         final = build_final_record(canvas_trace, canvas_state)
         assert final["record_type"] == "final"
         assert final["steps_used"] == canvas_state.steps_used
+
+
+class TestInjectionProvenanceRealRoundTrip:
+    """Issue #266's two injected specimens, driven through the REAL
+    with-cache drive body (`dgemma.loop._run_pipeline_with_injected_cache`,
+    ADR-CDG-012 Phase 4) via `run_diffusion(kv_cache=...)` — not a
+    hand-built trace. Reuses `tests/test_kv_cache_drive_body.py`'s
+    decode-capable fixtures (`_fake_decoder_capable_model`/
+    `_matching_kv_cache`) rather than re-deriving a second decode-capable
+    fake model, per that module's own fixture-composition precedent
+    (`TestOut3ProvenanceStamp` already proves `run_diffusion(kv_cache=...)`
+    stamps `CanvasTrace.injected_cache_provenance` — this class carries that
+    same real trace one step further, through `build_run_log_header`)."""
+
+    def test_composed_run_non_empty_prompt_stamps_header(self, monkeypatch):
+        """Composed run (ADR-CDG-024): non-empty `prompt` + a connected
+        `kv_cache` — the with-cache path prefills the templated turn onto
+        the cache before decoding. Header must report `injection_present`
+        True and a stamp matching the trace's own OUT-3 identity exactly."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache
+
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model, minting_sequence=(4, 5, 6))
+
+        text, canvas_state, canvas_trace = run_diffusion(
+            model,
+            "hello there",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=4,
+            kv_cache=cache,
+        )
+        assert canvas_trace.injected_cache_provenance is cache.provenance
+
+        run_config = RunConfig(
+            prompt="hello there",
+            model_repo_id=model.repo_id,
+            seed=None,
+            num_inference_steps_requested=2,
+            gen_length=4,
+            t_min=0.4,
+            t_max=0.8,
+            entropy_bound=0.1,
+            confidence=0.005,
+            thinking=False,
+            quant="none",
+            device="cpu",
+            dtype="bfloat16",
+        )
+        header = build_run_log_header(run_config, canvas_trace)
+
+        assert header["injection_present"] is True
+        assert header["injected_cache_provenance"] == {
+            "minting_sequence_length": len(cache.provenance.minting_sequence),
+            "edit_script_length": len(cache.provenance.edit_script),
+            "model_repo_id": cache.provenance.model_repo_id,
+            "tokenizer_fingerprint": cache.provenance.tokenizer_fingerprint,
+        }
+
+    def test_empty_prompt_with_cache_stamps_header_and_prompt_is_empty(self, monkeypatch):
+        """Pure-injection run (ADR-CDG-024): empty `prompt` + a connected
+        `kv_cache`, no prefill. Header must still report `injection_present`
+        True with a stamp matching OUT-3, AND `prompt == ""` — the
+        denoiser-prompt-empty discriminant the issue asks for, read directly
+        off the existing `prompt` field rather than a second boolean (see
+        `build_run_log_header`'s docstring for why no extra flag was
+        added)."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache
+
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model, minting_sequence=(1, 2, 3))
+
+        text, canvas_state, canvas_trace = run_diffusion(
+            model,
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=4,
+            kv_cache=cache,
+        )
+        assert canvas_trace.injected_cache_provenance is cache.provenance
+
+        run_config = RunConfig(
+            prompt="",
+            model_repo_id=model.repo_id,
+            seed=None,
+            num_inference_steps_requested=2,
+            gen_length=4,
+            t_min=0.4,
+            t_max=0.8,
+            entropy_bound=0.1,
+            confidence=0.005,
+            thinking=False,
+            quant="none",
+            device="cpu",
+            dtype="bfloat16",
+        )
+        header = build_run_log_header(run_config, canvas_trace)
+
+        assert header["prompt"] == ""
+        assert header["injection_present"] is True
+        assert header["injected_cache_provenance"]["minting_sequence_length"] == 3
+        assert header["injected_cache_provenance"]["model_repo_id"] == cache.provenance.model_repo_id
