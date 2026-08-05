@@ -1,7 +1,9 @@
 """tests/test_kv_cache_ingress.py — ADR-CDG-012 Phase 1 (issue #62):
 `dgemma.kv_cache.validate_kv_cache_ingress`'s V1-V6 branches, happy path plus
 every raise path, each asserting DV.3b's both-token message contract
-(precondition token AND remedy token, not a bare assertion).
+(precondition token AND remedy token, not a bare assertion). V7 (issue #265,
+interim guard, 2026-08-05) is covered separately below by
+`TestV7CacheAliasing`.
 
 Uses the `synthetic_kv_cache_factory` fixture (`tests/conftest.py`, §L) —
 no real weights, every check exercised against a small fake model/cache
@@ -227,6 +229,78 @@ class TestV5OrphanProvenance:
         message = str(excinfo.value)
         assert "orphan" in message
         assert "minting sequence" in message or "edit-script" in message
+
+
+class TestV7CacheAliasing:
+    """Issue #265 interim guard: `validate_kv_cache_ingress`'s V7 check
+    rejects a `KVCache` payload whose live `cache.get_seq_length()` has
+    outgrown the `cumulative_length` recorded on the payload at mint/advance
+    time — the shape a prior composed run's in-place `prefill_templated_turn`
+    growth produces when the SAME `KVCache` object is handed to
+    `run_diffusion`/`validate_kv_cache_ingress` a second time (e.g. ComfyUI
+    reusing a cached `DGemmaEncode` node output across two runs).
+
+    `synthetic_kv_cache_factory` builds a matching (V1-V6-passing) cache;
+    `.append(n)` (`tests/conftest.py`'s `FakeDynamicCache`, the same growth
+    helper `test_kv_cache_drive_body.py`'s multi-block tests use) grows the
+    live cache tensors WITHOUT touching `cumulative_length` — exactly what
+    `prefill_templated_turn`'s real in-place growth does, reproduced here
+    without needing a real prefill call."""
+
+    def test_fresh_matching_cache_passes_v7(self, synthetic_kv_cache_factory):
+        """Baseline: an unmutated, just-minted cache (the common case —
+        cache.get_seq_length() == cumulative_length[0]) passes V7 exactly as
+        it already passes V1-V6."""
+        model, cache = synthetic_kv_cache_factory()
+        assert cache.cache.get_seq_length() == cache.cumulative_length[0]
+        assert validate_kv_cache_ingress(cache, model) is None
+
+    def test_cache_grown_in_place_since_minting_rejected(self, synthetic_kv_cache_factory):
+        model, cache = synthetic_kv_cache_factory()
+        # Simulate a prior composed run's `prefill_templated_turn` growth:
+        # the live cache tensors grow, but `cumulative_length` (this
+        # payload's own field) is never updated to match — the exact
+        # divergence #265 names.
+        cache.cache.append(5)
+        assert cache.cache.get_seq_length() > cache.cumulative_length[0]
+        with pytest.raises(ValueError, match="V7") as excinfo:
+            validate_kv_cache_ingress(cache, model)
+        message = str(excinfo.value)
+        assert "#265" in message
+        assert "DGemmaEncode" in message
+        assert "grown in place" in message or "grown" in message
+
+    def test_grown_cache_message_names_remedy(self, synthetic_kv_cache_factory):
+        model, cache = synthetic_kv_cache_factory()
+        cache.cache.append(1)
+        with pytest.raises(ValueError) as excinfo:
+            validate_kv_cache_ingress(cache, model)
+        message = str(excinfo.value)
+        assert "re-run" in message or "fresh cache" in message
+
+    def test_cache_at_exactly_minted_length_passes(self, synthetic_kv_cache_factory):
+        """Boundary: actual == minted (not strictly greater) must pass —
+        V7 rejects only cache growth PAST the minted length, never an
+        untouched cache sitting exactly at it."""
+        model, cache = synthetic_kv_cache_factory()
+        assert cache.cache.get_seq_length() == cache.cumulative_length[0]
+        assert validate_kv_cache_ingress(cache, model) is None
+
+    def test_v7_skipped_on_zero_layer_cache(self, synthetic_kv_cache_factory):
+        """The same legal zero-layer degenerate case V6 skips (cache_layer_
+        count falsy) also skips V7 — nothing to alias with zero layers."""
+        model, cache = synthetic_kv_cache_factory(model_kwargs={"num_hidden_layers": 0})
+        assert len(cache.cache.layers) == 0
+        assert validate_kv_cache_ingress(cache, model) is None
+
+    def test_v7_fires_after_v5_orphan_check(self, synthetic_kv_cache_factory):
+        """Ordering pin: V5 (orphan) is checked before V7 (aliasing) per the
+        module docstring's stated order — an orphan cache that is ALSO grown
+        past its minted length reports V5 first."""
+        model, cache = synthetic_kv_cache_factory(mismatch="orphan")
+        cache.cache.append(5)
+        with pytest.raises(ValueError, match="V5"):
+            validate_kv_cache_ingress(cache, model)
 
 
 class TestV6DtypeDeviceMismatch:

@@ -20,6 +20,17 @@ cannot catch on its own.
 reject register. No participant reads a validated payload yet — Phase 1
 validates-then-ignores; Phases 3/4 wire the accepted payloads into
 `PinParticipant`/`WalkerParticipant`.
+
+**Interim guard (issue #263, 2026-08-05):** `reject_multi_block_composed_
+prefill` blocks the one composed-run shape known broken today (multi-block
+composed, block>0's splice offset short by the prefilled turn's length) while
+leaving single-block composed and multi-block pure-injection runs allowed.
+Named INTERIM in its own docstring, with the retirement condition stated —
+see that function. Not part of `validate_ingress`'s four-payload battery
+above (it needs `dgemma_model`-derived `canvas_length`, unavailable at that
+call's signature); `run_diffusion` calls it directly, alongside `dgemma.
+kv_cache.validate_kv_cache_ingress`'s own new V7 check (issue #265) — see
+that module's docstring for the sibling interim guard.
 """
 from __future__ import annotations
 
@@ -261,6 +272,68 @@ def reject_prompt_and_kv_cache(prompt: "str | None", kv_cache: Any) -> None:
     #248 with no code to land on. Callable directly (as the tombstone unit
     tests in `tests/test_ingress.py` do) to prove the no-op explicitly."""
     return None
+
+
+def reject_multi_block_composed_prefill(
+    prompt: "str | None", kv_cache: Any, *, gen_length: int, canvas_length: int
+) -> None:
+    """INTERIM invariant (issue #263, not a permanent one — retires when
+    #263's root-cause fix lands): reject a composed multi-block run.
+
+    **Defect this covers (#263, found during the Opus design-gate review of
+    PR #262):** `dgemma/loop.py`'s `_run_pipeline_with_injected_cache` binds
+    block 0's `decoder_start` to the cache's POST-prefill
+    `get_seq_length()` (ADR-CDG-024's fix), but every block AFTER the first
+    still derives its own splice offset from the ORIGINAL PRE-prefill
+    `cached_len` captured before the loop starts (`cached_len +
+    canvas_idx * canvas_length`) — short by the prefilled turn's length for
+    every block beyond the first. ADR-CDG-024 §1 commits to block 0's splice
+    only; a compensating shift for block>0 once a prefill has run is an open,
+    unresolved question, not silently assumed correct.
+
+    **Reachable configuration:** a non-empty `prompt` composed with a
+    connected `kv_cache` (ADR-CDG-024's composition, issue #257) AND
+    `gen_length > canvas_length` — i.e. the run needs more than one block.
+    Single-block composed runs (`gen_length <= canvas_length`) are the
+    already-tested path and are UNAFFECTED (block 0 is the only block, and
+    its splice is correct). Multi-block PURE injection (empty/absent
+    `prompt` alongside `kv_cache`, no prefill at all) is also UNAFFECTED —
+    there is no prefilled turn length to be short by, since `cached_len`
+    IS the cache's true pre-loop length in that shape.
+
+    Precedent (pattern, not reuse): this mirrors the now-retired issue #248
+    exclusivity guard (`reject_prompt_and_kv_cache`, merged `50ea909`,
+    tombstoned by ADR-CDG-024/#257) — a named INTERIM invariant with an
+    ADR-recorded retirement path, not a permanent restriction. Unlike #248's
+    guard, this one does NOT reject the whole prompt+kv_cache pair — only
+    the specific multi-block-composed sub-case #263 names as broken;
+    single-block composed and multi-block pure-injection remain allowed
+    exactly as ADR-CDG-024 intends.
+
+    Raises `ValueError` naming the blocked configuration, which of the two
+    still-allowed shapes remain open, and #263 as the tracking issue whose
+    fix retires this guard.
+    """
+    if kv_cache is None:
+        return
+    if prompt is None or not prompt.strip():
+        return
+    if gen_length <= canvas_length:
+        return
+    raise ValueError(
+        "Composed multi-block run rejected: a non-empty prompt alongside a "
+        "connected kv_cache with gen_length "
+        f"({gen_length}) > canvas_length ({canvas_length}) requires more "
+        "than one block. Multi-block composed runs are blocked pending "
+        "issue #263's splice-offset fix (block>0's decoder_start still "
+        "derives from the pre-prefill cache length, short by the prefilled "
+        "turn's length for every block after the first — see #263 for the "
+        "full defect). Still allowed: single-block composed runs "
+        "(gen_length <= canvas_length, i.e. one block) and multi-block "
+        "PURE injection (leave prompt empty alongside kv_cache — no "
+        "prefill, no splice-offset defect). Fix: either shrink gen_length "
+        "to <= canvas_length, or clear prompt for pure injection."
+    )
 
 
 def validate_ingress(

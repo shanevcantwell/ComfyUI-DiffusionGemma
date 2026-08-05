@@ -82,7 +82,7 @@ from .excision import (  # noqa: E402
     resolve_vocab_size,
 )
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
-from .ingress import validate_ingress  # noqa: E402
+from .ingress import reject_multi_block_composed_prefill, validate_ingress  # noqa: E402
 from .kv_cache import prefill_templated_turn, validate_kv_cache_ingress  # noqa: E402
 from .participants import PinParticipant, WalkerParticipant  # noqa: E402
 from .payloads import Constraints, ControlSignals  # noqa: E402
@@ -599,7 +599,8 @@ def run_diffusion(
 
     **Composition (ADR-CDG-024, issue #257 — supersedes issue #248's
     interim exclusivity):** `kv_cache` and a non-empty `prompt` are jointly
-    permitted. When both are supplied, `prompt` is treated as the current
+    permitted, SUBJECT to the #263 interim guard below. When both are
+    supplied (and the guard passes), `prompt` is treated as the current
     model-turn: chat-templated exactly as the no-cache path templates it
     (same `prompt_kwargs` construction, below) and prefilled onto
     `kv_cache.cache` before the decode loop begins, via
@@ -609,40 +610,62 @@ def run_diffusion(
     under issue #248's interim posture, is tombstoned (no-op) — see that
     function's docstring for the supersession.
 
-    `None` (default) is today's EXACT
-    behavior, byte-for-byte unchanged — the run mints its own cache
-    internally via the pipeline's own first encode, and rule-6
-    `STATELESS-CORE` is trivially satisfied (no injected state crosses).
-    When non-`None`, `dgemma.kv_cache.validate_kv_cache_ingress(kv_cache,
-    dgemma_model)` fires BEFORE the scheduler/pipeline are constructed
-    (fail-on-mismatch, rule 5 `EMIT-CANONICAL / PARSE-AT-THE-DOOR` — a bad
-    cache is rejected before any resource tied to this call is built), and
-    on pass this function **still raises** — `NotImplementedError` naming
-    issue #62 Phase 4 — because a well-formed injected cache is not the same
-    thing as a path that can honor it: the decoder-drive body that would
-    actually consume the cache's tensors does not exist yet (Open Question
-    #1, gated on the ADR's real-weights de-risk smoke test), and letting a
-    validated-but-ignored cache silently fall through to an uninjected run
-    would itself be the `EMIT-CANONICAL / PARSE-AT-THE-DOOR` violation this
-    ADR's own ingress discipline forbids (issue #207 operator ruling,
-    2026-08-01). The input `kv_cache` payload is never mutated by this
-    function regardless (§3 advance-returns-new-payload discipline — this
-    phase only reads it before raising).
+    **Interim guard 1 (issue #263, composed multi-block):**
+    `dgemma.ingress.reject_multi_block_composed_prefill` rejects the ONE
+    composed-run shape known broken today — a non-empty `prompt` alongside
+    `kv_cache` where `gen_length > canvas_length` (more than one block):
+    block>0's splice offset in `_run_pipeline_with_injected_cache` still
+    derives from the pre-prefill cache length, short by the prefilled
+    turn's length. Single-block composed runs (`gen_length <=
+    canvas_length`) and multi-block PURE injection (empty `prompt`) remain
+    allowed — see that function's docstring for the full defect and the
+    retirement condition (NOT a permanent restriction).
+
+    **Interim guard 2 (issue #265, cache aliasing):**
+    `dgemma.kv_cache.validate_kv_cache_ingress`'s V7 check rejects a
+    `kv_cache` whose live tensors were already grown in place by a PRIOR
+    composed run's prefill (`prefill_templated_turn` mutates the cache
+    object in place) — the everyday shape is ComfyUI's node-result cache
+    reusing an unchanged `DGemmaEncode` output across two runs, silently
+    inheriting the first run's prefilled turn on the second. See that
+    module's V7 docstring for the full mechanism and remedy.
+
+    `kv_cache=None` (default) is today's EXACT behavior, byte-for-byte
+    unchanged — the run mints its own cache internally via the pipeline's
+    own first encode, and rule-6 `STATELESS-CORE` is trivially satisfied (no
+    injected state crosses). When non-`None`,
+    `dgemma.kv_cache.validate_kv_cache_ingress(kv_cache, dgemma_model)`
+    (including its V7 check above) and `reject_multi_block_composed_prefill`
+    both fire BEFORE the scheduler/pipeline are constructed (fail-on-
+    mismatch, rule 5 `EMIT-CANONICAL / PARSE-AT-THE-DOOR` — a bad cache or a
+    known-broken composed shape is rejected before any resource tied to this
+    call is built). On pass, the decoder-drive body
+    (`_run_pipeline_with_injected_cache`) actually consumes the cache's
+    tensors (issue #62 Phase 4, LIVE — see below). The input `kv_cache`
+    payload is never mutated by `run_diffusion` itself regardless (§3
+    advance-returns-new-payload discipline); `prefill_templated_turn`
+    mutating the underlying cache OBJECT in place is the exact hazard
+    interim guard 2 above covers.
 
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
     `EntropyBoundScheduler` a nonsensical temperature trajectory), if
     ingress validation of `constraints`/`control_signals`/`capture`/the
     `constraints`+`logit_hook` combination fails (see
-    `dgemma.ingress.validate_ingress`'s error register), or if `kv_cache` is
-    given and fails `validate_kv_cache_ingress`'s V1-V6 checks (see
-    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register). A
+    `dgemma.ingress.validate_ingress`'s error register), if `kv_cache` is
+    given and fails `validate_kv_cache_ingress`'s V1-V7 checks (see
+    `dgemma.kv_cache.validate_kv_cache_ingress`'s error register — V7 is the
+    #265 interim addition), or if `kv_cache` is given together with a
+    non-empty `prompt` in the one composed-multi-block shape #263's interim
+    guard blocks (see `reject_multi_block_composed_prefill` above). A
     non-empty `prompt` given together with a non-`None` `kv_cache` no longer
-    raises (ADR-CDG-024, issue #257 — supersedes issue #248's exclusivity);
-    the pair composes instead, per above.
+    raises UNCONDITIONALLY (ADR-CDG-024, issue #257 — supersedes issue
+    #248's blanket exclusivity); the pair composes, subject to the two
+    interim guards above.
 
     **Phase 4 (issue #62, ADR-CDG-012 §D.1 IN-2) — the decoder-drive body is
-    LIVE.** A well-formed `kv_cache` that passes V1-V6 drives the decoder via
+    LIVE.** A well-formed `kv_cache` that passes V1-V7 (and, if composed with
+    a non-empty `prompt`, interim guard 1 above) drives the decoder via
     `_run_pipeline_with_injected_cache` (skip-first-encode, full multi-block
     loop to completion/EOS — OUT-1 stop-at-block stays deferred per
     `surfaces/comfyui/denoise.py`) instead of the retired fail-loud door
@@ -673,7 +696,7 @@ def run_diffusion(
     # (the default) skips this entirely — zero behavior change from before
     # this parameter existed.
     #
-    # Issue #62 Phase 4 (this function): V1-V6 above confirm the PAYLOAD is
+    # Issue #62 Phase 4 (this function): V1-V7 above confirm the PAYLOAD is
     # well-formed; the drive body below (`_run_pipeline_with_injected_cache`)
     # is what actually honors it, replacing issue #207's fail-loud
     # `NotImplementedError` door now that the ADR's real-weights de-risk
@@ -687,9 +710,23 @@ def run_diffusion(
     # `prompt_kwargs` branch below). `dgemma.ingress.reject_prompt_and_kv_cache`
     # is tombstoned, not deleted, so a reader grepping issue #248 lands on
     # live code explaining the reversal.
-
+    #
+    # Interim guards (issues #263/#265, 2026-08-05) — NOT permanent
+    # invariants; both retire when their respective root-cause fix lands
+    # (see each function's own docstring for the retirement condition).
+    # `validate_kv_cache_ingress` below carries its own new V7 check
+    # (#265's cache-aliasing hazard); `reject_multi_block_composed_prefill`
+    # covers #263's block>0 splice-offset defect and fires only for the
+    # narrow composed-multi-block shape known broken — single-block
+    # composed and multi-block pure-injection stay allowed.
     if kv_cache is not None:
         validate_kv_cache_ingress(kv_cache, dgemma_model)
+        reject_multi_block_composed_prefill(
+            prompt,
+            kv_cache,
+            gen_length=gen_length,
+            canvas_length=dgemma_model.model.config.canvas_length,
+        )
 
     # Constraints -> the two-mechanism givens (ADR-CDG-010 Decision 1, issue
     # #64 Phase 3). Both mechanisms are built from the SAME validated

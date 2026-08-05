@@ -36,13 +36,21 @@ class DGemmaEncode:
     an existing one with newly-committed text (IN-3, `kv_cache` wired)."""
 
     DESCRIPTION = (
-        "Mints or advances a DiffusionGemma KV-cache from a text prompt. "
-        "The optional kv_cache input is a dual door: leave it UNWIRED to "
-        "mint a fresh cache from text alone (IN-1); WIRE an existing "
-        "kv_cache in to ADVANCE it with the newly-committed text (IN-3). "
-        "Same node, one call — the presence of a wired cache is the only "
-        "thing that switches mint vs. advance. Feed the output cache into "
-        "DGemmaDenoise's kv_cache input to condition a run on it."
+        "Mints or advances a DiffusionGemma KV-cache from raw-encoded "
+        "text (context, not a chat-templated prompt/turn). The optional "
+        "kv_cache input is a dual door: leave it UNWIRED to mint a fresh "
+        "cache from text alone (IN-1); WIRE an existing kv_cache in to "
+        "ADVANCE it with the newly-committed text (IN-3). Same node, one "
+        "call — the presence of a wired cache is the only thing that "
+        "switches mint vs. advance. Feed the output cache into "
+        "DGemmaDenoise's kv_cache input to condition a run on it — the "
+        "turn text itself belongs on DGemmaDenoise's prompt widget. "
+        "Caution: if DGemmaDenoise's decoder composes a prompt onto this "
+        "node's output cache (ADR-CDG-024), the cache object is grown in "
+        "place; ComfyUI's node-result caching can then silently hand a "
+        "later run the already-grown cache. If you see the wrong/stale "
+        "turn echoed back, invalidate this node (change its input, or "
+        "force re-execution) rather than reusing its cached output (#265)."
     )
 
     @classmethod
@@ -59,9 +67,15 @@ class DGemmaEncode:
                         "multiline": True,
                         "default": "",
                         "tooltip": (
-                            "Text to encode into the KV-cache. On a fresh "
-                            "mint this is the full prompt; when advancing a "
-                            "wired cache, this is the newly-committed "
+                            "Raw-encoded CONTEXT — NOT a prompt slot. "
+                            "Tokenized directly (no chat role markers, no "
+                            "generation-prompt suffix, no thinking "
+                            "mechanism) and conditions as background; it "
+                            "cannot restrict output the way a prompt does. "
+                            "The current-turn text belongs on DGemmaDenoise's "
+                            "prompt widget, not here. On a fresh mint this "
+                            "is the full context; when advancing a wired "
+                            "cache, this is the newly-committed "
                             "continuation."
                         ),
                     },

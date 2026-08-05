@@ -71,6 +71,24 @@ class TestDGemmaEncodeContract:
         assert "UNWIRED" in spec["optional"]["kv_cache"][1]["tooltip"]
         assert "WIRED" in spec["optional"]["kv_cache"][1]["tooltip"]
 
+    def test_text_tooltip_teaches_context_not_prompt_semantics(self):
+        """Interim-guard surface work (issues #263/#265): the encode text
+        widget must teach that it is raw-encoded CONTEXT, not a prompt/turn
+        slot — the turn belongs on DGemmaDenoise's prompt widget."""
+        spec = DGemmaEncode.INPUT_TYPES()
+        tooltip = spec["required"]["text"][1]["tooltip"]
+        assert "context" in tooltip.lower()
+        assert "not a prompt" in tooltip.lower()
+        assert "DGemmaDenoise" in tooltip
+
+    def test_description_and_kv_cache_tooltip_name_265_aliasing_hazard(self):
+        """Issue #265's everyday cause (ComfyUI node-result caching reusing
+        an unchanged DGemmaEncode output across a composed run) must be
+        legible from this node's own surface text — the node that mints the
+        cache is where a reader is best placed to learn the reuse hazard."""
+        assert "#265" in DGemmaEncode.DESCRIPTION
+        assert "re-run" in DGemmaEncode.DESCRIPTION or "invalidate" in DGemmaEncode.DESCRIPTION
+
     def test_return_types(self):
         assert DGemmaEncode.RETURN_TYPES == (DGEMMA_KV_CACHE,)
         assert DGemmaEncode.RETURN_NAMES == ("kv_cache",)
@@ -158,6 +176,38 @@ class TestDGemmaDenoiseContract:
         assert "tooltip" in spec["required"]["model"][1]
         assert "tooltip" in spec["required"]["prompt"][1]
         assert "tooltip" in spec["optional"]["kv_cache"][1]
+
+    def test_prompt_tooltip_teaches_turn_vs_context_and_both_guards(self):
+        """Interim-guard surface work (issues #263/#265): prompt's tooltip
+        must teach the TURN/CONTEXT distinction (prompt = turn, chat-
+        templated and prefilled; kv_cache = independent context), name that
+        an empty prompt under injection deliberately does not anneal to
+        coherent text, and cite #263's multi-block limitation so the
+        rejection is recognizable from the tooltip alone."""
+        spec = DGemmaDenoise.INPUT_TYPES()
+        prompt_tooltip = spec["required"]["prompt"][1]["tooltip"]
+        assert "TURN" in prompt_tooltip
+        assert "#263" in prompt_tooltip
+        assert "canvas_length" in prompt_tooltip
+
+    def test_kv_cache_tooltip_teaches_context_and_both_guard_rejections(self):
+        spec = DGemmaDenoise.INPUT_TYPES()
+        kv_cache_tooltip = spec["optional"]["kv_cache"][1]["tooltip"]
+        assert "CONTEXT" in kv_cache_tooltip
+        assert "#263" in kv_cache_tooltip
+        assert "#265" in kv_cache_tooltip
+        assert "DGemmaEncode" in kv_cache_tooltip
+
+    def test_description_names_both_guards_and_pure_injection_non_coherence(self):
+        """The class-level DESCRIPTION (surfaced as the node's overall
+        tooltip in ComfyUI) must also carry both guards' issue numbers and
+        the pure-injection non-coherence note, not just the per-widget
+        tooltips — a reader hovering the node body, not a specific widget,
+        still lands on the same knowledge."""
+        description = DGemmaDenoise.DESCRIPTION
+        assert "#263" in description
+        assert "#265" in description
+        assert "does NOT anneal to coherent text" in description or "does not anneal" in description.lower()
 
     def test_return_types(self):
         """Issue #166 ratified scope: full connection parity with

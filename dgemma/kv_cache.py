@@ -43,6 +43,14 @@ landed:
   by `_run_pipeline_with_injected_cache`'s composed branch (`dgemma/loop.py`)
   when a non-empty `prompt` accompanies `kv_cache=`.
 
+**Interim ingress guards (issues #263/#265, 2026-08-05):** `validate_kv_cache_
+ingress`'s V7 check (new) rejects a cache grown in place by a prior composed
+run since it was minted (#265 aliasing hazard). A second interim guard
+against composed multi-block runs (#263's block>0 splice-offset defect) lives
+in `dgemma/ingress.py`'s `reject_multi_block_composed_prefill` — see that
+function's docstring. Both are named INTERIM in code and retire once their
+underlying issue's root-cause fix lands; neither is a permanent invariant.
+
 **Explicitly NOT in this module yet** (later phases, not silently folded in):
 `save_kv_cache`/`load_kv_cache` (IN-4's disk crossing) and any tier-2 surgery
 op (`dgemma/kv_surgery.py`) are both Phase 5, conditional on operator scope
@@ -117,11 +125,34 @@ def validate_kv_cache_ingress(payload: KVCache, dgemma_model: Any) -> None:
 
     Ordering (ADR-CDG-012 §D.3 / issue #62 implementation plan §C): V1
     (layer count) -> V2 (geometry) -> V4 (vocab) -> V3 (cumulative_length)
-    -> V6 (dtype/device) -> V5 (orphan). V5 is checked last here even
-    though it is model-independent, so a caller always sees the
-    model-alignment failures (if any) before the payload's own internal
-    consistency failure — either order is defensible per the plan; this
-    module picks one and is consistent about it.
+    -> V6 (dtype/device) -> V5 (orphan) -> V7 (aliasing, issue #265). V5 is
+    checked before V7 (not last) even though both are model-independent, so
+    the orphan-provenance failure (a cache with no reproduction path at all)
+    is reported before the aliasing failure (a cache whose reproduction path
+    no longer matches its live tensors) — either order is defensible per the
+    plan; this module picks one and is consistent about it.
+
+    **V7 (issue #265, interim guard — not the root-cause fix):**
+    `prefill_templated_turn` grows a `KVCache.cache` object IN PLACE (its own
+    docstring below: "the SAME object, grown in place") — a composed run
+    (`prompt=` + `kv_cache=`, ADR-CDG-024) mutates the live `DynamicCache`
+    tensors the caller's `KVCache` payload still points at, but the
+    payload's own `cumulative_length` (stamped at mint/advance time by
+    `encode_sequence`) is never updated to match. A caller — most commonly
+    ComfyUI's node-result cache reusing an unchanged `DGemmaEncode` output
+    across two runs — can then hand `run_diffusion` a `KVCache` whose
+    `payload.cache` has ALREADY been grown by a prior composed run's
+    prefill, while `payload.cumulative_length` still reports the
+    pre-growth length. Decoding against that cache silently inherits the
+    prior run's prefilled turn — content this run never submitted (the live
+    failure PR #262's acceptance run observed). V7 catches the mismatch at
+    the door: if the cache's actual `get_seq_length()` exceeds what
+    `cumulative_length` recorded at mint/advance time, the payload is
+    stale — rejected, not silently decoded against. Retires when #265's
+    root-cause fix (prefill onto a copy, or an equivalent non-mutating
+    shape) lands; tracked as an interim invariant, not a permanent one,
+    mirroring the retired issue #248 exclusivity guard's own precedent
+    (`dgemma/ingress.py`'s `reject_prompt_and_kv_cache` tombstone).
 
     Every raise names BOTH the violated precondition AND the actionable
     remedy in one message (DV.3b, issue #62 implementation plan §C) — a
@@ -249,6 +280,41 @@ def validate_kv_cache_ingress(payload: KVCache, dgemma_model: Any) -> None:
             "Remedy: supply the minting sequence (tier 1) or the edit-script "
             "(tier 2) that produced this cache."
         )
+
+    # V7 (issue #265, interim guard) — the payload's own live cache must not
+    # have grown PAST what its own cumulative_length recorded at mint/advance
+    # time. `prefill_templated_turn` (ADR-CDG-024) grows `payload.cache` in
+    # place without updating `payload.cumulative_length` to match — see this
+    # function's own docstring above for the full failure-mode grounding.
+    # `get_seq_length()` (no `layer_idx=`, defaulting to 0) matches the same
+    # no-arg convention `dgemma/loop.py` already uses at every other
+    # `past_key_values.get_seq_length()` call site on this path. Compared
+    # against `cumulative_length[0]` — V3 above has already confirmed
+    # `cumulative_length` is present and one-entry-per-layer, so index 0 is
+    # always safe here (V1/V3 both precede V7 in this function's ordering).
+    # A cache with zero layers (the legal V6-skip degenerate case) has
+    # nothing to alias — `get_seq_length()` on an empty-`.layers` cache
+    # returns 0, so this check is a no-op there rather than a spurious
+    # reject.
+    if cache_layer_count:
+        actual_seq_length = payload.cache.get_seq_length()
+        minted_length = cumulative_length[0]
+        if actual_seq_length > minted_length:
+            raise ValueError(
+                f"KV_CACHE ingress V7 failed: cache has been grown in place "
+                f"since it was minted — actual length {actual_seq_length} "
+                f"exceeds the minted length {minted_length} recorded on this "
+                "payload (issue #265). This is the everyday shape of "
+                "ComfyUI reusing a cached DGemmaEncode node output that a "
+                "PRIOR composed run (prompt + kv_cache, ADR-CDG-024) already "
+                "prefilled and grew — decoding against it now would silently "
+                "inherit that prior run's turn, content this run never "
+                "submitted. Remedy: re-run DGemmaEncode to mint a fresh "
+                "cache (change its input, or invalidate/bypass the node's "
+                "cached result) rather than reusing this cache object across "
+                "composed runs. Interim guard pending #265's root-cause fix "
+                "(prefill onto a copy)."
+            )
 
 
 def encode_sequence(

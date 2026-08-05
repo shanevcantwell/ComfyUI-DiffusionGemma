@@ -119,7 +119,7 @@ Payload validity is vocabulary-owned, outside this discipline.
 | Consumer | Primitives | Status |
 |----------|-----------|--------|
 | Run-log emission (#72) | 1+2+3+4 | **In force** ComfyUI-side; MCP promotion pending (#103 Scope B) |
-| Serialized `kv_cache` (ADR-CDG-012 tier-2) | 1 + V1–V6 door | NOT-YET-IMPLEMENTED — #103 fork, Phase 5 conditional |
+| Serialized `kv_cache` (ADR-CDG-012 tier-2) | 1 + V1–V7 door | NOT-YET-IMPLEMENTED — #103 fork, Phase 5 conditional. V7 (issue #265, interim guard, 2026-08-05) added to the live in-memory `validate_kv_cache_ingress` door this row's future disk-serialization variant would replay. |
 | Tier-2 `DISTRIBUTION` artifacts (ADR-CDG-014) | 1+2+3+5 | Capture in-core; artifact/banking story NOT-YET-IMPLEMENTED |
 | `runs/` raw-data banking (#101) | 1+3 | Proposal — draft-for-ratification |
 

@@ -22,6 +22,7 @@ import pytest
 
 from dgemma.ingress import (
     reject_conflicting_hook_sources,
+    reject_multi_block_composed_prefill,
     reject_prompt_and_kv_cache,
     validate_capture,
     validate_constraints,
@@ -452,6 +453,79 @@ class TestPromptKVCacheExclusivity:
         assert reject_prompt_and_kv_cache(None, None) is None
         assert reject_prompt_and_kv_cache("hello", self._SOME_CACHE) is None
         assert reject_prompt_and_kv_cache("", self._SOME_CACHE) is None
+
+
+class TestRejectMultiBlockComposedPrefill:
+    """Issue #263 interim guard: `reject_multi_block_composed_prefill` blocks
+    ONLY the composed-multi-block shape (non-empty prompt + kv_cache +
+    gen_length > canvas_length) known broken today (block>0's splice offset
+    short by the prefilled turn's length) — every other combination,
+    including single-block composed and multi-block pure injection, passes
+    unchanged. Pure unit tests: `kv_cache` is a bare sentinel object (the
+    function only checks `is None`, never touches cache internals), same
+    shape `TestPromptKVCacheExclusivity` uses for the #248 tombstone."""
+
+    _SOME_CACHE = object()
+
+    def test_no_kv_cache_passes_regardless_of_prompt_or_lengths(self):
+        reject_multi_block_composed_prefill(
+            "a real prompt", None, gen_length=999, canvas_length=4
+        )  # must not raise — no cache, nothing to compose
+
+    def test_no_prompt_with_kv_cache_passes_even_multi_block(self):
+        """Multi-block PURE injection (empty/absent prompt) — no prefill, no
+        splice-offset defect, must remain allowed."""
+        reject_multi_block_composed_prefill(
+            None, self._SOME_CACHE, gen_length=999, canvas_length=4
+        )  # must not raise
+        reject_multi_block_composed_prefill(
+            "", self._SOME_CACHE, gen_length=999, canvas_length=4
+        )  # must not raise
+        reject_multi_block_composed_prefill(
+            "   \n\t  ", self._SOME_CACHE, gen_length=999, canvas_length=4
+        )  # must not raise — whitespace-only counts as empty (same .strip() convention as #248's tombstoned check)
+
+    def test_single_block_composed_passes(self):
+        """gen_length <= canvas_length: exactly one block, block 0's splice
+        is correct (ADR-CDG-024's own fix) — the tested, unaffected path."""
+        reject_multi_block_composed_prefill(
+            "a real prompt", self._SOME_CACHE, gen_length=4, canvas_length=4
+        )  # must not raise — gen_length == canvas_length, one block
+
+    def test_single_block_composed_with_gen_length_below_canvas_length_passes(self):
+        reject_multi_block_composed_prefill(
+            "a real prompt", self._SOME_CACHE, gen_length=1, canvas_length=4
+        )  # must not raise
+
+    def test_multi_block_composed_rejected(self):
+        with pytest.raises(ValueError, match="Composed multi-block") as excinfo:
+            reject_multi_block_composed_prefill(
+                "a real prompt", self._SOME_CACHE, gen_length=8, canvas_length=4
+            )
+        message = str(excinfo.value)
+        assert "#263" in message
+        assert "single-block composed" in message
+        assert "pure injection" in message
+
+    def test_multi_block_composed_rejected_message_names_both_remedies(self):
+        """DV.3b-shaped register entry: both still-allowed shapes named as
+        the remedy, not a bare reject."""
+        with pytest.raises(ValueError) as excinfo:
+            reject_multi_block_composed_prefill(
+                "a real prompt", self._SOME_CACHE, gen_length=9, canvas_length=4
+            )
+        message = str(excinfo.value)
+        assert "gen_length" in message
+        assert "canvas_length" in message
+        assert "clear prompt" in message or "empty" in message
+
+    def test_gen_length_one_more_than_canvas_length_rejected(self):
+        """Off-by-one boundary: gen_length == canvas_length + 1 already
+        needs a second block."""
+        with pytest.raises(ValueError, match="#263"):
+            reject_multi_block_composed_prefill(
+                "hi", self._SOME_CACHE, gen_length=5, canvas_length=4
+            )
 
 
 class TestValidateIngressComposition:

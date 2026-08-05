@@ -814,7 +814,17 @@ def synthetic_kv_cache(
     elif mismatch == "cumulative_length_negative":
         cumulative_length = tuple([0] * (cache_layers - 1) + [-1]) if cache_layers > 0 else (-1,)
     else:
-        cumulative_length = tuple([0] * cache_layers)
+        # Issue #265 (V7, aliasing): must match the CACHE's own actual
+        # length, not a hardcoded 0 — `FakeDynamicCache`'s default
+        # `seq_len=4` means the cache is already non-empty by construction,
+        # and a real `KVCache` (minted via `encode_sequence`) always derives
+        # `cumulative_length` fresh from `cache.get_seq_length()` (never
+        # hand-tracked, per that function's own docstring). Hardcoding `0`
+        # here would make every default-shaped fixture trip V7 the moment
+        # that check exists, even though nothing was ever "grown since
+        # minting" — this fixture's own data would be internally
+        # inconsistent, not a real aliasing case.
+        cumulative_length = tuple([cache.get_seq_length()] * cache_layers) if cache_layers > 0 else ()
 
     if tier == 2 and mismatch != "orphan":
         minting_sequence = None
