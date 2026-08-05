@@ -469,9 +469,33 @@ def prefill_templated_turn(
     otherwise) for the no-cache path, per ADR-CDG-024 §4's "one
     template-construction site, two consumers" failure-mode prevention
     (double-templating / silent divergence from the no-cache template
-    shape)."""
+    shape).
+
+    Normalization to the processor call (issue #257 live-failure fix,
+    2026-08-05): `prompt_kwargs` is the PIPELINE-shaped dict (`prompt=` /
+    `messages=` are `DiffusionGemmaPipeline.__call__` parameter names, not
+    `apply_chat_template`'s — the real
+    `ProcessorMixin.apply_chat_template(conversation, ...)` takes a required
+    POSITIONAL `conversation` and would silently swallow a `prompt=` kwarg
+    into `**kwargs` while raising on the missing positional). This function
+    therefore mirrors the pipeline's own `_prepare_inputs` normalization
+    verbatim (`pipeline_diffusion_gemma.py:112-125`): a bare `prompt` string
+    is wrapped as a single user turn (`[{"role": "user", "content":
+    prompt}]`, the image-free arm of `:117`) when `messages` is absent, and
+    the resulting `messages` list is passed POSITIONALLY as `conversation`
+    (`:119-125`). The batch (`isinstance(prompt, list)`) and image arms of
+    `_prepare_inputs` are deliberately not mirrored: this path is
+    batch-size-1 by contract (the drive body's own ingress assert) and
+    `run_diffusion` never builds an image into `prompt_kwargs`."""
+    prompt = prompt_kwargs.get("prompt")
+    messages = prompt_kwargs.get("messages")
+    if messages is None:
+        # Same single-user-turn wrap as `_prepare_inputs`
+        # (`pipeline_diffusion_gemma.py:117`, image-free arm).
+        messages = [{"role": "user", "content": prompt}]
+
     encoded = pipeline.processor.apply_chat_template(
-        **prompt_kwargs,
+        messages,  # positional `conversation` — the real signature's required arg
         add_generation_prompt=add_generation_prompt,
         tokenize=True,
         return_tensors="pt",

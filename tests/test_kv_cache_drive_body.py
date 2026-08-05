@@ -72,26 +72,53 @@ GENERATION_PROMPT_SUFFIX_ID = 900
 
 
 class _FakeProcessor:
-    """`apply_chat_template` mirrors the REAL shape
-    `dgemma.kv_cache.prefill_templated_turn`/`pipeline_diffusion_gemma.py`'s
-    `_prepare_inputs` call (`messages=`/`prompt=`, `add_generation_prompt=`,
-    `tokenize=True`, `return_tensors="pt"`, `return_dict=True` ->
-    `{"input_ids": <tensor>}`), deterministically: one token id per character
-    of the joined message/prompt text (`ord(c) % VOCAB_SIZE`, offset so it
-    never collides with `GENERATION_PROMPT_SUFFIX_ID`), so a test can recover
-    which text produced which ids without a real tokenizer, plus the fixed
-    suffix id appended iff `add_generation_prompt=True`."""
+    """`apply_chat_template` mirrors the REAL
+    `transformers.ProcessorMixin.apply_chat_template` calling contract
+    (issue #257 live-failure fix, 2026-08-05 — the previous fake accepted a
+    `prompt=` kwarg the real signature does not have, so 1146 unit tests
+    passed over a call shape that raised `TypeError: ... missing 1 required
+    positional argument: 'conversation'` on first live execution):
+
+    - `conversation` is a REQUIRED positional (the real signature's first
+      param) — a caller that omits it raises `TypeError` here exactly as
+      the real one does.
+    - No `prompt`/`messages` parameters exist — those are
+      `DiffusionGemmaPipeline.__call__` names, not `apply_chat_template`
+      names; a stray `prompt=` kwarg is silently swallowed by `**kwargs`
+      (matching the real signature's trailing `**kwargs`) while the missing
+      positional still raises, reproducing the live failure mode faithfully.
+    - Keyword defaults match the real signature (`add_generation_prompt=
+      False`, `tokenize=False`, `return_tensors=None`, `return_dict=False`)
+      so a production caller silently relying on this fake's convenience
+      defaults would diverge from reality and fail here first.
+
+    Signature conformance against the installed transformers is pinned by
+    `TestFakeProcessorSignatureConformance` below — fake drift from the real
+    contract fails loudly instead of silently re-opening this gap.
+
+    Tokenization is deterministic: one token id per character of the joined
+    conversation content (`ord(c) % (VOCAB_SIZE - 1)`, never colliding with
+    `GENERATION_PROMPT_SUFFIX_ID`), so a test can recover which text
+    produced which ids without a real tokenizer, plus the fixed suffix id
+    appended iff `add_generation_prompt=True`."""
 
     tokenizer = _FakeTokenizer()
 
     def apply_chat_template(
-        self, messages=None, *, prompt=None, add_generation_prompt=True, tokenize=True, return_tensors="pt", return_dict=True
+        self,
+        conversation,
+        *,
+        add_generation_prompt=False,
+        tokenize=False,
+        return_tensors=None,
+        return_dict=False,
+        **kwargs,
     ):
-        assert tokenize and return_dict  # this fake only implements the shape the composed path actually uses
-        if messages is not None:
-            text = "".join(m["content"] for m in messages)
-        else:
-            text = prompt or ""
+        if not (tokenize and return_dict):
+            raise NotImplementedError(
+                "this fake only implements the tokenize=True/return_dict=True arm the composed path uses"
+            )
+        text = "".join(m["content"] for m in conversation)
         ids = [ord(c) % (VOCAB_SIZE - 1) for c in text]
         if add_generation_prompt:
             ids = ids + [GENERATION_PROMPT_SUFFIX_ID]
@@ -357,6 +384,130 @@ class TestPrefillTemplatedTurn:
         prefill_templated_turn(model, cache, {"prompt": "hi"}, add_generation_prompt=False)
 
         assert encoder.calls == [2]  # "hi" only, no suffix id
+
+    def test_prompt_shape_normalizes_to_single_user_turn_conversation(self, monkeypatch):
+        """Issue #257 live-failure regression (2026-08-05): `{"prompt": ...}`
+        prompt_kwargs must be NORMALIZED into the positional `conversation`
+        arg — mirroring `pipeline_diffusion_gemma.py:117`'s single-user-turn
+        wrap — never `**`-expanded into `apply_chat_template` (whose real
+        signature has no `prompt=` param and a required positional
+        `conversation`; the old expansion raised `TypeError` on first live
+        run). Captures the exact conversation the processor receives."""
+        model, _, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+
+        captured = {}
+        real_method = _FakeProcessor.apply_chat_template
+
+        def _spy(self, conversation, **kw):
+            captured["conversation"] = conversation
+            return real_method(self, conversation, **kw)
+
+        monkeypatch.setattr(_FakeProcessor, "apply_chat_template", _spy)
+
+        prefill_templated_turn(model, cache, {"prompt": "hi"})
+
+        assert captured["conversation"] == [{"role": "user", "content": "hi"}]
+
+    def test_messages_shape_passes_through_as_positional_conversation_unchanged(self, monkeypatch):
+        """The `{"messages": [...]}` (thinking=True) shape reaches
+        `apply_chat_template` as the positional `conversation`, same object,
+        no re-wrap — the second arm of the live-failure fix."""
+        model, _, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+        messages = [
+            {"role": "system", "content": "T"},
+            {"role": "user", "content": "hi"},
+        ]
+
+        captured = {}
+        real_method = _FakeProcessor.apply_chat_template
+
+        def _spy(self, conversation, **kw):
+            captured["conversation"] = conversation
+            return real_method(self, conversation, **kw)
+
+        monkeypatch.setattr(_FakeProcessor, "apply_chat_template", _spy)
+
+        prefill_templated_turn(model, cache, {"messages": messages})
+
+        assert captured["conversation"] is messages
+
+
+class TestFakeProcessorSignatureConformance:
+    """Issue #257 live-failure postmortem (2026-08-05): the previous
+    `_FakeProcessor.apply_chat_template` accepted a `prompt=` kwarg the real
+    `transformers.ProcessorMixin.apply_chat_template` does not have, so the
+    full unit suite passed over a call shape that raised `TypeError` on
+    first live execution. This class pins the fake to the real installed
+    signature on every property the production code path depends on — fake
+    drift from the real contract now fails loudly here instead of surviving
+    to a live run."""
+
+    def _signatures(self):
+        import inspect
+
+        from transformers.processing_utils import ProcessorMixin
+
+        return (
+            inspect.signature(ProcessorMixin.apply_chat_template),
+            inspect.signature(_FakeProcessor.apply_chat_template),
+        )
+
+    def test_conversation_is_required_positional_in_both(self):
+        import inspect
+
+        real, fake = self._signatures()
+        for sig in (real, fake):
+            conv = sig.parameters["conversation"]
+            assert conv.default is inspect.Parameter.empty
+            assert conv.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+
+    def test_used_keyword_params_exist_with_matching_defaults(self):
+        real, fake = self._signatures()
+        for name in ("add_generation_prompt", "tokenize", "return_tensors", "return_dict"):
+            assert name in real.parameters, f"real signature lost {name!r} — production call must be re-grounded"
+            assert name in fake.parameters, f"fake signature missing {name!r}"
+            assert real.parameters[name].default == fake.parameters[name].default, (
+                f"fake default for {name!r} drifted from the real signature"
+            )
+
+    def test_neither_signature_has_pipeline_level_prompt_or_messages_params(self):
+        """`prompt`/`messages` are `DiffusionGemmaPipeline.__call__` names —
+        the exact confusion the live failure was made of."""
+        real, fake = self._signatures()
+        for name in ("prompt", "messages"):
+            assert name not in real.parameters
+            assert name not in fake.parameters
+
+    def test_both_swallow_unknown_kwargs_like_the_live_failure_did(self):
+        """Both signatures end in `**kwargs` — which is WHY the stray
+        `prompt=` kwarg didn't raise on its own and the failure surfaced as
+        the missing positional instead. The fake must reproduce that
+        swallow, or it would fail differently from reality."""
+        import inspect
+
+        real, fake = self._signatures()
+        for sig in (real, fake):
+            assert any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
+    def test_prompt_shaped_kwargs_expansion_raises_type_error_like_live(self):
+        """The verbatim broken call shape (PR #262's original
+        `**prompt_kwargs` expansion, thinking=False arm) against the
+        real-signature fake reproduces the live `TypeError` — the regression
+        test that would have caught this before it shipped."""
+        proc = _FakeProcessor()
+        with pytest.raises(TypeError, match="conversation"):
+            proc.apply_chat_template(
+                **{"prompt": "hi"},  # noqa: PIE804 — the dict-expansion shape IS the reproduced bug
+                add_generation_prompt=True,
+                tokenize=True,
+                return_tensors="pt",
+                return_dict=True,
+            )
 
 
 class TestComposedPrefillDispatch:
