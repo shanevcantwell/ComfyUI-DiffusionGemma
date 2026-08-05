@@ -23,7 +23,14 @@ research rungs** (the liquid-phase program). Same letter, different ledgers.
 
 ---
 
-## Roadmap (recorded 2026-07-31, operator-set)
+## Roadmap (recorded 2026-08-05, operator-set)
+
+**Spine, stated once so it can't be missed:** the operator priority for this
+bracket is **get a working `kv_cache` channel out** — end to end, both
+surfaces — **without shipping regression or incomplete speculative ideas
+alongside it.** Everything below is sequenced against that spine: what's
+closed on it, what's guarded-open on it, and what's explicitly parked off
+it. Nothing parked below gained a new promise in this pass.
 
 **Version namespace note.** The "0.5.0 AutoRound INT4 release" attempt died
 unshipped — no version literal, tag, or registry artifact ever bore the name
@@ -31,15 +38,6 @@ unshipped — no version literal, tag, or registry artifact ever bore the name
 The name is therefore reused below. 0.4.2 remains available as the stabilization
 tag.
 
-- **0.4.2 — stabilization patch (next ship).** The product-fix batch on the
-  reconciled trunk: #191 (VRAM guard reports the measured condition, not a menu),
-  #187 (encode device pin under whole-fit), #188 (live-view single mint), #169
-  (F0 test baseline), #151 (mcp<2.0 verification), #161 (CI actions bump), #175
-  (node explanations, draft tier), plus the Encode/Denoise visibility disposition
-  (operator call pending — the kv_cache door is LIVE: the Phase 4 drive body
-  landed `ac3c832` (PR #242, 2026-08-04) and `run_diffusion(kv_cache=...)`
-  now drives off the injected cache).
-  Ship discipline per #195 (gate integrity axis) and #196 (version/tag timing).
 - **0.5.0 — the refactor version, and only that** — **shipped 2026-08-03**, tag
   `v0.5.0` @ `c4beb3e`.
   [ADR-CDG-018](decisions/adr-cdg-018-decompose-loop-py.md): `dgemma/loop.py`
@@ -48,45 +46,118 @@ tag.
   live-verified 4/4 on real weights (#129, closed). The registry still serves
   0.4.2 — a 0.5.0 registry publish is a separate operator call. Post-tag on
   `main`: #119 offload-aware tied-weights guard (`f04688f`), rides the next tag.
-  Banked beyond the topology bracket: #219 (salience decomposition: model.py
-  map + prose evacuation).
-- **Next bracket — opened 2026-08-04 (run ledger: #225; ordering: KV-encoder
-  live, GGUF design beside): CLOSED.** (a) **KV-cache encoder — done.** Q-2
-  smoke re-run (Amendment 1 on #62, run 2026-08-04b, ledger #240) PASSed
-  3/3 seeds live on real weights; Phase 4 (the decoder drive body) then
-  landed `ac3c832` (PR #242). The `run_diffusion(kv_cache=...)` door now
-  drives the decoder off an injected cache end to end. Next open work reads
-  from that reality, not from the prior in-flight state: #47's
-  cache-perturbation experiments are unlocked; #245 (prompt-under-injection
-  composition design, `auto:draft`) is queued; #243 tracks `loop.py`'s
-  size drift past ADR-CDG-018's 5k threshold. Knowledge-locality fix
-  (function-scoped live-proof banking + promote an Encode scenario into the
-  E2E battery) is #228.
-  (b) **GGUF engine/packaging — corrected per #223.** "Rung 4" was roadmap
-  shorthand, not the issue-thread sequence. Actual gate chain: rung-1 probe
-  (partial 2026-08-04: #24423 leg live at 55.5–74.6 tok/s Q8_0,
-  byte-identical seed-rerun; #24427 legs absent from host) → engine ADR
-  [ADR-CDG-020](decisions/adr-cdg-020-gguf-engine-sourcing-pinned-pr-branch.md)
-  (proposed; ratification **HOLD** until the #24427 legs run) → CI packaging.
-  Note: `c3fb972` is a pinned upstream draft-PR branch, not owned code —
-  "owned pin" language retired.
-- **Lifecycle proposal pending:**
-  [ADR-CDG-021](decisions/adr-cdg-021-per-surface-vram-tenancy-ownership.md)
-  (per-surface VRAM tenancy — MCP/transformers lane may OOM fail-loud;
-  ComfyUI surface integrates `comfy.model_management`; grown from an operator
-  observation, #229) — proposed, operator disposition open; binds the #138
-  bracket to in-process consumption if accepted. Topology (#138) and #219
-  remain queued below.
+- **Composition/KV bracket — CLOSED.** The Encode/Denoise visibility
+  disposition that this roadmap previously carried as "operator call
+  pending" is resolved by supersession chain, in order:
+  1. [ADR-CDG-024](decisions/adr-cdg-024-prompt-under-injection-composition.md)
+     (independent encoder context + templated denoiser turn, prefilled onto
+     the injected cache) — **Accepted**, ratified at `b01a992` (PR #256,
+     2026-08-05) — supersedes #248's interim prompt+KV_CACHE exclusivity
+     invariant by name.
+  2. **#257 implements ADR-CDG-024** — merged `0b6bd1a` (PR #262,
+     2026-08-05): the drive body composes `prompt` + `kv_cache` instead of
+     ignoring `prompt` under injection.
+  3. **Live-verified at AIO parity, operator-field-confirmed** during PR
+     #262's acceptance session (2026-08-05): the banked #245 stall trace
+     converges under the composed drive body, matching the AIO control's
+     healthy range — the falsifiable acceptance ADR-CDG-024 §5 named.
+  4. **#266 — run-log injection-provenance fields** — merged `ad8a8e7`
+     (PR #268, 2026-08-05): closes the attribution gap the acceptance
+     session hit twice (KV-path vs AIO indistinguishable in a banked log).
+  The kv_cache channel's ComfyUI-surface half is therefore **shipped and
+  verified**, not pending — #103's original "operator call pending" framing
+  no longer applies to this bracket.
+- **Remainders — guarded, not silent, not "just a bugfix."** PR #262's
+  Opus design-gate review surfaced two defects in the composed path,
+  **both fenced by interim ingress guards in PR #270 (in gate review)**
+  rather than shipped open or rushed to a fix that skips design. This
+  guard-then-fix sequencing *is* the "no regression, no incomplete ideas"
+  mechanism for this bracket — name it as such when reading the two rows
+  below:
+  - **#263 — block>0 splice offset is short by the prefilled-turn length**
+    under a composed (`prompt`+`kv_cache`) multi-block run
+    (`gen_length > canvas_length`). Not a plain bugfix: the fix needs a
+    small design confirmation first (whether/how block>0 re-encode should
+    condition on the prefilled turn at all is ADR-CDG-024-adjacent,
+    undecided). Guarded today by `reject_multi_block_composed_prefill`
+    (PR #270) — single-block composed runs and multi-block pure injection
+    remain allowed; only the uncovered shape is rejected at ingress.
+    Retires when the design-confirmed fix lands.
+  - **#265 — `prefill_templated_turn` mutates the injected `KVCache` in
+    place**, so a caller reusing the same cache object (observed live:
+    ComfyUI node-result caching reusing an unchanged `DGemmaEncode` output)
+    silently inherits a prior run's prefilled turn. Architectural, not a
+    plain bugfix: sits against the stateless-core rule (ARCHITECTURE.md
+    rule 6) and needs an ADR-CDG-024 amendment to pick a shape (prefill-onto-
+    copy vs. defensive re-mint/invalidation vs. documented caller contract)
+    before implementation. Guarded today by ingress check **V7** in
+    `validate_kv_cache_ingress` (PR #270) — rejects when a cache's actual
+    `get_seq_length()` exceeds its minted `cumulative_length`. Retires when
+    the amendment-confirmed fix lands.
+- **Next implementation bracket — #259, MCP KV-path parity.** Design ratified
+  as [ADR-CDG-025](decisions/adr-cdg-025-mcp-kv-cache-handle-registry.md)
+  (Accepted, merged `d6b9991`, PR #258, 2026-08-05); issue #259 is
+  `auto:fix pri:now`, unblocked. This is the kv_cache channel's **second
+  surface** — an `encode`/`generate(kv_cache_id=...)` MCP door over a bounded,
+  model-scoped cache-handle registry in `StateManager` — and its completion
+  is what makes "a working kv_cache channel" true across both surfaces, not
+  just ComfyUI's. Repairs the rule-2 inversion tracked by #103.
+- **Parked explicitly — not on the KV-channel line, no new promises added.**
+  #260 (Tier-2 cache surgery: splice/ablate/scale + disk serialization) is
+  design-first and sequenced behind #257/#259 — untouched by this pass. The
+  research-track probes (Track B below, S/C/X/G/F-tracks) stay in their
+  existing research section, unchanged.
+- **Quant — re-sequenced, gated.** #264 (`_assert_tie_integrity` crashes on
+  AutoRound's `QuantLinear`, no `.weight` attribute — every int4-AutoRound
+  load dies post-load) sits inside #211's quantized-engine bracket and
+  **gates** it: the AutoRound lane must load end-to-end before any
+  alternate quant engine (e.g. #211's GPTQModel scoping) is worth
+  considering. **bf16 (`quant="none"`) remains the only working load path**
+  today — see #269 (merged, `0d348ea`) for the full corrected quant/GGUF
+  ground state on `README.md`/`AGENTS.md`.
+- **#131 — GGUF rung-1: parked until an operator-scheduled GPU window.**
+  Read as parked, not in-flight: rung-0 build is green (`c3fb972`, pinned
+  upstream draft-PR branch off ggml-org/llama.cpp#24423, not owned code),
+  but the rung-1 inference/telemetry probe has not run. [ADR-CDG-020](decisions/adr-cdg-020-gguf-engine-sourcing-pinned-pr-branch.md)
+  stays **proposed** — ratification and the #24423-vs-#24427 pin choice
+  wait on that probe's readback, which waits on the GPU window.
+- **Salience debt — reconciled as sibling ungated items.** #243 (`dgemma/loop.py`
+  drifted to ~908 lines / ~12k tokens, past ADR-CDG-018's 5k threshold) and
+  #219 (decompose `model.py` + evacuate prose from `loop.py`/`types.py`,
+  broader salience-ceiling pass) are both open, both ungated, tracked at
+  their own labeled priorities (#243 `pri:later`, #219 `pri:next`) — no
+  topology-bracket dependency on either; the prior framing that gated #219
+  behind the #138 topology bracket named no actual technical dependency and
+  is retired.
 - **Next bracket — topology (version minted at opening):**
   [ADR-CDG-019](decisions/adr-cdg-019-mcp-as-contract-topology-remediation.md)
   (accepted 2026-08-03; sequenced after #129; `dgemma_mcp/` rename per gate
   finding I1) → topology remediation (#138), import-gate consolidation (#57),
   and the interrupt fix (#140, rides the restructure per operator 2026-08-01).
+- **Lifecycle proposal pending:**
+  [ADR-CDG-021](decisions/adr-cdg-021-per-surface-vram-tenancy-ownership.md)
+  (per-surface VRAM tenancy — MCP/transformers lane may OOM fail-loud;
+  ComfyUI surface integrates `comfy.model_management`; grown from an operator
+  observation, #229) — proposed, operator disposition open; binds the #138
+  bracket to in-process consumption if accepted.
 - **The seam (post-refactor) — done.**
   [ADR-CDG-012](decisions/adr-cdg-012-mitm-seam-ar-diffusion-kv-cache.md)
   Phase 4 landed `ac3c832` (PR #242): the Q-2 real-weights de-risk smoke
-  PASSed (#62), and the decoder is now genuinely driven off injected caches.
-  #47's known-provenance cache-perturbation experiments are open.
+  PASSed (#62), and the decoder is now genuinely driven off injected caches,
+  composed with a templated prompt turn per ADR-CDG-024 above. #47's
+  known-provenance cache-perturbation experiments are open, unlocked by
+  the closed composition bracket.
+- **Release line — v0.6.0.** Snaps after PR #270 (the #263/#265 interim
+  guards) merges, through #163's release gate: a seat-run fresh-install +
+  live smoke on the dev host before the operator sees a version. #196's
+  version-bump/tag-timing question resolves in that same act (mint the
+  literal and the tag at gate PASS). The release's known limitations are
+  exactly the guarded #263/#265 pair above plus the standing quant/GGUF
+  state (#264-gated AutoRound, #131-parked GGUF, bf16-only working path).
+- **#175 — in-UI node explanations.** Substantially delivered by PR #270's
+  tooltip/`DESCRIPTION` build-out (the `DGemmaDenoise` prompt/kv_cache
+  composition-vs-exclusivity language, the guard-rejection naming) —
+  disposition (close vs. residual scope) pending gate confirmation on #270.
 - **Research arc.** The capture instrument is complete (Tiers 0–2 + display
   consumers, [ADR-CDG-014](decisions/adr-cdg-014-frame-capture-discipline.md)).
   Queued: #186 (bf16-vs-INT4 trace comparison), #28 (flagship global-constraint
