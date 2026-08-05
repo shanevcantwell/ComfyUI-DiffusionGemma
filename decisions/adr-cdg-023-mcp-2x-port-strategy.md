@@ -1,11 +1,17 @@
 # ADR-CDG-023 — mcp SDK 2.x port strategy: hold the `<2.0.0` cap as standing posture, with a named revisit trigger
 
-**Status**: `proposed` — ratification authority: the OPERATOR, per this repo's
-process convention (independent Opus design-gate review; the operator sets
-intent, reads conclusions, holds the standing veto). This ADR does not open
+**Status**: `accepted` — ratified via independent Opus design-gate review on
+[PR #250](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/250),
+verdict PASS (2026-08-05, review commit `3acb834`). This ADR does not open
 implementation — it is the decision record the issue's own bounce clause
-required before any port work could begin.
+required before any port work could begin; the 2.x port itself (Option B or
+C) is deferred follow-on work tracked under a new issue filed off this ADR.
 **Date**: 2026-08-04
+
+**Ratification note**: PASS — doctrine-conformant, internally consistent,
+cross-artifact seams (ADR-CDG-001, ADR-CDG-008, ADR-CDG-019) correctly scoped,
+load-bearing mechanical claims verified against ground truth. Full review text
+on PR #250.
 **Related**:
 - [Issue #151](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/151) — this ADR's tracking issue (mcp SDK 2.x breakage; the immediate-fix/follow-up-port split; the 2026-08-03 bounce this ADR resolves)
 - [Ledger #247](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/247) — the autonomous-run batch this work executes under
