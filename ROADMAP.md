@@ -69,8 +69,9 @@ tag.
   no longer applies to this bracket.
 - **Remainders — guarded, not silent, not "just a bugfix."** PR #262's
   Opus design-gate review surfaced two defects in the composed path,
-  **both fenced by interim ingress guards in PR #270 (in gate review)**
-  rather than shipped open or rushed to a fix that skips design. This
+  **both fenced by the interim ingress guards of PR #270 (merged `921f944`,
+  2026-08-05)** rather than shipped open or rushed to a fix that skips
+  design. This
   guard-then-fix sequencing *is* the "no regression, no incomplete ideas"
   mechanism for this bracket — name it as such when reading the two rows
   below:
@@ -80,9 +81,9 @@ tag.
     small design confirmation first (whether/how block>0 re-encode should
     condition on the prefilled turn at all is ADR-CDG-024-adjacent,
     undecided). Guarded today by `reject_multi_block_composed_prefill`
-    (PR #270) — single-block composed runs and multi-block pure injection
-    remain allowed; only the uncovered shape is rejected at ingress.
-    Retires when the design-confirmed fix lands.
+    (PR #270, merged `921f944`) — single-block composed runs and multi-block
+    pure injection remain allowed; only the uncovered shape is rejected at
+    ingress. Retires when the design-confirmed fix lands.
   - **#265 — `prefill_templated_turn` mutates the injected `KVCache` in
     place**, so a caller reusing the same cache object (observed live:
     ComfyUI node-result caching reusing an unchanged `DGemmaEncode` output)
@@ -91,9 +92,9 @@ tag.
     rule 6) and needs an ADR-CDG-024 amendment to pick a shape (prefill-onto-
     copy vs. defensive re-mint/invalidation vs. documented caller contract)
     before implementation. Guarded today by ingress check **V7** in
-    `validate_kv_cache_ingress` (PR #270) — rejects when a cache's actual
-    `get_seq_length()` exceeds its minted `cumulative_length`. Retires when
-    the amendment-confirmed fix lands.
+    `validate_kv_cache_ingress` (PR #270, merged `921f944`) — rejects when
+    a cache's actual `get_seq_length()` exceeds its minted
+    `cumulative_length`. Retires when the amendment-confirmed fix lands.
 - **Next implementation bracket — #259, MCP KV-path parity.** Design ratified
   as [ADR-CDG-025](decisions/adr-cdg-025-mcp-kv-cache-handle-registry.md)
   (Accepted, merged `d6b9991`, PR #258, 2026-08-05); issue #259 is
@@ -148,18 +149,20 @@ tag.
   (known-provenance cache-perturbation) is **closed** (2026-08-05); its
   Tier-2 remainder is tracked by #260, parked above.
 - **Release line — v0.5.2** (operator ruling: "0.5.0 was refactor and this
-  is activating latent functionality"). Snaps after PR #270 (the #263/#265
-  interim guards) merges, through #163's release gate: a seat-run
-  fresh-install + live smoke on the dev host before the operator sees a
-  version. #196's version-bump/tag-timing question resolves in that same
-  act (mint the literal and the tag at gate PASS). The release's known
-  limitations are exactly the guarded #263/#265 pair above plus the
-  standing quant/GGUF state (#264-gated AutoRound, #131-parked GGUF,
-  bf16-only working path).
-- **#175 — in-UI node explanations.** Substantially delivered by PR #270's
-  tooltip/`DESCRIPTION` build-out (the `DGemmaDenoise` prompt/kv_cache
-  composition-vs-exclusivity language, the guard-rejection naming) —
-  disposition (close vs. residual scope) pending gate confirmation on #270.
+  is activating latent functionality"). PR #270 (the #263/#265 interim
+  guards) merged (`921f944`, 2026-08-05); the v0.5.2 line now waits only on
+  #163's release gate: a seat-run fresh-install + live smoke on the dev
+  host before the operator sees a version. #196's version-bump/tag-timing
+  question resolves in that same act (mint the literal and the tag at gate
+  PASS). The release's known limitations are exactly the guarded #263/#265
+  pair above plus the standing quant/GGUF state (#264-gated AutoRound,
+  #131-parked GGUF, bf16-only working path).
+- **#175 — in-UI node explanations.** PR #270's gate PASS (merged `921f944`)
+  assessed #175 as **partially delivered** by its tooltip/`DESCRIPTION`
+  build-out (the `DGemmaDenoise` prompt/kv_cache composition-vs-exclusivity
+  language, the guard-rejection naming) — issue rescoped (2026-08-05) to
+  the remainder: DGemmaRunLogWriter, the gen_length tooltip, and
+  DGemmaTokenTrace.
 - **Research arc.** The capture instrument is complete (Tiers 0–2 + display
   consumers, [ADR-CDG-014](decisions/adr-cdg-014-frame-capture-discipline.md)).
   Queued: #186 (bf16-vs-INT4 trace comparison), #28 (flagship global-constraint
