@@ -110,6 +110,31 @@ class RunConfig:
     dtype: str
 
 
+def _provenance_stamp(provenance: Any | None) -> dict | None:
+    """Compact serialization of OUT-3's `Provenance` identity (issue #266):
+    `None` for every non-injected run (mirrors `injected_cache_provenance`'s
+    own honest-absence discipline — never a fabricated stamp). When present,
+    follows OUT-3's own tiering (`dgemma.types.Provenance`'s docstring)
+    rather than inventing a parallel encoding: `minting_sequence_length`
+    stands in for the full token-id tuple (a run with a long minted prefix
+    would otherwise bloat the header with a raw id array for a fact this
+    schema only needs the SHAPE of, not the content — `edit_script_length`
+    is the tier-2 companion count, `model_repo_id`/`tokenizer_fingerprint`
+    are the identity-alignment fields V4 checks at ingress). Never the cache
+    tensors (those were never on `Provenance` to begin with, OUT-1's own
+    retention policy)."""
+    if provenance is None:
+        return None
+    return {
+        "minting_sequence_length": (
+            len(provenance.minting_sequence) if provenance.minting_sequence is not None else None
+        ),
+        "edit_script_length": len(provenance.edit_script),
+        "model_repo_id": provenance.model_repo_id,
+        "tokenizer_fingerprint": provenance.tokenizer_fingerprint,
+    }
+
+
 def build_run_log_header(run_config: RunConfig, canvas_trace: CanvasTrace) -> dict:
     """Line-1 header record (§5 of the ratified plan). Pulls
     `num_inference_steps_effective`/`scheduler_name`/`scheduler_config`
@@ -118,7 +143,28 @@ def build_run_log_header(run_config: RunConfig, canvas_trace: CanvasTrace) -> di
     does NOT carry, G-1). A fresh `run_id` (uuid4 hex) is minted per header
     call — the cross-reference key a future image-filename correlation
     (out of scope, §9) would join against
-    (`CONSERVE-ACROSS-THE-DATA-BOUNDARY`)."""
+    (`CONSERVE-ACROSS-THE-DATA-BOUNDARY`).
+
+    **Injection-provenance fields (issue #266):** `injection_present` is the
+    one-field discriminant the issue names — `True` iff this run's trace
+    carries an OUT-3 stamp (`canvas_trace.injected_cache_provenance is not
+    None`), i.e. which drive body ran (`run_diffusion`'s with-cache path vs.
+    the chat-templated no-cache path). `injected_cache_provenance` carries
+    that stamp's compact identity (`_provenance_stamp` above) — `None` for
+    every non-injected run, the same additive-optional shape
+    `raw_canvas_ids`/`CanvasTrace.injected_cache_provenance` itself already
+    uses. No separate `denoiser_prompt_empty` flag: `prompt` already rides
+    this header verbatim (unchanged, above), so emptiness is one string
+    comparison a reader already has the field for — adding a second boolean
+    that says nothing `bool(header["prompt"])` doesn't already say would be
+    redundant surface, not a new fact (named deviation from the issue's
+    three-item list, not a silent drop). Both new keys are additive to
+    `SCHEMA_VERSION`
+    (`dg-runlog/1` unchanged) — no reader in this repo asserts a closed key
+    set against the header (`_assert_known_schema_or_reject`-style checks
+    only ever compare the `schema` string), and `dg-runlog/2` is already
+    reserved for the Tier-1/Tier-2 core-measurement fields (module
+    docstring), not for a surface-side additive key."""
     scheduler_config = canvas_trace.scheduler_config
     return {
         "schema": SCHEMA_VERSION,
@@ -142,6 +188,8 @@ def build_run_log_header(run_config: RunConfig, canvas_trace: CanvasTrace) -> di
         "quant": run_config.quant,
         "device": run_config.device,
         "dtype": run_config.dtype,
+        "injection_present": canvas_trace.injected_cache_provenance is not None,
+        "injected_cache_provenance": _provenance_stamp(canvas_trace.injected_cache_provenance),
     }
 
 
