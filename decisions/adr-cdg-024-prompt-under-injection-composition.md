@@ -1,6 +1,6 @@
 # ADR-CDG-024 — Prompt-under-injection composition: independent encoder context (KV) + templated denoiser turn
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-08-05
 **Related**: ADR-CDG-012 (MITM seam / `KV_CACHE` — this ADR amends §D.1 IN-2's
 open-question resolution, does not reopen the rest), ADR-CDG-001 (native
@@ -12,6 +12,69 @@ https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/253 at
 record this ADR is the design gate for), Issue #254 (commit/de-commit
 semantics under per-step recompute — cited for evidence-chain context, not
 amended here), Issue #62 (Phase 4 ledger, `ac3c832` / PR #242).
+
+## Ratification
+
+**Verdict: PASS** — independent Opus design-gate review (a reviewer that did
+not author this ADR), 2026-08-05, PR
+https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/pull/256. Ratified per
+this repo's waterfall process (design completes and is gate-ratified before
+implementation opens); this note flips the Status to Accepted and records each
+resolved gate check as a decision.
+
+Resolved gate checks:
+
+1. **Doctrine conformance — CONFIRMED.** ARCHITECTURE.md rule 5 (payloads mean
+   what they say) and rule 7 (declarative ingress) are read correctly. The
+   supersession argument is doctrinally sound rather than a waiver: once
+   `prompt` is tokenized, chat-templated, and prefilled onto the cache (§1),
+   "connected but ignored" no longer describes the pair, so the
+   `EMIT-CANONICAL / PARSE-AT-THE-DOOR` (ADR-CDG-001) ground for #248's
+   rejection is genuinely removed. Forward-pass framing is honoured — §1 gives
+   explicit token-sequence layouts (K/V attended by every canvas position), not
+   a chat-level "add a directive" framing. The greenfield anticipated-failure
+   rule is satisfied: §4 names four failure modes, each with a "Prevented by"
+   clause. Verified against `dgemma/ingress.py:238` (`reject_prompt_and_kv_cache`),
+   `dgemma/loop.py:131,238-240,258-274` (the with-cache drive body and block>0
+   re-encode the prefill generalizes), and `dgemma/loop.py:736-744` (the
+   `prompt_kwargs` construction §4 reuses).
+
+2. **Operator requirement — CONFIRMED.** The design cites the banked #245
+   evidence chain in full (two independent KV-injection stalls plus the
+   discriminating AIO control) and pins the mechanism (conditioning without an
+   attractor). §5 defines a falsifiable H0 with a concrete acceptance test — one
+   of the two banked stall traces must converge under the composed drive body,
+   with a predicted convergence range and an explicit falsification condition —
+   satisfying the "KV path must converge / stall prompt converging" requirement
+   as a live, non-mocked evaluation against the same real-weights fixture. The
+   ADR honestly flags (§Negative Consequences) that this run is not yet
+   performed and carries the obligation forward to the implementation PR.
+
+3. **Internal consistency — CONFIRMED.** Decision (Option B) matches the
+   Alternatives section, §1's token layout, and #245's title/use case. No
+   contradictions found across Decision, Rationale, Failure modes, and
+   Supersession sections.
+
+4. **Cross-artifact seams — CONFIRMED.** The mandatory #248 supersession is
+   explicit and named (§3 and §Supersession Relationships): the chosen
+   disposition is **re-permit + supersede** — #248's acceptance criterion
+   ("KV_CACHE connected AND non-empty prompt → ingress rejects") is reversed by
+   name, and `reject_prompt_and_kv_cache`'s removal/tombstone is scoped in §2
+   and Open Questions. The ADR-CDG-012 §D.1 IN-2 amendment relationship is
+   explicit (amends the open-question resolution only, does not reopen the
+   rest). #254 is correctly cited for evidence-chain context and explicitly not
+   amended.
+
+Advisory (non-blocking, no design change): §4's citation of
+`dgemma/loop.py:274` as the point `decoder_start` derives from
+`past_key_values.get_seq_length()` is a near-miss — `decoder_start` is computed
+at loop.py:269 from `cached_len + canvas_idx * canvas_length`, and
+`get_seq_length()` is read at loop.py:273 for the attention mask. The design
+intent (derive the splice offset from the cache's own advanced length rather
+than a hand-computed constant) is correct and matches the block>0 re-encode
+pattern; the implementer should bind the prefill splice to the cache's actual
+post-prefill `get_seq_length()`. Recorded for the implementation PR, not a
+ratification blocker.
 
 ---
 
