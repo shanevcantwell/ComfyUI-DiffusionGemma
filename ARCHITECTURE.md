@@ -25,6 +25,7 @@ Eight rules, all simultaneous. Rules 1–7 govern the core/surface seam; rule 8 
 5. **Payloads mean what they say.** Native socket types carry real payloads or they are lying — validated at ingress, fail on unknown. *(→ ADR-CDG-001 · `EMIT-CANONICAL / PARSE-AT-THE-DOOR`)*
 
 6. **The core is stateless across runs; only the model load persists.** No mutable run-state survives a `run_diffusion` call. Two identical calls yield identical telemetry. The ~53 GB model load is the *only* persisted object. *(→ ADR-CDG-008, #35 R5 · `STATELESS-CORE`)*
+   **GAP (#265):** composed prefill (`prefill_templated_turn`, called at `dgemma/loop.py:273`) mutates the caller's `kv_cache.cache` in place — cross-call state in a caller-held payload. Operationally guarded: V7 ingress detection rejects stale reuse fail-loud (`dgemma/kv_cache.py`), #263's guard blocks the multi-block composed sub-case; root-cause fix (prefill-onto-copy vs contract change) pending an ADR-CDG-024 amendment, tracked in #265. The statelessness test covers only the pure-injection path; a composed-path statelessness assertion is the pending fix's acceptance criterion.
 
 7. **Step-end intervention enters as declarative payloads through one door.** `run_diffusion` widens only by validated declarative payloads (`constraints=`, `control_signals=`, `capture=`). No surface-supplied closures or hooks — ingress rejects them. The only executable crossing is the read-only `on_frame` observer. `should_cancel` is the second sanctioned executable crossing — a surface-supplied read-only cancellation poll (returns bool, mutates nothing; `surfaces/mcp/commands/generate.py`, `surfaces/comfyui/sampler.py`). **GAP (#221):** `logit_hook` is engine-internal by convention only; ingress rejects the `constraints`+`logit_hook` combination but not a bare surface-supplied closure — hardening tracked in #221. *(→ ADR-CDG-010/011 · `ONE-DOOR`)*
 
@@ -65,6 +66,11 @@ Top (consumer) to bottom (substrate).
 
    **GAP (#137):** `surfaces/comfyui/` currently sits beside MCP calling core directly.
    The diagram above shows the target topology: ComfyUI consumes MCP tools.
+
+   **Dated note:** the diagram labels the MCP surface tier `mcp/` (i.e.
+   `surfaces/mcp/`), reflecting the tree as of this reading. ADR-CDG-019
+   (accepted, #138) renames it to `dgemma_mcp/` — accepted-not-landed as of
+   this pass; the rename has not occurred in the tree.
 ```
 
 ### Orchestration / consumer plane — sequences the surfaces (rule 8)
