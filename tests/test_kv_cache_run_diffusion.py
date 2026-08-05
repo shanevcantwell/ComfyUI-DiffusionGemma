@@ -91,9 +91,17 @@ def _matching_kv_cache(model: DGemmaModel, *, minting_sequence=(1, 2, 3)) -> KVC
     text_config = model.model.config.get_text_config()
     cache = FakeDynamicCache(num_layers=text_config.num_hidden_layers)
     geometry = geometry_from_model(model)
+    # Issue #265 (V7, aliasing): `cumulative_length` must match the cache's
+    # own actual `get_seq_length()` (here, `FakeDynamicCache`'s default
+    # `seq_len=4`) — a real KVCache always derives this fresh from the
+    # advanced cache (`encode_sequence`, never hand-tracked), and V7 rejects
+    # any payload where the two disagree. Same fix as `tests/conftest.py`'s
+    # `synthetic_kv_cache`.
+    num_layers = text_config.num_hidden_layers
+    cumulative_length = tuple([cache.get_seq_length()] * num_layers) if num_layers > 0 else ()
     return KVCache(
         cache=cache,
-        cumulative_length=tuple([0] * text_config.num_hidden_layers),
+        cumulative_length=cumulative_length,
         geometry=geometry,
         provenance=Provenance(
             minting_sequence=minting_sequence,
@@ -352,6 +360,192 @@ class TestPromptKVCacheComposition:
         )
         assert text == "TEXT:2"
         assert trace.injected_cache_provenance is None
+
+
+class TestMultiBlockComposedPrefillRejected:
+    """Issue #263 interim guard, at the `run_diffusion` boundary (not just
+    `dgemma.ingress`'s unit level `tests/test_ingress.py` covers): a
+    composed run (non-empty `prompt` + `kv_cache`) whose `gen_length`
+    exceeds `canvas_length` (more than one block) is rejected BEFORE the
+    scheduler/pipeline are constructed — same pre-construction-ordering
+    proof `TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction`
+    uses for the V-checks. Accept-path coverage for single-block composed
+    and multi-block pure-injection already lives in
+    `tests/test_kv_cache_drive_body.py` (`TestComposedPrefillDispatch`,
+    `TestMultiBlockContinuation`) — this class covers the one rejected
+    shape plus the guard's own pre-construction-ordering guarantee."""
+
+    def test_multi_block_composed_raises_before_scheduler_built(self, monkeypatch):
+        constructed: list = []
+
+        class TrackingScheduler:
+            def __init__(self, **kwargs):
+                constructed.append("scheduler")
+
+        class TrackingPipeline:
+            def __init__(self, **kwargs):
+                constructed.append("pipeline")
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", TrackingScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", TrackingPipeline)
+
+        model = _kv_capable_fake_model()  # canvas_length defaults to 256
+        cache = _matching_kv_cache(model)
+
+        with pytest.raises(ValueError, match="#263"):
+            run_diffusion(
+                model,
+                "a real prompt",
+                entropy_bound=0.1,
+                t_min=0.4,
+                t_max=0.8,
+                num_inference_steps=2,
+                gen_length=300,  # > canvas_length (256): needs 2 blocks
+                kv_cache=cache,
+            )
+
+        assert constructed == []
+
+    def test_multi_block_composed_raises_even_when_cache_would_otherwise_pass_v1_v7(self, monkeypatch):
+        """The #263 guard fires independently of V1-V7 cache-shape
+        validity — a well-formed, freshly-minted cache (passes every V-check)
+        is still rejected here because the SHAPE of the request (composed +
+        multi-block), not the cache's own integrity, is what's broken."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
+
+        model, encoder, _ = _fake_decoder_capable_model()  # canvas_length == 4
+        cache = _decode_kv_cache(model)
+
+        with pytest.raises(ValueError, match="#263"):
+            run_diffusion(
+                model,
+                "a real prompt",
+                entropy_bound=0.1,
+                t_min=0.4,
+                t_max=0.8,
+                num_inference_steps=2,
+                confidence=None,
+                gen_length=8,  # canvas_length is 4 for this fixture — 2 blocks
+                kv_cache=cache,
+            )
+        # Rejected before the drive body ever dispatches — no prefill fired.
+        assert encoder.calls == []
+
+    def test_single_block_composed_at_run_diffusion_boundary_still_passes(self, monkeypatch):
+        """Sanity companion to the reject tests above: the boundary itself
+        (gen_length == canvas_length) is NOT rejected — proves the guard's
+        `<=` comparison, not just its `>` reject arm, at the `run_diffusion`
+        call site (unit-level boundary coverage already lives in
+        `tests/test_ingress.py::TestRejectMultiBlockComposedPrefill`)."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
+
+        model, encoder, _ = _fake_decoder_capable_model()  # canvas_length == 4
+        cache = _decode_kv_cache(model)
+
+        run_diffusion(
+            model,
+            "a real prompt",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=4,  # == canvas_length: one block, allowed
+            kv_cache=cache,
+        )
+        assert len(encoder.calls) == 1  # the composed prefill fired
+
+
+class TestGrownCacheAliasingRejected:
+    """Issue #265 interim guard, at the `run_diffusion` boundary: a
+    `kv_cache` whose live tensors were already grown in place (e.g. by a
+    prior composed run's `prefill_templated_turn`, or — the everyday
+    trigger — ComfyUI reusing a cached `DGemmaEncode` node output across two
+    runs) is rejected by `validate_kv_cache_ingress`'s V7 check before the
+    scheduler/pipeline are constructed. Unit-level V7 coverage (every
+    boundary/ordering case) lives in `tests/test_kv_cache_ingress.py::
+    TestV7CacheAliasing`; this class proves the guard reaches through
+    `run_diffusion`'s own dispatch, not just the validator called directly."""
+
+    def test_grown_cache_raises_before_scheduler_built(self, monkeypatch):
+        constructed: list = []
+
+        class TrackingScheduler:
+            def __init__(self, **kwargs):
+                constructed.append("scheduler")
+
+        class TrackingPipeline:
+            def __init__(self, **kwargs):
+                constructed.append("pipeline")
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", TrackingScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", TrackingPipeline)
+
+        model = _kv_capable_fake_model()
+        cache = _matching_kv_cache(model)
+        # Simulate a prior composed run's in-place growth — cumulative_length
+        # (this payload's own field) does not reflect it, exactly the #265
+        # aliasing shape.
+        cache.cache.append(5)
+
+        with pytest.raises(ValueError, match="V7"):
+            run_diffusion(
+                model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache
+            )
+
+        assert constructed == []
+
+    def test_grown_cache_rejected_regardless_of_prompt(self, monkeypatch):
+        """The aliasing hazard is about the CACHE's own staleness, not
+        whether this particular call also composes a prompt — a grown cache
+        is rejected even for a pure-injection (empty-prompt) call, since the
+        stale prefilled content it already carries would still leak into
+        that run's decode."""
+        model = _kv_capable_fake_model()
+        cache = _matching_kv_cache(model)
+        cache.cache.append(1)
+
+        with pytest.raises(ValueError, match="V7"):
+            run_diffusion(
+                model, "also a prompt", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+                num_inference_steps=2, kv_cache=cache,
+            )
+
+    def test_fresh_unmutated_cache_passes_v7_and_reaches_construction(self, monkeypatch):
+        """Positive companion: a freshly-built, never-mutated cache (the
+        `_matching_kv_cache` helper's own default shape, self-consistent
+        since the fix above) passes V7 and reaches scheduler construction —
+        V7 rejects only a cache that has ACTUALLY grown past its minted
+        length, never an untouched one. Unit-level grounding of V7 against
+        the real `encode_sequence` minting call path (not just this
+        module's hand-built fixture) lives in
+        `tests/test_kv_cache_ingress.py::TestV7CacheAliasing::
+        test_fresh_matching_cache_passes_v7`."""
+        constructed: list = []
+
+        class TrackingScheduler:
+            def __init__(self, **kwargs):
+                constructed.append("scheduler")
+                raise _StopAfterIngress()
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", TrackingScheduler)
+
+        model = _kv_capable_fake_model()
+        cache = _matching_kv_cache(model)
+        assert cache.cache.get_seq_length() == cache.cumulative_length[0]
+
+        with pytest.raises(_StopAfterIngress):
+            run_diffusion(
+                model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=cache
+            )
+        assert constructed == ["scheduler"]  # ingress passed; reached construction
+
+
+class _StopAfterIngress(Exception):
+    """Sentinel raised by a monkeypatched scheduler constructor, so a test
+    can assert ingress passed (construction was reached) without needing a
+    fully decode-capable fake for a case that only cares about the ingress
+    boundary."""
 
 
 class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
