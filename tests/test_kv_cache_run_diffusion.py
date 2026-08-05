@@ -219,10 +219,9 @@ class TestKVCacheValidIngressDispatchesToDriveBody:
         cache = _decode_kv_cache(model, minting_sequence=(4, 5, 6))
 
         # No raise: Phase 4's drive body honors the cache instead of the
-        # retired fail-loud door. `prompt=""` — issue #248's exclusivity
-        # door rejects a non-empty prompt alongside a connected kv_cache;
-        # this class exercises cache-dispatch behavior, not that door (see
-        # TestPromptKVCacheExclusivityAtRunDiffusion for the door itself).
+        # retired fail-loud door. `prompt=""` — pure injection (ADR-CDG-024);
+        # this class exercises cache-dispatch behavior, not prompt/cache
+        # composition (see TestPromptKVCacheComposition for that).
         text, canvas_state, trace = run_diffusion(
             model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
             confidence=None, gen_length=4, kv_cache=cache,
@@ -286,50 +285,52 @@ class TestKVCacheValidIngressDispatchesToDriveBody:
         assert cache.provenance.minting_sequence == (1, 2, 3)
 
 
-class TestPromptKVCacheExclusivityAtRunDiffusion:
-    """Issue #248, at the `run_diffusion` boundary (not just the
+class TestPromptKVCacheComposition:
+    """ADR-CDG-024 (issue #257) — supersedes issue #248's interim
+    exclusivity, at the `run_diffusion` boundary (not just the
     `dgemma.ingress` unit level `tests/test_ingress.py` covers): a non-empty
-    `prompt` supplied together with a connected `kv_cache` is rejected BEFORE
-    the scheduler/pipeline are constructed and before the cache's own V1-V6
-    checks run — same pre-construction-ordering discipline
-    `TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction` proves for
-    a malformed cache. Each single-input path (prompt-only chat-templated;
-    cache-only injection) stays unaffected."""
+    `prompt` supplied together with a connected `kv_cache` now COMPOSES
+    (chat-templated, prefilled onto the cache) rather than being rejected.
+    This is the positive replacement for the old exclusivity-rejection test
+    — the plan's named highest-value regression guard: without it, a future
+    refactor could silently reintroduce #248's rejection, or silently drop
+    composition, with nothing here catching it. Each single-input path
+    (prompt-only chat-templated; cache-only injection) stays unaffected.
+    Decode-mechanics coverage (prefill call count, position-id splice,
+    `thinking=` composition) lives in
+    `tests/test_kv_cache_drive_body.py::TestComposedPrefillDispatch`; this
+    class only proves the pair reaches that dispatch without raising."""
 
-    def test_prompt_and_kv_cache_together_rejected_before_scheduler_built(self, monkeypatch):
-        constructed: list = []
+    def test_prompt_and_kv_cache_together_no_longer_raises_and_dispatches(self, monkeypatch):
+        """The exact pair `test_prompt_and_kv_cache_together_rejected_before_scheduler_built`
+        used to assert `ValueError` for now succeeds and dispatches to the
+        composed drive body — the guard-removal replacement the plan names
+        as mandatory (an empty gap here is how a guard-removal silently
+        reopens a rejected-input hole with no test noticing)."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
 
-        class TrackingScheduler:
-            def __init__(self, **kwargs):
-                constructed.append("scheduler")
+        model, encoder, _ = _fake_decoder_capable_model()
+        good_cache = _decode_kv_cache(model)
 
-        class TrackingPipeline:
-            def __init__(self, **kwargs):
-                constructed.append("pipeline")
+        text, canvas_state, trace = run_diffusion(
+            model, "a real prompt", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+            num_inference_steps=2, confidence=None, gen_length=4, kv_cache=good_cache,
+        )
 
-        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", TrackingScheduler)
-        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", TrackingPipeline)
-
-        model = _kv_capable_fake_model()
-        # Even a WELL-FORMED cache is rejected once a non-empty prompt is
-        # also given — the exclusivity door fires before the cache's own
-        # V1-V6 checks (which would otherwise pass here).
-        good_cache = _matching_kv_cache(model)
-
-        with pytest.raises(ValueError, match="prompt and kv_cache cannot both be given"):
-            run_diffusion(
-                model, "a real prompt", entropy_bound=0.1, t_min=0.4, t_max=0.8,
-                num_inference_steps=2, kv_cache=good_cache,
-            )
-        assert constructed == []
+        assert trace.injected_cache_provenance is not None
+        # The composed prefill fired exactly once before block 0's decode —
+        # proof this reached the composed path, not a silent no-op.
+        assert len(encoder.calls) == 1
 
     def test_empty_prompt_with_kv_cache_dispatches_to_injection_path_unchanged(self, monkeypatch):
         """Acceptance criterion 2: cache + empty prompt → injection path
         unchanged. Reuses the same decode-capable fixtures
-        `TestKVCacheValidIngressDispatchesToDriveBody` drives."""
+        `TestKVCacheValidIngressDispatchesToDriveBody` drives. Also asserts
+        the degradation proof (zero prefill-encoder calls) the plan asks
+        for — not just "doesn't raise"."""
         from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
 
-        model, _, _ = _fake_decoder_capable_model()
+        model, encoder, _ = _fake_decoder_capable_model()
         cache = _decode_kv_cache(model, minting_sequence=(4, 5, 6))
 
         text, canvas_state, trace = run_diffusion(
@@ -337,6 +338,7 @@ class TestPromptKVCacheExclusivityAtRunDiffusion:
             confidence=None, gen_length=4, kv_cache=cache,
         )
         assert trace.injected_cache_provenance is not None
+        assert encoder.calls == []
 
     def test_prompt_only_no_cache_chat_templated_path_unchanged(self, monkeypatch):
         """Acceptance criterion 2: prompt + no cache → chat-templated path

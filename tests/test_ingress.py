@@ -398,17 +398,20 @@ class TestHookSourceConflict:
 
 
 class TestPromptKVCacheExclusivity:
-    """Issue #248: `prompt` and `kv_cache=` are mutually exclusive — a
-    connected `KV_CACHE` with a non-empty `prompt` also supplied is rejected
-    at ingress. Pure unit tests against `reject_prompt_and_kv_cache` directly
-    (no fake pipeline/model needed — the function only inspects `prompt`/
-    `kv_cache` identity and `str` content, mirroring `TestHookSourceConflict`'s
-    shape for the sibling H1 check).
+    """ADR-CDG-024 (issue #257) tombstones issue #248's exclusivity rule:
+    `prompt` and `kv_cache=` now COMPOSE (chat-templated prefill, drive-body
+    level — see `tests/test_kv_cache_drive_body.py`) rather than being
+    mutually exclusive. `reject_prompt_and_kv_cache` is retained as a
+    documented no-op (not deleted — so a reader grepping issue #248 lands on
+    live code explaining the reversal); these are pure unit tests proving it
+    is unconditionally inert regardless of arguments (no fake pipeline/model
+    needed — same shape `TestHookSourceConflict` uses for the sibling H1
+    check).
 
-    `kv_cache` is a bare sentinel object here (not a real `KVCache`) —
-    `reject_prompt_and_kv_cache` only checks `is not None`, never touching
-    cache internals, so any non-`None` object exercises the same branch a
-    real `KVCache` would."""
+    `kv_cache` is a bare sentinel object here (not a real `KVCache`) — the
+    tombstoned function never touches cache internals (it never touched
+    anything at all, now), so any non-`None` object exercises the same
+    (no-op) branch a real `KVCache` would."""
 
     _SOME_CACHE = object()
 
@@ -424,29 +427,31 @@ class TestPromptKVCacheExclusivity:
 
     def test_empty_prompt_with_kv_cache_passes(self):
         """Empty/absent prompt alongside a cache is the intended
-        injection-only shape (#248 acceptance criterion 2) — distinct from
-        #241's separate empty-text seam at the `encode_sequence` door, which
-        this check never touches."""
+        injection-only shape — distinct from #241's separate empty-text seam
+        at the `encode_sequence` door, which this (now no-op) check never
+        touched even under #248's original rule."""
         reject_prompt_and_kv_cache("", self._SOME_CACHE)  # must not raise
 
     def test_whitespace_only_prompt_with_kv_cache_passes(self):
-        """Whitespace-only prompt is treated the same as empty — `.strip()`
-        makes this an intentional design choice (not merely `!= ""`), since a
-        prompt that tokenizes to nothing meaningful is not a real conflicting
-        second input."""
+        """Whitespace-only prompt alongside a cache — inert under the
+        tombstone regardless of `.strip()` semantics, which only mattered
+        while the function still raised."""
         reject_prompt_and_kv_cache("   \n\t  ", self._SOME_CACHE)  # must not raise
 
-    def test_non_empty_prompt_with_kv_cache_rejected(self):
-        with pytest.raises(ValueError, match="prompt and kv_cache cannot both be given"):
-            reject_prompt_and_kv_cache("hello", self._SOME_CACHE)
-        with pytest.raises(ValueError, match="Exactly one of the denoiser prompt or an injected KV_CACHE"):
-            reject_prompt_and_kv_cache("hello", self._SOME_CACHE)
+    def test_non_empty_prompt_with_kv_cache_no_longer_rejected(self):
+        """ADR-CDG-024 (issue #257): the pair this used to reject
+        (`test_non_empty_prompt_with_kv_cache_rejected`, pre-tombstone) is
+        now accepted — this is the tombstone's own regression guard: a
+        future accidental un-tombstoning would be caught here."""
+        reject_prompt_and_kv_cache("hello", self._SOME_CACHE)  # must not raise
 
-    def test_reject_message_names_both_supplied_inputs_measured_condition_only(self):
-        """#248 acceptance criterion 1: the message names both supplied
-        inputs (measured-condition-only, #191 principle) — no cause menu."""
-        with pytest.raises(ValueError, match=r"prompt supplied \(5 chars\) AND a KV_CACHE is connected"):
-            reject_prompt_and_kv_cache("hello", self._SOME_CACHE)
+    def test_tombstone_returns_none_regardless_of_arguments(self):
+        """The no-op's explicit contract (ADR-CDG-024 Open Question 1's
+        "unreachable/no-op" resolution) — `None` for every call shape, not
+        just non-raising."""
+        assert reject_prompt_and_kv_cache(None, None) is None
+        assert reject_prompt_and_kv_cache("hello", self._SOME_CACHE) is None
+        assert reject_prompt_and_kv_cache("", self._SOME_CACHE) is None
 
 
 class TestValidateIngressComposition:

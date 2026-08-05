@@ -113,19 +113,20 @@ else:
     )
 
 class DGemmaDenoise:
-    """Drives the denoising loop for one prompt, optionally consuming a
-    `DGEMMA_KV_CACHE` injected via `DGemmaEncode` (IN-2)."""
+    """Drives the denoising loop for one prompt, optionally composed with a
+    `DGEMMA_KV_CACHE` injected via `DGemmaEncode` (IN-2, ADR-CDG-024)."""
 
     DESCRIPTION = (
         "Drives the denoising loop for one prompt, optionally conditioned "
         "on a KV-cache. Identical knob surface and six outputs to "
         "DGemmaSampler, plus one extra input: the optional kv_cache (from "
         "DGemmaEncode) — wire it to inject a known-provenance cache "
-        "(IN-2); leave it unwired for an unconditioned run. Exactly one of "
-        "prompt or kv_cache is permitted (issue #248): a connected kv_cache "
-        "requires prompt to be left empty, since the with-cache path never "
-        "tokenizes it — supplying both is rejected at ingress rather than "
-        "silently ignoring prompt. Outputs: text "
+        "(IN-2); leave it unwired for an unconditioned run. prompt and "
+        "kv_cache compose (ADR-CDG-024, issue #257): a non-empty prompt "
+        "alongside a connected kv_cache is the current-turn text — "
+        "chat-templated and prefilled onto the cache before decoding "
+        "begins. Leave prompt empty alongside a connected kv_cache for "
+        "pure injection (no prefill). Outputs: text "
         "(decoded result), canvas_state (a resumable/validity save-state), "
         "canvas_trace (per-step analysis data — feeds DGemmaTrace/"
         "DGemmaTokenTrace), frames (one decoded string per captured step), "
@@ -150,11 +151,14 @@ class DGemmaDenoise:
                         "multiline": True,
                         "default": "",
                         "tooltip": (
-                            "The user turn to generate a response to. Leave "
-                            "empty when kv_cache is connected — exactly one "
-                            "of prompt or kv_cache is permitted (issue "
-                            "#248); a non-empty prompt alongside a "
-                            "connected kv_cache is rejected at ingress."
+                            "The user turn to generate a response to. "
+                            "Composes with kv_cache (ADR-CDG-024, issue "
+                            "#257): when kv_cache is connected, a non-empty "
+                            "prompt is the current-turn text — "
+                            "chat-templated and prefilled onto the cache "
+                            "before decoding. Leave empty alongside a "
+                            "connected kv_cache for pure injection (no "
+                            "prefill)."
                         ),
                     },
                 ),
@@ -246,13 +250,13 @@ class DGemmaDenoise:
                         "tooltip": (
                             "Optional KV-cache from DGemmaEncode to "
                             "condition this run on (IN-2). Leave unwired "
-                            "for an unconditioned run. Exactly one of "
-                            "prompt or kv_cache is permitted (issue #248) "
-                            "— when connected, leave prompt empty; the "
-                            "with-cache path never tokenizes prompt, so a "
-                            "non-empty prompt supplied alongside a "
-                            "connected cache is rejected at ingress "
-                            "rather than silently ignored."
+                            "for an unconditioned run. Composes with "
+                            "prompt (ADR-CDG-024, issue #257): a "
+                            "non-empty prompt alongside a connected cache "
+                            "is the current-turn text, chat-templated and "
+                            "prefilled onto the cache before decoding. "
+                            "Leave prompt empty for pure injection (no "
+                            "prefill)."
                         )
                     },
                 ),

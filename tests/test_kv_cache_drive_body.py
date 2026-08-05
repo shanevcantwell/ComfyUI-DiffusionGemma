@@ -41,7 +41,7 @@ from transformers.models.diffusion_gemma.modeling_diffusion_gemma import (
 
 from dgemma.composite import DiffusionCancelled, StepEndComposite
 from dgemma.capture import _FrameCollector
-from dgemma.kv_cache import geometry_from_model, tokenizer_fingerprint
+from dgemma.kv_cache import geometry_from_model, prefill_templated_turn, tokenizer_fingerprint
 from dgemma.loop import DGemmaPipeline, run_diffusion
 from dgemma.types import DGemmaModel, KVCache, Provenance
 from tests.conftest import FakeDGemmaModelConfig, FakeDynamicCache
@@ -64,8 +64,67 @@ class _FakeTokenizer:
         return "TEXT:" + ",".join(str(i) for i in ids)
 
 
+# Fixed "generation-prompt suffix" id this fake's `apply_chat_template`
+# always appends when `add_generation_prompt=True` — a stand-in for the real
+# `<start_of_turn>model\n` tail, deterministic and inspectable (tests assert
+# its presence/absence rather than trying to pin real tokenizer output).
+GENERATION_PROMPT_SUFFIX_ID = 900
+
+
 class _FakeProcessor:
+    """`apply_chat_template` mirrors the REAL
+    `transformers.ProcessorMixin.apply_chat_template` calling contract
+    (issue #257 live-failure fix, 2026-08-05 — the previous fake accepted a
+    `prompt=` kwarg the real signature does not have, so 1146 unit tests
+    passed over a call shape that raised `TypeError: ... missing 1 required
+    positional argument: 'conversation'` on first live execution):
+
+    - `conversation` is a REQUIRED positional (the real signature's first
+      param) — a caller that omits it raises `TypeError` here exactly as
+      the real one does.
+    - No `prompt`/`messages` parameters exist — those are
+      `DiffusionGemmaPipeline.__call__` names, not `apply_chat_template`
+      names; a stray `prompt=` kwarg is silently swallowed by `**kwargs`
+      (matching the real signature's trailing `**kwargs`) while the missing
+      positional still raises, reproducing the live failure mode faithfully.
+    - Keyword defaults match the real signature (`add_generation_prompt=
+      False`, `tokenize=False`, `return_tensors=None`, `return_dict=False`)
+      so a production caller silently relying on this fake's convenience
+      defaults would diverge from reality and fail here first.
+
+    Signature conformance against the installed transformers is pinned by
+    `TestFakeProcessorSignatureConformance` below — fake drift from the real
+    contract fails loudly instead of silently re-opening this gap.
+
+    Tokenization is deterministic: one token id per character of the joined
+    conversation content (`ord(c) % (VOCAB_SIZE - 1)`, never colliding with
+    `GENERATION_PROMPT_SUFFIX_ID`), so a test can recover which text
+    produced which ids without a real tokenizer, plus the fixed suffix id
+    appended iff `add_generation_prompt=True`."""
+
     tokenizer = _FakeTokenizer()
+
+    def apply_chat_template(
+        self,
+        conversation,
+        *,
+        add_generation_prompt=False,
+        tokenize=False,
+        return_tensors=None,
+        return_dict=False,
+        **kwargs,
+    ):
+        if not (tokenize and return_dict):
+            raise NotImplementedError(
+                "this fake only implements the tokenize=True/return_dict=True arm the composed path uses"
+            )
+        text = "".join(m["content"] for m in conversation)
+        ids = [ord(c) % (VOCAB_SIZE - 1) for c in text]
+        if add_generation_prompt:
+            ids = ids + [GENERATION_PROMPT_SUFFIX_ID]
+        if not ids:
+            ids = [0]  # apply_chat_template never returns a zero-length sequence in practice
+        return {"input_ids": torch.tensor([ids], dtype=torch.long)}
 
 
 class _FakeEncoderOutput:
@@ -217,7 +276,7 @@ class TestSkipFirstEncode:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -242,7 +301,7 @@ class TestSkipFirstEncode:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -260,6 +319,311 @@ class TestSkipFirstEncode:
         assert cache.cache is original_cache_obj
 
 
+class TestPrefillTemplatedTurn:
+    """ADR-CDG-024 (issue #257): `dgemma.kv_cache.prefill_templated_turn`
+    called directly against the same `_RecordingFakeEncoderModel`/
+    `FakeDynamicCache` fixtures the rest of this module uses — the unit-level
+    seam test the plan asks for, independent of `run_diffusion` dispatch."""
+
+    def test_fires_one_encoder_call_with_templated_ids_and_continued_position_ids(self):
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=5)
+        pre_call_len = cache.get_seq_length()
+
+        advanced = prefill_templated_turn(model, cache, {"prompt": "hi"})
+
+        assert len(encoder.calls) == 1
+        # "hi" -> 2 content ids + 1 generation-prompt suffix id (the fake's
+        # deterministic `apply_chat_template`, see `_FakeProcessor`).
+        assert encoder.calls[0] == 3
+        assert advanced is cache  # same object, grown in place (DynamicCache.update semantics)
+        assert advanced.get_seq_length() == pre_call_len + 3
+
+    def test_position_ids_start_at_pre_call_cache_length_not_zero(self, monkeypatch):
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=9)
+
+        captured_position_ids = {}
+        real_call = type(encoder).__call__
+
+        def _spy(self, *, input_ids, past_key_values=None, position_ids=None):
+            captured_position_ids["value"] = position_ids
+            return real_call(self, input_ids=input_ids, past_key_values=past_key_values, position_ids=position_ids)
+
+        monkeypatch.setattr(type(encoder), "__call__", _spy)
+
+        prefill_templated_turn(model, cache, {"prompt": "hi"})
+
+        position_ids = captured_position_ids["value"]
+        assert position_ids[0, 0].item() == 9  # pre-call get_seq_length(), not 0
+        assert position_ids.shape[-1] == 3  # matches the templated token count
+
+    def test_messages_shaped_prompt_kwargs_reused_verbatim_no_retemplating(self):
+        """`thinking=True`'s `{"messages": [...]}` shape (the SAME dict
+        `run_diffusion`'s no-cache path builds) reaches `apply_chat_template`
+        unchanged — closes ADR-CDG-024's Open Question 2 at the seam level
+        (the real-tokenizer pin lives in `tests/test_chat_template_thinking.py`,
+        gated on a local HF cache; this fake proves the SAME `prompt_kwargs`
+        dict is what arrives here, not a second template-construction site)."""
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+        messages = [
+            {"role": "system", "content": "T"},
+            {"role": "user", "content": "hi"},
+        ]
+
+        prefill_templated_turn(model, cache, {"messages": messages})
+
+        # "T" + "hi" = 3 content chars + 1 generation-prompt suffix id.
+        assert encoder.calls == [4]
+
+    def test_add_generation_prompt_false_omits_suffix(self):
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+
+        prefill_templated_turn(model, cache, {"prompt": "hi"}, add_generation_prompt=False)
+
+        assert encoder.calls == [2]  # "hi" only, no suffix id
+
+    def test_prompt_shape_normalizes_to_single_user_turn_conversation(self, monkeypatch):
+        """Issue #257 live-failure regression (2026-08-05): `{"prompt": ...}`
+        prompt_kwargs must be NORMALIZED into the positional `conversation`
+        arg — mirroring `pipeline_diffusion_gemma.py:117`'s single-user-turn
+        wrap — never `**`-expanded into `apply_chat_template` (whose real
+        signature has no `prompt=` param and a required positional
+        `conversation`; the old expansion raised `TypeError` on first live
+        run). Captures the exact conversation the processor receives."""
+        model, _, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+
+        captured = {}
+        real_method = _FakeProcessor.apply_chat_template
+
+        def _spy(self, conversation, **kw):
+            captured["conversation"] = conversation
+            return real_method(self, conversation, **kw)
+
+        monkeypatch.setattr(_FakeProcessor, "apply_chat_template", _spy)
+
+        prefill_templated_turn(model, cache, {"prompt": "hi"})
+
+        assert captured["conversation"] == [{"role": "user", "content": "hi"}]
+
+    def test_messages_shape_passes_through_as_positional_conversation_unchanged(self, monkeypatch):
+        """The `{"messages": [...]}` (thinking=True) shape reaches
+        `apply_chat_template` as the positional `conversation`, same object,
+        no re-wrap — the second arm of the live-failure fix."""
+        model, _, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+        messages = [
+            {"role": "system", "content": "T"},
+            {"role": "user", "content": "hi"},
+        ]
+
+        captured = {}
+        real_method = _FakeProcessor.apply_chat_template
+
+        def _spy(self, conversation, **kw):
+            captured["conversation"] = conversation
+            return real_method(self, conversation, **kw)
+
+        monkeypatch.setattr(_FakeProcessor, "apply_chat_template", _spy)
+
+        prefill_templated_turn(model, cache, {"messages": messages})
+
+        assert captured["conversation"] is messages
+
+
+class TestFakeProcessorSignatureConformance:
+    """Issue #257 live-failure postmortem (2026-08-05): the previous
+    `_FakeProcessor.apply_chat_template` accepted a `prompt=` kwarg the real
+    `transformers.ProcessorMixin.apply_chat_template` does not have, so the
+    full unit suite passed over a call shape that raised `TypeError` on
+    first live execution. This class pins the fake to the real installed
+    signature on every property the production code path depends on — fake
+    drift from the real contract now fails loudly here instead of surviving
+    to a live run."""
+
+    def _signatures(self):
+        import inspect
+
+        from transformers.processing_utils import ProcessorMixin
+
+        return (
+            inspect.signature(ProcessorMixin.apply_chat_template),
+            inspect.signature(_FakeProcessor.apply_chat_template),
+        )
+
+    def test_conversation_is_required_positional_in_both(self):
+        import inspect
+
+        real, fake = self._signatures()
+        for sig in (real, fake):
+            conv = sig.parameters["conversation"]
+            assert conv.default is inspect.Parameter.empty
+            assert conv.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+
+    def test_used_keyword_params_exist_with_matching_defaults(self):
+        real, fake = self._signatures()
+        for name in ("add_generation_prompt", "tokenize", "return_tensors", "return_dict"):
+            assert name in real.parameters, f"real signature lost {name!r} — production call must be re-grounded"
+            assert name in fake.parameters, f"fake signature missing {name!r}"
+            assert real.parameters[name].default == fake.parameters[name].default, (
+                f"fake default for {name!r} drifted from the real signature"
+            )
+
+    def test_neither_signature_has_pipeline_level_prompt_or_messages_params(self):
+        """`prompt`/`messages` are `DiffusionGemmaPipeline.__call__` names —
+        the exact confusion the live failure was made of."""
+        real, fake = self._signatures()
+        for name in ("prompt", "messages"):
+            assert name not in real.parameters
+            assert name not in fake.parameters
+
+    def test_both_swallow_unknown_kwargs_like_the_live_failure_did(self):
+        """Both signatures end in `**kwargs` — which is WHY the stray
+        `prompt=` kwarg didn't raise on its own and the failure surfaced as
+        the missing positional instead. The fake must reproduce that
+        swallow, or it would fail differently from reality."""
+        import inspect
+
+        real, fake = self._signatures()
+        for sig in (real, fake):
+            assert any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
+    def test_prompt_shaped_kwargs_expansion_raises_type_error_like_live(self):
+        """The verbatim broken call shape (PR #262's original
+        `**prompt_kwargs` expansion, thinking=False arm) against the
+        real-signature fake reproduces the live `TypeError` — the regression
+        test that would have caught this before it shipped."""
+        proc = _FakeProcessor()
+        with pytest.raises(TypeError, match="conversation"):
+            proc.apply_chat_template(
+                **{"prompt": "hi"},  # noqa: PIE804 — the dict-expansion shape IS the reproduced bug
+                add_generation_prompt=True,
+                tokenize=True,
+                return_tensors="pt",
+                return_dict=True,
+            )
+
+
+class TestComposedPrefillDispatch:
+    """ADR-CDG-024 (issue #257), at the `run_diffusion`/drive-body dispatch
+    boundary: a non-empty `prompt` alongside `kv_cache` fires the templated
+    prefill BEFORE block 0's decode, and the splice offset binds to the
+    cache's post-prefill `get_seq_length()` — the replacement for the
+    guard-removal gap the plan names as the highest-value regression risk
+    (a future refactor silently reopening #248's rejected-input hole, or
+    silently dropping composition, with no test catching it)."""
+
+    def test_non_empty_prompt_with_cache_dispatches_without_raising_and_fires_one_prefill_call(self, monkeypatch):
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model, seq_len=5)
+
+        run_diffusion(
+            model,
+            "a real prompt",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            kv_cache=cache,
+        )
+
+        # One prefill call (the templated turn) — no block>0 re-encode at
+        # gen_length == CANVAS_LENGTH (single block).
+        assert len(encoder.calls) == 1
+
+    def test_empty_prompt_with_cache_fires_zero_prefill_calls_degradation_proof(self, monkeypatch):
+        """Empty prompt alongside kv_cache stays pure injection — the
+        degradation-proof half of the plan's test ask (not just "doesn't
+        raise", an explicit zero-prefill-calls assertion)."""
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model, seq_len=5)
+
+        run_diffusion(
+            model,
+            "",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            kv_cache=cache,
+        )
+
+        assert encoder.calls == []
+
+    def test_decoder_position_ids_for_block_zero_bind_to_post_prefill_seq_length(self, monkeypatch):
+        """The ADR's named highest-risk failure mode (position-id drift at
+        the splice): block 0's `decoder_position_ids` must start at the
+        cache's `get_seq_length()' taken AFTER the prefill call, not the
+        pre-prefill `cached_len` alone."""
+        model, encoder, inner_model = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model, seq_len=5)
+
+        captured_decoder_position_ids = []
+        real_call = type(inner_model).__call__
+
+        def _spy(self, **kwargs):
+            captured_decoder_position_ids.append(kwargs["decoder_position_ids"])
+            return real_call(self, **kwargs)
+
+        monkeypatch.setattr(type(inner_model), "__call__", _spy)
+
+        run_diffusion(
+            model,
+            "a real prompt",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=1,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            kv_cache=cache,
+        )
+
+        first_decoder_position_ids = captured_decoder_position_ids[0]
+        # Pre-prefill cached_len is 5; "a real prompt" (13 chars) + suffix =
+        # 14 templated tokens, so the post-prefill splice base is 5 + 14 = 19
+        # — NOT 5 (what the old unconditional `cached_len` base would give).
+        assert first_decoder_position_ids[0, 0].item() == 19
+
+    def test_thinking_true_composes_without_a_third_divergent_template_path(self, monkeypatch):
+        """ADR-CDG-024 Open Question 2: `thinking=True` alongside
+        `prompt=`+`kv_cache=` must reuse the SAME `prompt_kwargs`
+        construction the no-cache path builds (`{"messages": [...]}`), not a
+        third code path — proven here by asserting the encoder call count
+        matches what that exact messages shape would template to (system
+        THINK_TOKEN content + user prompt content)."""
+        from dgemma.loop import THINK_TOKEN
+
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model, seq_len=0)
+
+        run_diffusion(
+            model,
+            "hi",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=1,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            kv_cache=cache,
+            thinking=True,
+        )
+
+        expected_len = len(THINK_TOKEN) + len("hi") + 1  # +1 generation-prompt suffix id
+        assert encoder.calls == [expected_len]
+
+
 class TestMultiBlockContinuation:
     """`gen_length` spanning more than one `canvas_length` must re-encode
     every block AFTER the first — IN-2 skips ONLY the first block's encode,
@@ -271,7 +635,7 @@ class TestMultiBlockContinuation:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -292,7 +656,7 @@ class TestMultiBlockContinuation:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -324,7 +688,7 @@ class TestEosEarlyStop:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -352,7 +716,7 @@ class TestOut3ProvenanceStamp:
 
         _, _, trace = run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -396,7 +760,7 @@ class TestConvergenceAndOutput:
 
         text, canvas_state, trace = run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -420,7 +784,7 @@ class TestConvergenceAndOutput:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -455,7 +819,7 @@ class TestCancellationPartialReturn:
 
         text, canvas_state, trace = run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -481,7 +845,7 @@ class TestParticipantWiringReused:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -502,7 +866,7 @@ class TestParticipantWiringReused:
 
         _, _, trace = run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -532,7 +896,7 @@ class TestKVCacheNotMutatedInPlaceBeyondRealCacheSemantics:
 
         run_diffusion(
             model,
-            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -566,7 +930,7 @@ class TestBatchSizeGuard:
         with pytest.raises(ValueError, match="batch size"):
             run_diffusion(
                 model,
-                "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
+                "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
                 entropy_bound=0.1,
                 t_min=0.4,
                 t_max=0.8,

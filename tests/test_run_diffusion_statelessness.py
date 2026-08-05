@@ -582,9 +582,8 @@ class TestKVCacheInjectionStatelessness:
         cache1 = _decode_kv_cache(model1)
         cache2 = _decode_kv_cache(model2)
 
-        # prompt="" — issue #248's exclusivity door rejects a non-empty
-        # prompt alongside a connected kv_cache; this class proves cross-call
-        # statelessness of the drive body, not that door.
+        # prompt="" — pure injection (ADR-CDG-024); this class proves
+        # cross-call statelessness of the drive body, not prompt handling.
         _, _, trace1 = run_diffusion(
             model1, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
             confidence=None, gen_length=4, kv_cache=cache1,
