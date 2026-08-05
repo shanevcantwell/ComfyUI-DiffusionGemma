@@ -327,23 +327,26 @@ class TestBackendAwareMismatch:
         with pytest.raises(RuntimeError, match="gptq"):
             _check_quant_checkpoint_match(DEFAULT_REPO_ID, "autoround", False)
 
-    def test_autoround_checkpoint_under_non_matching_quant_none_raises(
+    def test_gptq_checkpoint_under_non_matching_quant_none_raises(
         self, monkeypatch
     ):
-        """The mirror direction: an AutoRound (or any quantized) checkpoint
-        loaded with a non-matching request — here quant='none' — still
-        raises via direction 1, which is already backend-agnostic (any
-        non-None declared_method + quant='none' is a mismatch). Named
-        explicitly for #210's "both directions" acceptance criterion."""
+        """The mirror direction: a checkpoint declaring a non-AutoRound
+        backend (here "gptq") loaded with a non-matching request — quant='none'
+        — still raises via direction 1, which is backend-agnostic (any
+        non-None declared_method + quant='none' is a mismatch). The gptq
+        literal (not "auto-round") is what makes this satisfy #210's "both
+        directions with a non-AutoRound quant_method" acceptance criterion —
+        proving the none-direction guard is backend-agnostic, not AutoRound-
+        specific."""
         _patch_autoconfig(
-            monkeypatch, quantization_config={"quant_method": "auto-round"}
+            monkeypatch, quantization_config={"quant_method": "gptq"}
         )
 
         with pytest.raises(RuntimeError) as excinfo:
-            _check_quant_checkpoint_match(AUTOROUND_REPO_ID, "none", False)
+            _check_quant_checkpoint_match(DEFAULT_REPO_ID, "none", False)
 
         message = str(excinfo.value)
-        assert "auto-round" in message
+        assert "gptq" in message
         assert "quant='none'" in message
 
     def test_full_load_model_raises_before_from_pretrained(self, monkeypatch):
