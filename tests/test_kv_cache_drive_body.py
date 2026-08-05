@@ -217,7 +217,7 @@ class TestSkipFirstEncode:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -242,7 +242,7 @@ class TestSkipFirstEncode:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -271,7 +271,7 @@ class TestMultiBlockContinuation:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -292,7 +292,7 @@ class TestMultiBlockContinuation:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -324,7 +324,7 @@ class TestEosEarlyStop:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -352,7 +352,7 @@ class TestOut3ProvenanceStamp:
 
         _, _, trace = run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -396,7 +396,7 @@ class TestConvergenceAndOutput:
 
         text, canvas_state, trace = run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -420,7 +420,7 @@ class TestConvergenceAndOutput:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -455,7 +455,7 @@ class TestCancellationPartialReturn:
 
         text, canvas_state, trace = run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -481,7 +481,7 @@ class TestParticipantWiringReused:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -502,7 +502,7 @@ class TestParticipantWiringReused:
 
         _, _, trace = run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -532,7 +532,7 @@ class TestKVCacheNotMutatedInPlaceBeyondRealCacheSemantics:
 
         run_diffusion(
             model,
-            "unused prompt",
+            "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
             entropy_bound=0.1,
             t_min=0.4,
             t_max=0.8,
@@ -566,7 +566,7 @@ class TestBatchSizeGuard:
         with pytest.raises(ValueError, match="batch size"):
             run_diffusion(
                 model,
-                "unused prompt",
+                "",  # issue #248: with kv_cache=, prompt must be empty at the exclusivity door
                 entropy_bound=0.1,
                 t_min=0.4,
                 t_max=0.8,

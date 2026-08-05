@@ -82,7 +82,7 @@ from .excision import (  # noqa: E402
     resolve_vocab_size,
 )
 from .hooks import ForwardHookFn, install_logit_shaping_hook  # noqa: E402
-from .ingress import validate_ingress  # noqa: E402
+from .ingress import reject_prompt_and_kv_cache, validate_ingress  # noqa: E402
 from .kv_cache import validate_kv_cache_ingress  # noqa: E402
 from .participants import PinParticipant, WalkerParticipant  # noqa: E402
 from .payloads import Constraints, ControlSignals  # noqa: E402
@@ -558,7 +558,18 @@ def run_diffusion(
     `kv_cache=` (ADR-CDG-012 IN-2, issue #62 Phase 2 — types + ingress door;
     Phase 4 decoder-drive body NOT YET BUILT, issue #207 makes that gap fail
     loud rather than silently no-op): an optional injected `KVCache` payload
-    (§62's `dgemma/types.py` dataclass). `None` (default) is today's EXACT
+    (§62's `dgemma/types.py` dataclass).
+
+    **Exclusivity (issue #248):** `kv_cache` and a non-empty `prompt` are
+    mutually exclusive — a connected cache with `prompt` also supplied is
+    rejected at ingress (`reject_prompt_and_kv_cache`, below) rather than
+    silently ignoring `prompt`, since the with-cache drive body never
+    tokenizes it. Empty/absent `prompt` alongside a cache is the intended
+    injection-only shape and stays valid; this is interim posture until
+    #245's prompt+cache composition design lands and (per that issue)
+    explicitly supersedes this invariant if it composes the two.
+
+    `None` (default) is today's EXACT
     behavior, byte-for-byte unchanged — the run mints its own cache
     internally via the pipeline's own first encode, and rule-6
     `STATELESS-CORE` is trivially satisfied (no injected state crosses).
@@ -583,7 +594,10 @@ def run_diffusion(
     `EntropyBoundScheduler` a nonsensical temperature trajectory), if
     ingress validation of `constraints`/`control_signals`/`capture`/the
     `constraints`+`logit_hook` combination fails (see
-    `dgemma.ingress.validate_ingress`'s error register), or if `kv_cache` is
+    `dgemma.ingress.validate_ingress`'s error register), if a non-empty
+    `prompt` is given together with a non-`None` `kv_cache` (issue #248 —
+    exactly one of the denoiser prompt or an injected KV_CACHE is permitted;
+    see `dgemma.ingress.reject_prompt_and_kv_cache`), or if `kv_cache` is
     given and fails `validate_kv_cache_ingress`'s V1-V6 checks (see
     `dgemma.kv_cache.validate_kv_cache_ingress`'s error register).
 
@@ -625,6 +639,15 @@ def run_diffusion(
     # `NotImplementedError` door now that the ADR's real-weights de-risk
     # smoke test has PASSed (ledger #240, run 2026-08-04b) per the ADR's own
     # resolution trigger.
+    #
+    # Issue #248: exclusivity door — a non-empty `prompt` alongside a
+    # connected `kv_cache` is rejected BEFORE the (otherwise well-formed)
+    # cache's own V1-V6 checks run, same ordering discipline as every other
+    # pre-construction ingress check in this function (rule 5,
+    # EMIT-CANONICAL / PARSE-AT-THE-DOOR — reject the conflicting pair before
+    # either input's own validation ties up further resources).
+    reject_prompt_and_kv_cache(prompt, kv_cache)
+
     if kv_cache is not None:
         validate_kv_cache_ingress(kv_cache, dgemma_model)
 

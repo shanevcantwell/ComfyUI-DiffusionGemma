@@ -219,9 +219,12 @@ class TestKVCacheValidIngressDispatchesToDriveBody:
         cache = _decode_kv_cache(model, minting_sequence=(4, 5, 6))
 
         # No raise: Phase 4's drive body honors the cache instead of the
-        # retired fail-loud door.
+        # retired fail-loud door. `prompt=""` — issue #248's exclusivity
+        # door rejects a non-empty prompt alongside a connected kv_cache;
+        # this class exercises cache-dispatch behavior, not that door (see
+        # TestPromptKVCacheExclusivityAtRunDiffusion for the door itself).
         text, canvas_state, trace = run_diffusion(
-            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
             confidence=None, gen_length=4, kv_cache=cache,
         )
         assert trace.injected_cache_provenance is not None
@@ -254,7 +257,7 @@ class TestKVCacheValidIngressDispatchesToDriveBody:
         )
 
         with pytest.raises(ValueError, match="V1"):
-            run_diffusion(model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=bad_cache)
+            run_diffusion(model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=bad_cache)
 
         assert constructed == []
 
@@ -274,13 +277,79 @@ class TestKVCacheValidIngressDispatchesToDriveBody:
         original_cache_obj = cache.cache
 
         run_diffusion(
-            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
             confidence=None, gen_length=4, kv_cache=cache,
         )
 
         assert cache.cache is original_cache_obj
         assert cache.provenance is original_provenance
         assert cache.provenance.minting_sequence == (1, 2, 3)
+
+
+class TestPromptKVCacheExclusivityAtRunDiffusion:
+    """Issue #248, at the `run_diffusion` boundary (not just the
+    `dgemma.ingress` unit level `tests/test_ingress.py` covers): a non-empty
+    `prompt` supplied together with a connected `kv_cache` is rejected BEFORE
+    the scheduler/pipeline are constructed and before the cache's own V1-V6
+    checks run — same pre-construction-ordering discipline
+    `TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction` proves for
+    a malformed cache. Each single-input path (prompt-only chat-templated;
+    cache-only injection) stays unaffected."""
+
+    def test_prompt_and_kv_cache_together_rejected_before_scheduler_built(self, monkeypatch):
+        constructed: list = []
+
+        class TrackingScheduler:
+            def __init__(self, **kwargs):
+                constructed.append("scheduler")
+
+        class TrackingPipeline:
+            def __init__(self, **kwargs):
+                constructed.append("pipeline")
+
+        monkeypatch.setattr("dgemma.loop.EntropyBoundScheduler", TrackingScheduler)
+        monkeypatch.setattr("dgemma.loop.DGemmaPipeline", TrackingPipeline)
+
+        model = _kv_capable_fake_model()
+        # Even a WELL-FORMED cache is rejected once a non-empty prompt is
+        # also given — the exclusivity door fires before the cache's own
+        # V1-V6 checks (which would otherwise pass here).
+        good_cache = _matching_kv_cache(model)
+
+        with pytest.raises(ValueError, match="prompt and kv_cache cannot both be given"):
+            run_diffusion(
+                model, "a real prompt", entropy_bound=0.1, t_min=0.4, t_max=0.8,
+                num_inference_steps=2, kv_cache=good_cache,
+            )
+        assert constructed == []
+
+    def test_empty_prompt_with_kv_cache_dispatches_to_injection_path_unchanged(self, monkeypatch):
+        """Acceptance criterion 2: cache + empty prompt → injection path
+        unchanged. Reuses the same decode-capable fixtures
+        `TestKVCacheValidIngressDispatchesToDriveBody` drives."""
+        from tests.test_kv_cache_drive_body import _fake_decoder_capable_model, _matching_kv_cache as _decode_kv_cache
+
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _decode_kv_cache(model, minting_sequence=(4, 5, 6))
+
+        text, canvas_state, trace = run_diffusion(
+            model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            confidence=None, gen_length=4, kv_cache=cache,
+        )
+        assert trace.injected_cache_provenance is not None
+
+    def test_prompt_only_no_cache_chat_templated_path_unchanged(self, monkeypatch):
+        """Acceptance criterion 2: prompt + no cache → chat-templated path
+        unchanged — a bare prompt-only call still succeeds exactly as
+        before."""
+        _install_fakes(monkeypatch, num_steps=2)
+        model = _kv_capable_fake_model()
+
+        text, state, trace = run_diffusion(
+            model, "a real prompt", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2
+        )
+        assert text == "TEXT:2"
+        assert trace.injected_cache_provenance is None
 
 
 class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
@@ -315,7 +384,7 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
 
         with pytest.raises(ValueError, match="V1"):
             run_diffusion(
-                model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=bad_cache
+                model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=bad_cache
             )
 
         assert constructed == []
@@ -350,7 +419,7 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
 
         with pytest.raises(ValueError, match="V5"):
             run_diffusion(
-                model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=orphan_cache
+                model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2, kv_cache=orphan_cache
             )
 
         assert constructed == []
@@ -386,7 +455,7 @@ class TestKVCacheInvalidIngressRejectedBeforeSchedulerConstruction:
         )
 
         _, _, trace = run_diffusion(
-            model, "hi", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
+            model, "", entropy_bound=0.1, t_min=0.4, t_max=0.8, num_inference_steps=2,
             confidence=None, gen_length=4, kv_cache=tier2_cache,
         )
         assert trace.injected_cache_provenance.minting_sequence is None
