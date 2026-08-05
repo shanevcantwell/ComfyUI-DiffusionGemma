@@ -256,9 +256,12 @@ class TestMinimalKVCacheGraphIsNonDegenerate:
         denoise_node = DGemmaDenoise()
         denoise_defaults = _widget_defaults(DGemmaDenoise.INPUT_TYPES())
 
+        # prompt="" — issue #248's exclusivity door rejects a non-empty
+        # prompt alongside a connected kv_cache; the injection path is
+        # exercised via the wired kv_cache, not a re-supplied prompt.
         text, canvas_state, canvas_trace, frames, images, run_config = denoise_node.denoise(
             model,
-            prompt="hi",
+            prompt="",
             seed=denoise_defaults["seed"],
             num_inference_steps=2,
             t_min=DEFAULT_T_MIN,

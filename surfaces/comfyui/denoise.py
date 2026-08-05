@@ -121,7 +121,11 @@ class DGemmaDenoise:
         "on a KV-cache. Identical knob surface and six outputs to "
         "DGemmaSampler, plus one extra input: the optional kv_cache (from "
         "DGemmaEncode) — wire it to inject a known-provenance cache "
-        "(IN-2); leave it unwired for an unconditioned run. Outputs: text "
+        "(IN-2); leave it unwired for an unconditioned run. Exactly one of "
+        "prompt or kv_cache is permitted (issue #248): a connected kv_cache "
+        "requires prompt to be left empty, since the with-cache path never "
+        "tokenizes it — supplying both is rejected at ingress rather than "
+        "silently ignoring prompt. Outputs: text "
         "(decoded result), canvas_state (a resumable/validity save-state), "
         "canvas_trace (per-step analysis data — feeds DGemmaTrace/"
         "DGemmaTokenTrace), frames (one decoded string per captured step), "
@@ -145,7 +149,13 @@ class DGemmaDenoise:
                     {
                         "multiline": True,
                         "default": "",
-                        "tooltip": "The user turn to generate a response to.",
+                        "tooltip": (
+                            "The user turn to generate a response to. Leave "
+                            "empty when kv_cache is connected — exactly one "
+                            "of prompt or kv_cache is permitted (issue "
+                            "#248); a non-empty prompt alongside a "
+                            "connected kv_cache is rejected at ingress."
+                        ),
                     },
                 ),
                 "seed": (
@@ -236,7 +246,13 @@ class DGemmaDenoise:
                         "tooltip": (
                             "Optional KV-cache from DGemmaEncode to "
                             "condition this run on (IN-2). Leave unwired "
-                            "for an unconditioned run."
+                            "for an unconditioned run. Exactly one of "
+                            "prompt or kv_cache is permitted (issue #248) "
+                            "— when connected, leave prompt empty; the "
+                            "with-cache path never tokenizes prompt, so a "
+                            "non-empty prompt supplied alongside a "
+                            "connected cache is rejected at ingress "
+                            "rather than silently ignored."
                         )
                     },
                 ),

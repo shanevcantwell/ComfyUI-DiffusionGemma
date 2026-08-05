@@ -235,6 +235,39 @@ def reject_conflicting_hook_sources(constraints: "Constraints | None", logit_hoo
         )
 
 
+def reject_prompt_and_kv_cache(prompt: "str | None", kv_cache: Any) -> None:
+    """Issue #248: `prompt` and `kv_cache=` cannot both be given — exactly one
+    of the denoiser prompt or an injected `KV_CACHE` is permitted.
+
+    Under ADR-CDG-012 §D.1 IN-2 as amended, `_run_pipeline_with_injected_cache`
+    never tokenizes or encodes `prompt` — a connected-but-ignored input is
+    exactly the trust-and-degrade failure ARCHITECTURE.md rules 5/7 forbid
+    (payloads mean what they say; declarative payloads validated at ingress).
+    Reject the conflicting pair at the door instead of silently ignoring
+    `prompt`.
+
+    A non-empty `prompt` is what makes the pair conflicting — an empty/absent
+    `prompt` alongside a cache is the intended injection-only shape and stays
+    valid (mirrors #241's separate empty-text seam at the `encode_sequence`
+    door, which this check does not touch). Empty/whitespace-only text is
+    inert here by design: this is an exclusivity check on the PAIR, not the
+    `encode_sequence` empty-token-ids guard (issue #227) that fires on a
+    different door entirely.
+
+    Per the operator's #191 measured-condition-only principle: the message
+    states what was actually supplied on each side — no menu of possible
+    causes or remedies."""
+    if kv_cache is not None and prompt is not None and prompt.strip():
+        raise ValueError(
+            f"prompt and kv_cache cannot both be given: prompt supplied ({len(prompt)} chars) AND a "
+            "KV_CACHE is connected. Exactly one of the denoiser prompt or an injected KV_CACHE is "
+            "permitted (issue #248) — under KV injection (ADR-CDG-012 §D.1 IN-2 as amended), prompt is "
+            "never tokenized, so a connected-but-ignored prompt is rejected rather than silently "
+            "dropped. Fix: pass prompt with no kv_cache connected (chat-templated path), or connect "
+            "kv_cache with prompt left empty (injection path)."
+        )
+
+
 def validate_ingress(
     constraints: "Constraints | None",
     control_signals: "ControlSignals | None",

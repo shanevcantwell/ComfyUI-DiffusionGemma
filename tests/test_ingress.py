@@ -22,6 +22,7 @@ import pytest
 
 from dgemma.ingress import (
     reject_conflicting_hook_sources,
+    reject_prompt_and_kv_cache,
     validate_capture,
     validate_constraints,
     validate_control_signals,
@@ -394,6 +395,58 @@ class TestHookSourceConflict:
             reject_conflicting_hook_sources(constraints, a_hook)
         with pytest.raises(ValueError, match="Fix: pass only constraints="):
             reject_conflicting_hook_sources(constraints, a_hook)
+
+
+class TestPromptKVCacheExclusivity:
+    """Issue #248: `prompt` and `kv_cache=` are mutually exclusive — a
+    connected `KV_CACHE` with a non-empty `prompt` also supplied is rejected
+    at ingress. Pure unit tests against `reject_prompt_and_kv_cache` directly
+    (no fake pipeline/model needed — the function only inspects `prompt`/
+    `kv_cache` identity and `str` content, mirroring `TestHookSourceConflict`'s
+    shape for the sibling H1 check).
+
+    `kv_cache` is a bare sentinel object here (not a real `KVCache`) —
+    `reject_prompt_and_kv_cache` only checks `is not None`, never touching
+    cache internals, so any non-`None` object exercises the same branch a
+    real `KVCache` would."""
+
+    _SOME_CACHE = object()
+
+    def test_neither_given_passes(self):
+        reject_prompt_and_kv_cache(None, None)  # must not raise
+        reject_prompt_and_kv_cache("", None)  # must not raise
+
+    def test_only_prompt_given_passes(self):
+        reject_prompt_and_kv_cache("hello", None)  # must not raise — chat-templated path unchanged
+
+    def test_only_kv_cache_given_passes(self):
+        reject_prompt_and_kv_cache(None, self._SOME_CACHE)  # must not raise — injection path unchanged
+
+    def test_empty_prompt_with_kv_cache_passes(self):
+        """Empty/absent prompt alongside a cache is the intended
+        injection-only shape (#248 acceptance criterion 2) — distinct from
+        #241's separate empty-text seam at the `encode_sequence` door, which
+        this check never touches."""
+        reject_prompt_and_kv_cache("", self._SOME_CACHE)  # must not raise
+
+    def test_whitespace_only_prompt_with_kv_cache_passes(self):
+        """Whitespace-only prompt is treated the same as empty — `.strip()`
+        makes this an intentional design choice (not merely `!= ""`), since a
+        prompt that tokenizes to nothing meaningful is not a real conflicting
+        second input."""
+        reject_prompt_and_kv_cache("   \n\t  ", self._SOME_CACHE)  # must not raise
+
+    def test_non_empty_prompt_with_kv_cache_rejected(self):
+        with pytest.raises(ValueError, match="prompt and kv_cache cannot both be given"):
+            reject_prompt_and_kv_cache("hello", self._SOME_CACHE)
+        with pytest.raises(ValueError, match="Exactly one of the denoiser prompt or an injected KV_CACHE"):
+            reject_prompt_and_kv_cache("hello", self._SOME_CACHE)
+
+    def test_reject_message_names_both_supplied_inputs_measured_condition_only(self):
+        """#248 acceptance criterion 1: the message names both supplied
+        inputs (measured-condition-only, #191 principle) — no cause menu."""
+        with pytest.raises(ValueError, match=r"prompt supplied \(5 chars\) AND a KV_CACHE is connected"):
+            reject_prompt_and_kv_cache("hello", self._SOME_CACHE)
 
 
 class TestValidateIngressComposition:
