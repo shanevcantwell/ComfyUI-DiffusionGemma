@@ -141,12 +141,17 @@ class _RecordingFakeEncoderModel:
     def __init__(self, num_hidden_layers: int) -> None:
         self.num_hidden_layers = num_hidden_layers
         self.calls: list[int] = []  # input_ids.shape[-1] per call
+        # issue #226 root-cause fix: grad-enabled state at each call, same
+        # mechanical-enforcement convention as `tests/conftest.py`'s
+        # `_FakeEncoderModel.last_grad_enabled`.
+        self.grad_enabled_calls: list[bool] = []
 
     def parameters(self):
         yield torch.zeros(1)
 
     def __call__(self, *, input_ids, past_key_values=None, position_ids=None):
         self.calls.append(input_ids.shape[-1])
+        self.grad_enabled_calls.append(torch.is_grad_enabled())
         cache = past_key_values if past_key_values is not None else FakeDynamicCache(
             num_layers=self.num_hidden_layers, seq_len=0
         )
@@ -194,6 +199,11 @@ class _FakeTopLevelModel:
         self.target_id = target_id
         self.forward_calls = 0
         self.device = torch.device("cpu")
+        # issue #226 root-cause fix: same grad-enabled recording convention
+        # as `_RecordingFakeEncoderModel.grad_enabled_calls` above, on the
+        # decoder-loop forward call `_run_pipeline_with_injected_cache`
+        # drives every step.
+        self.grad_enabled_calls: list[bool] = []
 
     def __call__(
         self,
@@ -205,6 +215,7 @@ class _FakeTopLevelModel:
         decoder_position_ids=None,
     ):
         self.forward_calls += 1
+        self.grad_enabled_calls.append(torch.is_grad_enabled())
         batch, canvas_len = decoder_input_ids.shape
         logits = torch.full((batch, canvas_len, VOCAB_SIZE), -10.0)
         logits[:, :, self.target_id] = 10.0
@@ -432,6 +443,20 @@ class TestPrefillTemplatedTurn:
         prefill_templated_turn(model, cache, {"messages": messages})
 
         assert captured["conversation"] is messages
+
+    def test_encoder_call_has_grad_disabled(self):
+        """Issue #226 root-cause fix twin: `prefill_templated_turn` shares
+        `encode_sequence`'s exact unguarded-encoder-call bug pattern and
+        gets the same `torch.no_grad()` fix — see
+        `tests/test_kv_cache_ingress.py::TestEncodeSequenceNoGradGuard` for
+        the bisected root-cause grounding."""
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = FakeDynamicCache(num_layers=NUM_HIDDEN_LAYERS, seq_len=0)
+
+        prefill_templated_turn(model, cache, {"prompt": "hi"})
+
+        assert len(encoder.grad_enabled_calls) == 1
+        assert encoder.grad_enabled_calls[0] is False
 
 
 class TestFakeProcessorSignatureConformance:
@@ -667,6 +692,80 @@ class TestMultiBlockContinuation:
         )
 
         assert len(encoder.calls) == 2
+
+
+class TestNoGradGuard:
+    """Issue #226 root-cause fix (2026-08-06): `_run_pipeline_with_injected_cache`
+    is `@torch.no_grad()`-decorated, matching
+    `DiffusionGemmaPipeline.__call__`'s own decoration — the block>0
+    re-encode call (`encoder.grad_enabled_calls`) and every decoder-loop
+    step (`top_level_model.grad_enabled_calls`) must therefore observe
+    `torch.is_grad_enabled() is False`. Same bisected root cause as
+    `tests/test_kv_cache_ingress.py::TestEncodeSequenceNoGradGuard`
+    (`dgemma.kv_cache.encode_sequence`'s sibling fix) — this class is the
+    mechanical enforcement surface for the twin fix on the injected-cache
+    drive body, so a future edit that drops the decorator fails here
+    instead of only surfacing as a live GPU OOM.
+    """
+
+    def test_reencode_call_has_grad_disabled(self):
+        model, encoder, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model)
+
+        run_diffusion(
+            model,
+            "",  # empty prompt + kv_cache = pure injection, no prefill (ADR-CDG-024)
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=CANVAS_LENGTH * 2,  # forces a block>0 re-encode
+            kv_cache=cache,
+        )
+
+        assert len(encoder.grad_enabled_calls) >= 1
+        assert all(g is False for g in encoder.grad_enabled_calls)
+
+    def test_decoder_loop_steps_have_grad_disabled(self):
+        model, _, top_level_model = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model)
+
+        run_diffusion(
+            model,
+            "",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=3,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            kv_cache=cache,
+        )
+
+        assert len(top_level_model.grad_enabled_calls) >= 1
+        assert all(g is False for g in top_level_model.grad_enabled_calls)
+
+    def test_ambient_grad_enabled_outside_the_call_is_restored_after(self):
+        """`@torch.no_grad()` on `_run_pipeline_with_injected_cache` must not
+        leak past `run_diffusion`'s return into the caller's surrounding
+        context."""
+        model, _, _ = _fake_decoder_capable_model()
+        cache = _matching_kv_cache(model)
+
+        assert torch.is_grad_enabled() is True
+        run_diffusion(
+            model,
+            "",
+            entropy_bound=0.1,
+            t_min=0.4,
+            t_max=0.8,
+            num_inference_steps=2,
+            confidence=None,
+            gen_length=CANVAS_LENGTH,
+            kv_cache=cache,
+        )
+        assert torch.is_grad_enabled() is True
 
 
 class TestEosEarlyStop:

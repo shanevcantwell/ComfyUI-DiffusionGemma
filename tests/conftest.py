@@ -664,6 +664,14 @@ class _FakeEncoderModel:
         self._device = torch.device(device)
         self.last_input_ids_device: torch.device | None = None
         self.last_position_ids_device: torch.device | None = None
+        # issue #226 root-cause fix: records `torch.is_grad_enabled()` at
+        # call time so a test can assert the caller wrapped this call in
+        # `torch.no_grad()` (the fix) without needing a real CUDA OOM to
+        # prove the grad-guard is actually in place — a fake-based mechanical
+        # enforcement surface for a prose-documented invariant that would
+        # otherwise silently regress if a future edit re-introduces an
+        # unguarded encoder call on this seam.
+        self.last_grad_enabled: bool | None = None
 
     def parameters(self):
         yield torch.zeros(1, device=self._device)
@@ -677,6 +685,7 @@ class _FakeEncoderModel:
     ) -> _FakeEncoderOutput:
         self.last_input_ids_device = input_ids.device
         self.last_position_ids_device = None if position_ids is None else position_ids.device
+        self.last_grad_enabled = torch.is_grad_enabled()
         num_new_tokens = input_ids.shape[-1]
         if past_key_values is None:
             cache = FakeDynamicCache(num_layers=self.num_hidden_layers, seq_len=0)

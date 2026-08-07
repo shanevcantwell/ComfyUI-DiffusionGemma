@@ -128,6 +128,7 @@ class DGemmaPipeline(DiffusionGemmaPipeline):
     _callback_tensor_inputs = ["canvas", "logits", "scheduler_output"]
 
 
+@torch.no_grad()
 def _run_pipeline_with_injected_cache(
     pipeline: "DGemmaPipeline",
     *,
@@ -189,6 +190,20 @@ def _run_pipeline_with_injected_cache(
       function runs every block to completion/EOS exactly like the pipeline
       does — there is no `stop_at_block` parameter and no early-return
       mid-loop, because `DGemmaDenoise` ships no widget to request one.
+    - **`@torch.no_grad()` (issue #226 fix, 2026-08-06).** Matches
+      `DiffusionGemmaPipeline.__call__`'s own decoration
+      (`pipeline_diffusion_gemma.py:163`) — this function had no
+      grad-disabling context of its own (nor did its
+      `dgemma.kv_cache.prefill_templated_turn` call), so the block>0
+      re-encode and the decoder loop below both built an autograd graph
+      this pack never backprops through. #226 bisected the identical
+      pattern in `encode_sequence` to a deterministic bf16-CPU-spill OOM
+      (retained activations tipping accelerate's incremental offload-hook
+      weight materialization over the edge) and confirmed `torch.no_grad()`
+      eliminates it with zero other changes; this function shares the same
+      unguarded-encoder/decoder-call shape under the same load regime and
+      gets the same fix, gated by the existing live
+      `tests/e2e/test_battery.py::test_kv_door_contract`.
     - **Cancellation/participant wiring reused verbatim.** `callback_on_step_end`
       is the SAME `StepEndComposite` `run_diffusion` builds for the no-cache
       path (capture, cancellation, pin, walker) — this function does not
