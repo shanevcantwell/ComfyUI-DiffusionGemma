@@ -396,18 +396,32 @@ def encode_sequence(
     itself so it also catches a caller handing an empty list/tuple directly,
     not just the text-shaped path.
 
-    OOM hardening (issue #226 hardening slice, NOT the root-cause fix — see
-    `dgemma/kv_cache.py`'s `encode_sequence` OOM re-raise below): this is the
-    **bare transformers lane** — the encoder is called directly, not through
-    `DiffusionGemmaPipeline`'s own internal encode call, and OOM is a
-    possible outcome here that the pipeline's own equivalent call has not
-    been observed to hit under the same VRAM state (#226/#229). The
-    `torch.OutOfMemoryError` re-raise below only wraps that lane's own
-    forward call; it changes no happy-path behavior.
+    OOM root cause FOUND and fixed (issue #226): the encoder call below now
+    runs inside `torch.no_grad()`, matching
+    `DiffusionGemmaPipeline.__call__`'s own `@torch.no_grad()` decorator
+    (`pipeline_diffusion_gemma.py:163`) — `encode_sequence` had no
+    grad-disabling context anywhere, so every activation the encoder's MoE
+    expert dispatch produced was retained for a backward pass this pack
+    never runs. Under bf16 `device_map="auto"` CPU-spill, that retained-
+    activation memory is what tipped `accelerate.hooks.set_module_tensor_to_
+    device`'s incremental per-layer weight materialization over the edge:
+    bisected 2026-08-06 (issue #226) by isolating the call-shape
+    differential #226/#229 first named — `a68e29d`'s own `encode_sequence`
+    reproduces the OOM verbatim under the current env (ruling out an
+    a68e29d..33551d5 code regression AND an env/pin regression), while a
+    plain no-cache `run_diffusion` call succeeds in the identical load/VRAM
+    state; wrapping ONLY the `encode_sequence` call site in `torch.no_grad()`
+    — zero other changes — eliminates the OOM outright (fresh-load repro:
+    OOM at 45.29/47.26 GiB resident -> success, 1.5s). The
+    `torch.OutOfMemoryError` re-raise below stays as defense in depth (a
+    genuine capacity wall is still possible on a smaller card) but is no
+    longer expected to fire under this pack's field-verified bf16 CPU-spill
+    regime.
 
     Live-proof provenance (#228 pt.1): live-proven under bf16 CPU-spill via
     the ComfyUI server lane (gate run 4 S-B, 2026-07-30, `a68e29d`; #145) —
-    regressed 2026-08-04, BARE lane only (#226). Standing surface: `tests/e2e/test_battery.py::test_encode_live`.
+    regressed 2026-08-04 (#226), root-caused and fixed 2026-08-06. Standing
+    surface: `tests/e2e/test_battery.py::test_encode_live`.
     """
     if len(token_ids) == 0:
         raise ValueError(
@@ -437,7 +451,8 @@ def encode_sequence(
     position_ids = position_ids.unsqueeze(0)
 
     try:
-        outputs = encoder(input_ids=ids_tensor, past_key_values=cache, position_ids=position_ids)
+        with torch.no_grad():
+            outputs = encoder(input_ids=ids_tensor, past_key_values=cache, position_ids=position_ids)
     except torch.OutOfMemoryError as e:
         if torch.cuda.is_available():
             free_bytes, total_bytes = torch.cuda.mem_get_info()
@@ -578,5 +593,15 @@ def prefill_templated_turn(
         start_position, start_position + input_ids.shape[-1], device=encoder_device
     ).unsqueeze(0)
 
-    outputs = encoder(input_ids=input_ids, past_key_values=cache, position_ids=position_ids)
+    # torch.no_grad() (issue #226 root-cause fix): same bare-encoder call
+    # shape as `encode_sequence` above, same missing grad-guard, same fix —
+    # see that function's docstring for the full bisect grounding. This
+    # call site was not independently observed to OOM (only encode_sequence
+    # was, per #226's own probe), but it shares the identical unguarded
+    # encoder(input_ids=..., past_key_values=..., position_ids=...) shape
+    # under the same bf16 CPU-spill regime, so it carries the same latent
+    # risk and gets the same fix rather than leaving a known-bad pattern
+    # uncorrected in its sibling.
+    with torch.no_grad():
+        outputs = encoder(input_ids=input_ids, past_key_values=cache, position_ids=position_ids)
     return outputs.past_key_values

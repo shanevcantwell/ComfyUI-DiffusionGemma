@@ -606,3 +606,47 @@ class TestEncodeSequenceOutOfMemoryHardening:
 
         with pytest.raises(RuntimeError, match="some other unrelated failure"):
             encode_sequence(model, [1, 2, 3], into=None)
+
+
+class TestEncodeSequenceNoGradGuard:
+    """Issue #226 root-cause fix (2026-08-06): `encode_sequence`'s encoder
+    call must run inside `torch.no_grad()`, matching
+    `DiffusionGemmaPipeline.__call__`'s own `@torch.no_grad()` decoration.
+    Bisected root cause of the deterministic bf16-CPU-spill OOM named in
+    this class's sibling `TestEncodeSequenceOutOfMemoryHardening`: with no
+    grad-disabling context, every activation the encoder's MoE expert
+    dispatch produced was retained for an unused backward pass, tipping
+    accelerate's incremental per-layer offload-hook weight materialization
+    over the edge under CPU spill. `_FakeEncoderModel.last_grad_enabled`
+    (`tests/conftest.py`) records `torch.is_grad_enabled()` at the moment
+    the fake encoder is actually invoked — a mechanical enforcement surface
+    for this invariant (not just the docstring), so a future edit that
+    drops the `torch.no_grad()` wrapper fails this test rather than only
+    being caught by a live GPU OOM.
+    """
+
+    def test_encoder_called_with_grad_disabled_on_fresh_mint(self, dgemma_model_factory):
+        model = dgemma_model_factory()
+        encoder = model.model.model.encoder
+
+        encode_sequence(model, [1, 2, 3], into=None)
+
+        assert encoder.last_grad_enabled is False
+
+    def test_encoder_called_with_grad_disabled_on_advance(self, synthetic_kv_cache_factory):
+        model, cache = synthetic_kv_cache_factory()
+        encoder = model.model.model.encoder
+
+        encode_sequence(model, [4, 5], into=cache)
+
+        assert encoder.last_grad_enabled is False
+
+    def test_ambient_grad_enabled_outside_the_call_is_restored_after(self, dgemma_model_factory):
+        """`torch.no_grad()` inside `encode_sequence` must be scoped to the
+        encoder call only — it must not leak and disable grad for the
+        CALLER'S surrounding context after `encode_sequence` returns."""
+        model = dgemma_model_factory()
+
+        assert torch.is_grad_enabled() is True
+        encode_sequence(model, [1, 2, 3], into=None)
+        assert torch.is_grad_enabled() is True
