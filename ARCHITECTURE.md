@@ -135,7 +135,7 @@ Payload validity is vocabulary-owned, outside this discipline.
 
 - **The published repo name** — conserved identity, out of scope for renaming.
 - **`CanvasTrace` living in `dgemma/`** — the emitted canonical type sits core-side as the contract surface both sides depend on. A consumer importing it is not a violation. *(ADR-CDG-008 OQ2)*
-- **GGUF / llama.cpp backend (ADR-CDG-007)** — inference-only alternate backend, beside the drive seam, not through it. Rejected 2026-07-06.
+- **GGUF / llama.cpp backend (ADR-CDG-007)** — inference-only alternate backend, beside the drive seam, not through it. Rejected 2026-07-06; superseded by ADR-CDG-020 (proposed, pinned-upstream-PR posture), gated on #131 rung-1.
 - **Shared substrate** — `torch`, `transformers`, `diffusers` are beneath every layer; both core and surface importing them is not a seam crossing.
 
 ---
