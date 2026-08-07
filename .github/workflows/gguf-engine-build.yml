@@ -1,0 +1,152 @@
+name: gguf-engine-build
+
+# ADR-CDG-020 (decisions/adr-cdg-020-gguf-engine-sourcing-pinned-pr-branch.md) Decision 1/3:
+# CI-builds a checksummed artifact of a NAMED upstream llama.cpp commit — never a fork we own,
+# patch, or rebase. This workflow is the provenance mechanism the ADR draws the fork/not-fork
+# line around: "a reproducible CI build of a named upstream commit ... becomes [a fork] only if
+# we start carrying our own patches on top of it." This checkout is read-only against
+# ggml-org/llama.cpp; nothing here pushes, patches, or persists a branch.
+#
+# Pin (ratified, ADR-CDG-020 Decision 2, 2026-08-06): ggml-org/llama.cpp#24427
+# @ dd0cf04459b0c4f43aa6667dbc0879ac0cd50323 — a named SHA constant below (INV-3: never
+# "latest", never a moving PR-head ref, which would silently drift between pack releases).
+#
+# Manual-dispatch only, like publish_action.yml: this is a multi-minute (CUDA leg) build of
+# someone else's code, not a PR-gate job — running it on every push/PR would burn CI minutes
+# on an artifact that only changes when the pin is bumped (issue #280's re-pin maintenance
+# scope, ADR-CDG-020 Decision 3c) or the workflow itself changes.
+#
+# Two legs, mirroring the #131 rung-0 readback shape (CPU 1m27s, CUDA sm_75 9m46s on the dev
+# host): CPU is the cheap, always-available smoke leg; CUDA sm_75 is the real audience-matrix
+# build (ADR-CDG-020 Decision 3a: sm_75+ Turing/Ampere/Ada is the shipped platform matrix).
+# GitHub-hosted runners carry no GPU, but nvcc cross-compiles for a named target architecture
+# without one present — CMAKE_CUDA_ARCHITECTURES=75-real fixes the target explicitly rather
+# than relying on "native" detection, which would silently build for whatever (absent) GPU
+# the runner reports.
+#
+# INV-2 (fail-loud, checksummed, verified): every step here is a hard job failure on error —
+# no partial/unverified-artifact success path. sha256 is computed unconditionally after build
+# and uploaded alongside the binary; a missing binary fails the checksum step, not silently
+# skips it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pin_sha:
+        description: "Upstream ggml-org/llama.cpp commit SHA to build (ADR-CDG-020 Decision 2 default below)"
+        required: false
+        default: "dd0cf04459b0c4f43aa6667dbc0879ac0cd50323"
+
+env:
+  UPSTREAM_REPO: ggml-org/llama.cpp
+  PIN_SHA: ${{ github.event.inputs.pin_sha || 'dd0cf04459b0c4f43aa6667dbc0879ac0cd50323' }}
+  # ADR-CDG-020 Decision 3a: sm_75+ centers the audience matrix (3090/4090/4080-class =
+  # sm_86/sm_89; sm_75 = Turing, the dev host's own RTX-8000). One fixed multi-arch string
+  # covers the shipped matrix in a single CUDA build rather than one job per architecture.
+  CUDA_ARCHITECTURES: "75-real;86-real;89-real"
+
+jobs:
+  build-cpu:
+    name: CPU build (smoke leg)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pinned upstream commit (read-only, no fork)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.PIN_SHA }}
+          path: llama.cpp
+
+      - name: Verify checkout landed on the named pin
+        run: |
+          cd llama.cpp
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "$PIN_SHA" ]; then
+            echo "::error::checked out $actual, expected pinned SHA $PIN_SHA — refusing an unpinned build (ADR-CDG-020 INV-3)"
+            exit 1
+          fi
+          echo "Pin verified: $actual"
+
+      - name: Configure (CPU-only)
+        run: |
+          cmake -S llama.cpp -B build-cpu \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=OFF
+
+      - name: Build llama-diffusion-gemma-cli (CPU)
+        run: cmake --build build-cpu --target llama-diffusion-gemma-cli -j "$(nproc)"
+
+      - name: Smoke — binary runs and reports the pinned build
+        run: |
+          ./build-cpu/bin/llama-diffusion-gemma-cli --help | grep -q "diffusion" \
+            || { echo "::error::llama-diffusion-gemma-cli --help did not mention diffusion options"; exit 1; }
+
+  build-cuda:
+    name: CUDA sm_75+ build (audience-matrix leg)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pinned upstream commit (read-only, no fork)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.PIN_SHA }}
+          path: llama.cpp
+
+      - name: Verify checkout landed on the named pin
+        run: |
+          cd llama.cpp
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "$PIN_SHA" ]; then
+            echo "::error::checked out $actual, expected pinned SHA $PIN_SHA — refusing an unpinned build (ADR-CDG-020 INV-3)"
+            exit 1
+          fi
+          echo "Pin verified: $actual"
+
+      # Cross-compiles for CUDA_ARCHITECTURES without a GPU present on the runner — this is a
+      # build-only leg, not an execution leg (no on-runner inference smoke; that needs a real
+      # GPU and stays a dev-host / rung-1-class activity per ADR-CDG-020, not a CI job).
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@b8bf9c6c28f8a92fbb04dcfcaee872e60c57462d # v0.2.36
+        id: cuda-toolkit
+        with:
+          cuda: "12.6.0"
+          method: network
+          sub-packages: '["nvcc", "cudart-dev"]'
+
+      - name: Configure (CUDA)
+        run: |
+          cmake -S llama.cpp -B build-cuda \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}"
+
+      - name: Build llama-diffusion-gemma-cli (CUDA)
+        run: cmake --build build-cuda --target llama-diffusion-gemma-cli -j "$(nproc)"
+
+      - name: Checksum the built artifact (INV-2 — fail loud if missing)
+        run: |
+          bin=build-cuda/bin/llama-diffusion-gemma-cli
+          if [ ! -f "$bin" ]; then
+            echo "::error::expected build output $bin not found — build did not actually succeed"
+            exit 1
+          fi
+          sha256sum "$bin" | tee llama-diffusion-gemma-cli.sha256
+          echo "pin_sha=$PIN_SHA" >> build-manifest.txt
+          echo "upstream_repo=$UPSTREAM_REPO" >> build-manifest.txt
+          echo "cuda_architectures=$CUDA_ARCHITECTURES" >> build-manifest.txt
+          cat llama-diffusion-gemma-cli.sha256 >> build-manifest.txt
+
+      # Release-asset packaging (ADR-CDG-020 Decision 3b: checksummed GitHub Release artifact,
+      # never a repo-committed binary and never registry/pip-bundled) — this workflow uploads
+      # a build ARTIFACT here as the first proof the pin builds reproducibly in CI; wiring this
+      # into an actual `gh release upload` on a tag/dispatch is the fast-follow named on the PR
+      # (issue #281, the runtime fetch-and-verify path, is the consumer of that release asset).
+      - name: Upload build artifact + checksum + manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-diffusion-gemma-cli-${{ env.PIN_SHA }}-linux-cuda
+          path: |
+            build-cuda/bin/llama-diffusion-gemma-cli
+            llama-diffusion-gemma-cli.sha256
+            build-manifest.txt
+          retention-days: 30
