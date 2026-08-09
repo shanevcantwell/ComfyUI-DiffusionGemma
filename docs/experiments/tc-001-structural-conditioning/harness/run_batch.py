@@ -326,6 +326,16 @@ def main(argv: list[str] | None = None) -> int:
     graph = load_workflow(GRAPH_PATH)
     existing = load_manifest_keys(manifest_path)
 
+    # Smoke gate (issue #286 liveness ruling): the live HTTP submit/poll path
+    # is first exercised by the batch itself. The FIRST freshly-executed run
+    # is the smoke — if it does not land a valid run-log (`status == "ok"` AND
+    # a `run_log_path` on disk), abort before spending the GPU on the other 19
+    # runs. This is deliberately the first *executed* run, not a hardcoded key:
+    # on a resume, an already-ok pair-1 is skipped and the gate falls to the
+    # first run this invocation actually drives, so the smoke is always a live
+    # end-to-end submit→poll→log-landing round-trip made this session.
+    smoke_pending = True
+
     for run in plan:
         prior = existing.get(run["key"])
         if prior is not None and prior.get("status") == "ok":
@@ -336,6 +346,22 @@ def main(argv: list[str] | None = None) -> int:
         record = run_one(args.base_url, graph, run, runs_dir, args.poll_timeout_s)
         append_manifest_line(manifest_path, record)
         print(f"[done] {run['key']} -> {record['status']}", file=sys.stderr)
+
+        if smoke_pending:
+            smoke_pending = False
+            landed = record.get("status") == "ok" and record.get("run_log_path")
+            if not landed:
+                print(
+                    f"[abort] smoke gate failed on first live run {run['key']}: "
+                    f"status={record.get('status')!r}, "
+                    f"run_log_path={record.get('run_log_path')!r}. "
+                    "The live submit/poll/log-landing path did not round-trip; "
+                    "not spending the GPU on the remaining runs. Fix the live "
+                    "path (ComfyUI server, graph, node wiring) and re-invoke — "
+                    "the manifest makes this resumable.",
+                    file=sys.stderr,
+                )
+                return 1
 
     return 0
 
