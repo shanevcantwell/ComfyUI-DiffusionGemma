@@ -1,6 +1,6 @@
 # TC-001: Structural conditioning vs. basin re-assertion
 
-**Status**: proposed
+**Status**: registered (2026-08-09, Opus design-gate PASS)
 **Date**: 2026-08-09
 **Tracking**: #286
 **Runs on**: ComfyUI-DiffusionGemma, bf16 path, EB defaults (γ=0.1, temp 0.8→0.4, max 48 steps). Sampler untouched by design — the intervention lives entirely in the prefix.
