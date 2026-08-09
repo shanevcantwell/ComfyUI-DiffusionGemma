@@ -1,0 +1,52 @@
+{
+  "72": {
+    "inputs": {
+      "quant": "none"
+    },
+    "class_type": "DGemmaLoader",
+    "_meta": { "title": "DiffusionGemma Loader" }
+  },
+  "73": {
+    "inputs": {
+      "prompt": "",
+      "seed": 0,
+      "num_inference_steps": 48,
+      "t_min": 0.4,
+      "t_max": 0.8,
+      "entropy_bound": 0.1,
+      "confidence": 0.005,
+      "gen_length": 1024,
+      "thinking": false,
+      "model": ["72", 0]
+    },
+    "class_type": "DGemmaSampler",
+    "_meta": { "title": "DiffusionGemma Sampler" }
+  },
+  "74": {
+    "inputs": { "source": ["73", 0] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "Preview Text" }
+  },
+  "75": {
+    "inputs": {
+      "canvas_trace": ["73", 2],
+      "run_config": ["73", 5],
+      "frames": ["73", 3],
+      "canvas_state": ["73", 1],
+      "filename_prefix": "tc001_run",
+      "debug_log_path": ""
+    },
+    "class_type": "DGemmaRunLogWriter",
+    "_meta": { "title": "DiffusionGemma Run Log Writer" }
+  },
+  "76": {
+    "inputs": { "canvas_trace": ["73", 2], "mode": "commit", "cell_px": 6 },
+    "class_type": "DGemmaTrace",
+    "_meta": { "title": "DiffusionGemma Trace" }
+  },
+  "77": {
+    "inputs": { "images": ["76", 0] },
+    "class_type": "PreviewImage",
+    "_meta": { "title": "Preview Heatmap" }
+  }
+}
