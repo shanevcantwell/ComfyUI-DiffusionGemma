@@ -14,8 +14,8 @@ transitive import that runs before the hide takes effect):
    environment (the real one for CI: `mcp` is an optional extra, not a
    `[project] dependencies` entry, so a bare ComfyUI-only install genuinely
    lacks it).
-2. `surfaces.mcp.commands.model` / `.generate` / `.server` (the modules that
-   DO need the real SDK to function) raise an actionable `RuntimeError`
+2. `surfaces.mcp.commands.model` / `.generate` / `.encode` / `.server` (the
+   modules that DO need the real SDK to function) raise an actionable `RuntimeError`
    naming the missing 'mcp' optional extra when it's absent — never a bare
    `ModuleNotFoundError` with no context, and never a silent no-op that
    would let a caller think the surface "worked" without the SDK.
@@ -99,6 +99,24 @@ def test_commands_generate_raises_actionable_error_without_mcp_sdk():
     result = _run(
         "try:\n"
         "    import surfaces.mcp.commands.generate\n"
+        "    print('IMPORTED-UNEXPECTEDLY')\n"
+        "except RuntimeError as exc:\n"
+        "    assert 'mcp' in str(exc).lower()\n"
+        "    assert 'optional' in str(exc).lower()\n"
+        "    print('OK')\n"
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert "OK" in result.stdout
+    assert "IMPORTED-UNEXPECTEDLY" not in result.stdout
+
+
+def test_commands_encode_raises_actionable_error_without_mcp_sdk():
+    """ADR-CDG-025: `encode.py` follows the same `require_mcp_sdk()`-at-
+    import-time posture as `model.py`/`generate.py` — a missing SDK is a
+    loud, actionable RuntimeError at import, never a silent partial load."""
+    result = _run(
+        "try:\n"
+        "    import surfaces.mcp.commands.encode\n"
         "    print('IMPORTED-UNEXPECTEDLY')\n"
         "except RuntimeError as exc:\n"
         "    assert 'mcp' in str(exc).lower()\n"

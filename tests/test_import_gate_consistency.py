@@ -56,6 +56,7 @@ GATE_SITES = [
     "surfaces/comfyui/tally_audit.py",
     "surfaces/comfyui/token_trace.py",
     "surfaces/comfyui/trace.py",
+    "surfaces/mcp/commands/encode.py",
     "surfaces/mcp/commands/generate.py",
     "surfaces/mcp/commands/model.py",
     "surfaces/mcp/state_manager.py",

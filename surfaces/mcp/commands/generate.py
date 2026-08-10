@@ -40,18 +40,24 @@ them straight to `run_diffusion`, which validates them at ingress
 ARCHITECTURE.md rule 5, `EMIT-CANONICAL / PARSE-AT-THE-DOOR`). Omitting any
 of the three is `None`, byte-identical to before this widening.
 
-**`kv_cache=` deliberately NOT exposed here (issue #103 scope note).**
-`KVCache.cache` (`dgemma/types.py`) is a live `transformers.DynamicCache`
-tensor object — there is no JSON/disk encoding for it today
-(`dgemma/kv_cache.py`'s module docstring names `save_kv_cache`/
-`load_kv_cache`, the disk-crossing serialization a JSON payload would need,
-as explicit Phase-3 `NOT-YET-IMPLEMENTED`; the live decoder-drive body is
-also unbuilt, Phase 4). Exposing `kv_cache=` as a declarative JSON payload
-here would require inventing that serialization scheme — a real design
-decision `run_diffusion`'s ratified ADR-CDG-012 has not made yet, not a
-transcription of already-landed design. Per the autonomy contract, this is
-bounced alongside Scope B rather than absorbed; see the issue #103 tracking
-comment.
+**`kv_cache_id=` (ADR-CDG-025, issue #259): resolved-handle door, not a
+by-value payload.** The Scope-note reasoning above (issue #103) is why
+`kv_cache=` never became a JSON parameter directly — `KVCache.cache` is a
+live `transformers.DynamicCache` with no JSON/disk encoding. ADR-CDG-025
+dissolves that blocker by pointer-passing instead of inventing a
+serialization scheme: `kv_cache_id` is a JSON-safe string handle, minted by
+the sibling `encode` tool (`surfaces/mcp/commands/encode.py`) and resolved
+server-side against `StateManager`'s bounded, model-scoped registry
+(`manager.resolve_kv_cache`) at the top of this function, BEFORE
+`run_diffusion` is called. Fail-on-unknown (`resolve_kv_cache` raises
+`ValueError` naming the handle) is a designed rejection, never a silent
+fallback to an unconditioned cache — the same posture `require_model()`
+already takes for a missing model load. The resolved `KVCache` is handed to
+`run_diffusion(kv_cache=..., ...)` unconditionally alongside `prompt` — this
+module re-implements no exclusivity check between the two (ADR-CDG-024
+composition-compatibility, ADR-CDG-025 §3); whatever `run_diffusion`'s own
+ingress currently accepts for that pair is exactly what a resolved-handle
+call reaches.
 """
 from __future__ import annotations
 
@@ -263,6 +269,18 @@ def get_tools() -> list[Tool]:
                         },
                         "additionalProperties": False,
                     },
+                    "kv_cache_id": {
+                        "type": "string",
+                        "description": (
+                            "Handle from a prior encode call (ADR-CDG-025). Resolved "
+                            "server-side against the currently loaded model's cache "
+                            "registry; an unknown or expired handle is rejected, never "
+                            "silently substituted with a fresh cache. Composes with "
+                            "prompt — both are handed to the denoising loop "
+                            "unconditionally (ADR-CDG-024). Omit for no cache injection "
+                            "(today's behavior)."
+                        ),
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -368,9 +386,11 @@ async def generate(manager: StateManager, args: dict[str, Any]) -> dict[str, Any
     """Thin adapter over `run_diffusion`: unpack, call once (in a worker
     thread so the event loop stays free for a concurrent `cancel_run`), wrap.
 
-    Stateless per ADR-CDG-008 Correction 1: every call resolves `manager.
-    require_model()` (the one persisted object) and otherwise passes plain
-    kwargs straight through to `run_diffusion`, which builds its own fresh
+    Stateless per ADR-CDG-008 Correction 1 (amended by ADR-CDG-025 §1): every
+    call resolves `manager.require_model()` (persisted object #1) and, when
+    `kv_cache_id` is given, `manager.resolve_kv_cache()` (persisted object
+    #2, the ADR-CDG-025-sanctioned registry) — otherwise passes plain kwargs
+    straight through to `run_diffusion`, which builds its own fresh
     scheduler/collector/composite internally. This function retains nothing
     across calls except the transient cancel-event registration, which is
     always removed in `finally` before returning.
@@ -382,6 +402,14 @@ async def generate(manager: StateManager, args: dict[str, Any]) -> dict[str, Any
     model = manager.require_model()
     run_id = args.get("run_id")
     include_frames = bool(args.get("include_frames", False))
+
+    # ADR-CDG-025 §3: resolve BEFORE any run_diffusion call — a new, earlier
+    # door than run_diffusion's own validate_kv_cache_ingress (V1-V6), not a
+    # replacement for it. Fail-on-unknown: manager.resolve_kv_cache raises
+    # ValueError (caught by server.py:call_tool's outer handler, turned into
+    # a structured {"error": ...}) rather than silently passing None through.
+    kv_cache_id = args.get("kv_cache_id")
+    kv_cache = manager.resolve_kv_cache(kv_cache_id) if kv_cache_id else None
 
     should_cancel = None
     if run_id:
@@ -409,6 +437,7 @@ async def generate(manager: StateManager, args: dict[str, Any]) -> dict[str, Any
         "constraints": _unpack_constraints(args.get("constraints")),
         "control_signals": _unpack_control_signals(args.get("control_signals")),
         "capture": _unpack_capture(args.get("capture")),
+        "kv_cache": kv_cache,
     }
 
     try:

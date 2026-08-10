@@ -21,10 +21,10 @@ from surfaces.mcp.state_manager import StateManager  # noqa: E402
 from tests.test_run_diffusion_statelessness import _fake_model  # noqa: E402
 
 
-def test_list_tools_returns_all_four_registered_tools():
+def test_list_tools_returns_all_five_registered_tools():
     tools = asyncio.run(server_module.list_tools())
     names = {t.name for t in tools}
-    assert names == {"load_model", "model_status", "generate", "cancel_run"}
+    assert names == {"load_model", "model_status", "generate", "cancel_run", "encode"}
 
 
 def test_call_tool_unknown_name_returns_structured_error():
@@ -57,6 +57,26 @@ def test_call_tool_load_model_missing_args_returns_error_without_crashing(monkey
     payload = json.loads(results[0].text)
     assert "error" in payload
     assert fresh_manager.is_loaded is False
+
+
+def test_call_tool_encode_routes_to_the_encode_handler(monkeypatch, dgemma_model_factory):
+    """ADR-CDG-025: confirm the dispatch table actually reaches `encode`'s
+    handler (not just that the handler works in isolation, already covered
+    by `tests/test_mcp_statelessness.py::TestKVCacheRegistryLifecycle`).
+    Uses `dgemma_model_factory` (`tests/conftest.py`), not this module's own
+    `_fake_model()` — `encode` reaches `dgemma.kv_cache.encode_sequence`,
+    which needs the fuller `.model.model.encoder`/`.model.config` surface
+    `_fake_model()`'s minimal `_HookCapableModel` doesn't expose."""
+    fresh_manager = StateManager()
+    fresh_manager._model = dgemma_model_factory()
+    fresh_manager._repo_id = fresh_manager._model.repo_id
+    fresh_manager._quant = "none"
+    monkeypatch.setattr(server_module, "state_manager", fresh_manager)
+
+    results = asyncio.run(server_module.call_tool("encode", {"prompt": "hello"}))
+    payload = json.loads(results[0].text)
+    assert "kv_cache_id" in payload
+    assert payload["kv_cache_id"] in fresh_manager._kv_cache_registry
 
 
 def test_call_tool_swallows_handler_exceptions_as_structured_error(monkeypatch):
