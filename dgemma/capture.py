@@ -335,6 +335,13 @@ class _FrameCollector:
         )
         # Mean over the block dim ONLY — one fraction per example, never a
         # batch-blended scalar (review finding, 2026-07-05).
+        # `accepted_index` is THIS step's fresh scheduler output — the
+        # scheduler recomputes it from scratch every call and holds no
+        # persistent commit state, so `committed_per_example` is a per-step
+        # accepted-set fraction, not a latched/accumulating commitment
+        # (issue #254, misread twice 2026-08-04). See
+        # `DiffusionFrame.committed_fraction`'s docstring (dgemma/types.py)
+        # for the full semantics.
         committed_per_example = tuple(accepted_index.float().mean(dim=-1).tolist())
 
         entropy = None
