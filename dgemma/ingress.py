@@ -235,15 +235,44 @@ def validate_capture(capture: Any, *, vocab_size: int | None = None) -> None:
 
 
 def reject_conflicting_hook_sources(constraints: "Constraints | None", logit_hook: Any) -> None:
-    """H1: `constraints=` and a raw `logit_hook=` cannot both be given — two
-    logit-mask sources on one door (ADR-CDG-010 D5, the R5 single-
-    installation-path clause)."""
-    if constraints is not None and logit_hook is not None:
+    """H1/rule-7 (issue #221): reject ANY caller-supplied `logit_hook=`
+    outright — a bare surface-supplied closure is rejected exactly like the
+    `constraints=`+`logit_hook=` combination always was, closing the rule-7
+    hole ARCHITECTURE.md named (`GAP (#221)`: "ingress rejects the
+    constraints+logit_hook combination but not a bare surface-supplied
+    closure").
+
+    `logit_hook` is engine-internal only (ADR-CDG-010 Decision 5, the R5
+    single-installation-path clause): `dgemma.loop.run_diffusion` calls this
+    validator with the CALLER's raw `logit_hook` argument BEFORE any
+    `constraints=`-driven hook is built, so the engine's own internal
+    build-and-rebind of the same `logit_hook` local (`constraints.pins` ->
+    `build_logit_mask_hook`, `dgemma/loop.py`) happens strictly AFTER this
+    check runs and is never seen here — rejecting every non-`None` caller
+    value at this door cannot foreclose that internal path.
+
+    Two reject shapes share this one gate: `constraints=` alongside a
+    caller's `logit_hook=` (two logit-mask sources on one door, the
+    original H1 message) and a `logit_hook=` given alone (no sanctioned
+    caller of a raw forward-hook closure exists — ARCHITECTURE.md rule 7:
+    "No surface-supplied closures or hooks — ingress rejects them").
+    """
+    if logit_hook is None:
+        return
+    if constraints is not None:
         raise ValueError(
             "constraints= and logit_hook= cannot both be given: two logit-mask sources on one door "
             "(ADR-CDG-010 D5, the R5 single-installation-path clause). Fix: pass only constraints=; "
             "the engine builds and installs the mask hook."
         )
+    raise ValueError(
+        "logit_hook= is engine-internal only and cannot be supplied by a caller (ARCHITECTURE.md "
+        "rule 7, issue #221): the only sanctioned executable crossings at this door are the "
+        "read-only on_frame observer and the should_cancel poll. Fix: use constraints= to declare "
+        "a logit mask — the engine builds and installs the hook internally via "
+        "dgemma.hooks.install_logit_shaping_hook; a raw forward-hook closure is never accepted "
+        "from a caller."
+    )
 
 
 def reject_prompt_and_kv_cache(prompt: "str | None", kv_cache: Any) -> None:

@@ -45,12 +45,14 @@ singular.
 
 `run_diffusion` (`dgemma/loop.py`) wraps its one pipeline call in
 `install_logit_shaping_hook(dgemma_model.model, hook_fn)` whenever a hook
-function is supplied (`logit_hook=` — today only reachable internally, since
-no `constraints=` ingress exists yet per ADR-CDG-010/011's `NOT-YET-IMPLEMENTED`
-status; a future constraints implementation builds its hook function and
-passes it through this same parameter, never installing its own hook
-directly). When no hook function is given (`logit_hook=None`, today's only
-real call shape), the context manager is a no-op pass-through — no
+function is supplied (`logit_hook=` — reachable ONLY internally: a `constraints=`
+payload with at least one pin builds `dgemma.constraints_hook.build_logit_mask_hook`
+and rebinds the `logit_hook` local to it; `dgemma.ingress.
+reject_conflicting_hook_sources` rejects any caller-supplied `logit_hook`
+value outright, bare or alongside `constraints=`, so this module's own
+caller — `run_diffusion` — is the only code path that ever passes a
+non-`None` `hook_fn` here, issue #221). When no hook function is given
+(`logit_hook=None`), the context manager is a no-op pass-through — no
 `register_forward_hook` call happens at all, so a run with no logit-shaping
 need pays zero hook-lifecycle cost and leaves zero installed hooks, which is
 also the state the "zero hooks after run" invariant demands trivially.

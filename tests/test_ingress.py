@@ -373,7 +373,7 @@ class TestCaptureIngress:
 
 
 class TestHookSourceConflict:
-    """H1 (issue #64 §1.4)."""
+    """H1/rule-7 (issue #64 §1.4; hardened issue #221)."""
 
     def test_neither_given_passes(self):
         reject_conflicting_hook_sources(None, None)  # must not raise
@@ -381,11 +381,20 @@ class TestHookSourceConflict:
     def test_only_constraints_given_passes(self):
         reject_conflicting_hook_sources(Constraints(pins=(Pin(position=0, token_id=1),)), None)  # must not raise
 
-    def test_only_logit_hook_given_passes(self):
+    def test_bare_logit_hook_rejected(self):
+        """Rule-7 hole (#221): a BARE surface-supplied closure — no
+        `constraints=` in the picture at all — must raise at ingress with a
+        named remedy, not pass through. `logit_hook` is engine-internal
+        only; the only sanctioned executable crossings are the read-only
+        `on_frame` observer and the `should_cancel` poll."""
+
         def a_hook(module, args, output):
             return output
 
-        reject_conflicting_hook_sources(None, a_hook)  # must not raise
+        with pytest.raises(ValueError, match="logit_hook= is engine-internal only"):
+            reject_conflicting_hook_sources(None, a_hook)
+        with pytest.raises(ValueError, match="Fix: use constraints="):
+            reject_conflicting_hook_sources(None, a_hook)
 
     def test_h1_both_given_rejected(self):
         def a_hook(module, args, output):

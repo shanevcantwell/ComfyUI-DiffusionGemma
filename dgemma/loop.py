@@ -498,21 +498,26 @@ def run_diffusion(
     Phase 5 lands that body; this phase only fills the `walker` slot the
     scaffold already exposed.
 
-    `logit_hook` (#35 R5, F4; ADR-CDG-010 Decision 5): an optional forward
-    hook installed on `dgemma_model.model` for exactly the duration of the
-    one pipeline call below, via `dgemma.hooks.install_logit_shaping_hook` —
+    `logit_hook` (#35 R5, F4; ADR-CDG-010 Decision 5; hardened issue #221):
+    ENGINE-INTERNAL ONLY — a caller-supplied value of any kind (bare, or
+    alongside `constraints=`) is rejected at ingress (H1/rule-7, below);
+    `None` is the only value a caller may ever legally pass. Internally,
+    when `constraints=` carries at least one pin, this function builds its
+    own forward hook (`dgemma.constraints_hook.build_logit_mask_hook`) and
+    rebinds the `logit_hook` local to it AFTER ingress validation has
+    already run — the sole path by which a non-`None` value ever reaches
+    `dgemma.hooks.install_logit_shaping_hook` below, which installs it on
+    `dgemma_model.model` for exactly the duration of the one pipeline call,
     the ONLY sanctioned installation path for a hook on this door (the only
     logit-shaping door per issue #28: a callback-returned `{"logits": ...}`
-    is silently discarded by the installed pipeline). `None` when
-    `constraints=` is also `None` installs nothing and leaves zero hooks
-    registered, trivially satisfying `STATELESS-CORE`'s "no hook survives a
-    `run_diffusion` call" (rule 6): the context manager's `try/finally`
-    guarantees teardown on the pipeline call's clean return, on
-    `DiffusionCancelled` (caught below), and on any other exception raised
-    mid-run — the hook is torn down before this function's own exception
-    handling (or return) is reached in every case. Passing BOTH
-    `constraints=` and `logit_hook=` is rejected at ingress (H1, below) —
-    two logit-mask sources on one door (ADR-CDG-010 D5).
+    is silently discarded by the installed pipeline). `None` (no pins,
+    the only shape a caller can produce directly) installs nothing and
+    leaves zero hooks registered, trivially satisfying `STATELESS-CORE`'s
+    "no hook survives a `run_diffusion` call" (rule 6): the context
+    manager's `try/finally` guarantees teardown on the pipeline call's
+    clean return, on `DiffusionCancelled` (caught below), and on any other
+    exception raised mid-run — the hook is torn down before this function's
+    own exception handling (or return) is reached in every case.
 
     `constraints=`/`control_signals=`/`capture=` (ADR-CDG-010/011/014, issue
     #64/#61): declarative payloads, validated at ingress (`dgemma.ingress.
@@ -564,10 +569,11 @@ def run_diffusion(
     docstring for the full mechanism. `ControlSignals(bindings=())`/`None`
     builds no walker (empty == no-op) — byte-identical to today's
     no-`control_signals=` behavior. An invalid payload of any of the three
-    still raises at ingress regardless of phase; `constraints=` +
-    `logit_hook=` together still raise at ingress (H1) even now that
-    `constraints=` builds its own hook internally — the two-source-on-one-door
-    reject is unconditional.
+    still raises at ingress regardless of phase; ANY caller-supplied
+    `logit_hook=` — bare, or alongside `constraints=` — still raises at
+    ingress (H1/rule-7, issue #221) even now that `constraints=` builds its
+    own hook internally — the reject is unconditional on `logit_hook`'s
+    mere presence, not just on the two-source combination.
 
     Returns `(text, CanvasState, CanvasTrace)` — never a bare string
     (ADR-CDG-001 Addendum). `CanvasTrace` carries `collector.frames` plus
@@ -665,9 +671,9 @@ def run_diffusion(
     Raises `ValueError` if `t_min >= t_max` (parse-at-the-door validation —
     an inverted or degenerate anneal range would silently hand
     `EntropyBoundScheduler` a nonsensical temperature trajectory), if
-    ingress validation of `constraints`/`control_signals`/`capture`/the
-    `constraints`+`logit_hook` combination fails (see
-    `dgemma.ingress.validate_ingress`'s error register), if `kv_cache` is
+    ingress validation of `constraints`/`control_signals`/`capture`/any
+    caller-supplied `logit_hook` (bare or alongside `constraints`) fails
+    (see `dgemma.ingress.validate_ingress`'s error register), if `kv_cache` is
     given and fails `validate_kv_cache_ingress`'s V1-V7 checks (see
     `dgemma.kv_cache.validate_kv_cache_ingress`'s error register — V7 is the
     #265 interim addition), or if `kv_cache` is given together with a
@@ -751,8 +757,9 @@ def run_diffusion(
     # `constraints=` builds neither the hook nor the pin participant and is
     # byte-identical to today's no-`constraints=` behavior.
     #
-    # H1 (validated above) already forecloses `constraints=` AND
-    # `logit_hook=` both being given, so building the hook here and passing
+    # H1/rule-7 (validated above, issue #221) already forecloses a caller
+    # ever reaching this point with a non-`None` `logit_hook` at all — bare
+    # or alongside `constraints=` — so building the hook here and passing
     # it through the same `logit_hook` name below can never collide with a
     # caller-supplied one.
     pin_participants: tuple = ()

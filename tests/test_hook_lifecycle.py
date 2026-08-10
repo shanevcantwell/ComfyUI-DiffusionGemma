@@ -11,13 +11,19 @@ Two tiers, per the task brief:
 - `TestInstallLogitShapingHookUnit` — the context manager in isolation,
   against `tests/conftest.py`'s `HookRecordingModel` (#35 R4), covering
   clean/raising/no-op paths directly and cheaply.
-- `TestRunDiffusionHookLifecycle` — the full `run_diffusion`-level
-  enforcement: a real `run_diffusion` call (fakes installed the same way
-  `tests/test_run_diffusion_knobs.py`/`test_run_diffusion_cancel.py` do)
-  driving a `HookRecordingModel` through the clean, cancelled, and
-  exception-raising paths, asserting `live_hook_count == 0` after each —
-  the actual invariant a caller relies on, not just the primitive's own
-  contract.
+- `TestRunDiffusionHookLifecycle` — the `run_diffusion`-level no-op path
+  (`logit_hook=None`) plus the rule-7 rejection of a bare caller-supplied
+  `logit_hook=` (issue #221 — see `dgemma.ingress.
+  reject_conflicting_hook_sources`).
+- `TestRunDiffusionHookLifecycleWithConstraints` — the full
+  `run_diffusion`-level enforcement: a real `run_diffusion` call (fakes
+  installed the same way `tests/test_run_diffusion_knobs.py`/
+  `test_run_diffusion_cancel.py` do) driving a `HookRecordingModel`
+  through the clean, cancelled, and exception-raising paths via the
+  engine-internal `constraints=` -> hook path (the only path left that
+  installs a real hook through this door since #221), asserting
+  `live_hook_count == 0` after each — the actual invariant a caller
+  relies on, not just the primitive's own contract.
 """
 from __future__ import annotations
 
@@ -171,7 +177,14 @@ def _install_hook_lifecycle_fakes(monkeypatch, *, num_steps: int, raise_on_step:
 
 class TestRunDiffusionHookLifecycle:
     """The invariant as `run_diffusion`'s own caller experiences it: whatever
-    path the call takes, zero hooks remain on the model afterward."""
+    path the call takes, zero hooks remain on the model afterward.
+
+    A caller-supplied `logit_hook=` is now rejected outright at ingress
+    (rule-7 hardening, issue #221) — `TestRunDiffusionHookLifecycleWithConstraints`
+    below covers the same clean/cancelled/raising lifecycle for the one
+    remaining way a hook reaches `install_logit_shaping_hook`: the engine's
+    own internal build from `constraints=`. This class now covers the
+    `logit_hook=None` no-op path plus the new bare-closure rejection."""
 
     def test_clean_run_with_no_logit_hook_leaves_zero_hooks(self, monkeypatch, fake_pipeline_factory):
         """Today's only real call shape (`logit_hook=None`): confirms the
@@ -183,83 +196,37 @@ class TestRunDiffusionHookLifecycle:
 
         assert built.model.live_hook_count == 0
 
-    def test_clean_run_with_a_logit_hook_installs_and_tears_down(self, monkeypatch, fake_pipeline_factory):
+    def test_bare_logit_hook_rejected_before_any_hook_installs(self, monkeypatch, fake_pipeline_factory):
+        """Rule-7 hole (#221): a caller-supplied `logit_hook=` — with no
+        `constraints=` in the picture — must raise at ingress with a named
+        remedy, BEFORE the scheduler/pipeline are constructed and before
+        `install_logit_shaping_hook` ever runs. Zero hooks touch the model
+        on this reject path."""
         built = fake_pipeline_factory()
         _install_hook_lifecycle_fakes(monkeypatch, num_steps=3)
-        seen_during_run: list[int] = []
 
-        def hook_fn(mod, inp, out):
-            seen_during_run.append(mod.live_hook_count)
-
-        run_diffusion(_model_with_hook_recording(built.model), "hi", logit_hook=hook_fn)
-
-        # The hook actually fired (proves it was really installed, not a
-        # vacuous no-op) and was live (count==1) while it fired.
-        assert seen_during_run and all(count == 1 for count in seen_during_run)
-        assert built.model.live_hook_count == 0
-
-    def test_cancelled_run_still_tears_down_the_hook(self, monkeypatch, fake_pipeline_factory):
-        """The partial-return path (`DiffusionCancelled`, ADR-CDG-010's
-        cancellation amendment): the hook must not survive a cancelled run
-        any more than a completed one — F4 applies identically to both."""
-        built = fake_pipeline_factory()
-        _install_hook_lifecycle_fakes(monkeypatch, num_steps=5)
-
-        text, canvas_state, canvas_trace = run_diffusion(
-            _model_with_hook_recording(built.model),
-            "hi",
-            should_cancel=lambda: True,
-            logit_hook=lambda mod, inp, out: None,
-        )
-
-        assert canvas_trace.frames  # cancelled but evidence-bearing, per #38
-        assert built.model.live_hook_count == 0
-
-    def test_raising_run_still_tears_down_the_hook(self, monkeypatch, fake_pipeline_factory):
-        """The exception path: a real error mid-run (not `DiffusionCancelled`)
-        must still leave zero hooks — this is the mutation spot-check target:
-        remove `hooks.py`'s `finally` and this test must fail."""
-        built = fake_pipeline_factory()
-        _install_hook_lifecycle_fakes(monkeypatch, num_steps=5, raise_on_step=2)
-
-        with pytest.raises(RuntimeError, match="simulated mid-run failure"):
+        with pytest.raises(ValueError, match="logit_hook= is engine-internal only"):
             run_diffusion(
                 _model_with_hook_recording(built.model),
                 "hi",
                 logit_hook=lambda mod, inp, out: None,
             )
 
+        assert built.model.install_log == []
         assert built.model.live_hook_count == 0
-
-    def test_two_sequential_runs_on_one_model_each_leave_zero_hooks(self, monkeypatch, fake_pipeline_factory):
-        """The F4 failure mode named directly: run A's hook must not survive
-        into run B. Two back-to-back calls on the SAME model object each
-        leave `live_hook_count == 0`, and run B's hook fires independently of
-        whatever run A installed."""
-        built = fake_pipeline_factory()
-        _install_hook_lifecycle_fakes(monkeypatch, num_steps=2)
-        model = _model_with_hook_recording(built.model)
-
-        run_diffusion(model, "hi", logit_hook=lambda mod, inp, out: None)
-        assert built.model.live_hook_count == 0
-
-        run_diffusion(model, "hi", logit_hook=lambda mod, inp, out: None)
-        assert built.model.live_hook_count == 0
-        # Two independent install/remove cycles, not one hook reused.
-        assert built.model.install_log == [0, 1]
-        assert built.model.removal_log == [0, 1]
 
 
 class TestRunDiffusionHookLifecycleWithConstraints:
     """Issue #64 Phase 3 extension: the SAME zero-hooks-after-run invariant,
     now exercised with a `constraints=` payload (the ENGINE-BUILT hook
     `dgemma.constraints_hook.build_logit_mask_hook`, installed through the
-    exact same `install_logit_shaping_hook` path a caller-supplied
-    `logit_hook=` uses) rather than a hand-supplied `logit_hook=`. Proves
-    the two-mechanism given's hook half — not just the earlier bare
-    `logit_hook=` shape above — is torn down clean, cancelled, and raising,
-    matching the task brief's "extend test_hook_lifecycle.py — zero hooks
-    after clean/cancelled/raising runs WITH a constraints payload"."""
+    exact same `install_logit_shaping_hook` path). Since issue #221 rejects
+    every caller-supplied `logit_hook=` at ingress, this class is now the
+    ONLY place a real hook is installed and torn down through a full
+    `run_diffusion` call — proving the clean/cancelled/raising lifecycle
+    for the one remaining path a hook reaches this door, matching the task
+    brief's "extend test_hook_lifecycle.py — zero hooks after
+    clean/cancelled/raising runs WITH a constraints payload"."""
 
     def test_clean_run_with_constraints_installs_and_tears_down(self, monkeypatch, fake_pipeline_factory):
         built = fake_pipeline_factory()
@@ -326,3 +293,23 @@ class TestRunDiffusionHookLifecycleWithConstraints:
 
         assert built.model.install_log == []
         assert built.model.live_hook_count == 0
+
+    def test_two_sequential_constrained_runs_on_one_model_each_leave_zero_hooks(
+        self, monkeypatch, fake_pipeline_factory
+    ):
+        """The F4 failure mode named directly: run A's engine-built hook
+        must not survive into run B. Two back-to-back `constraints=` calls
+        on the SAME model object each leave `live_hook_count == 0` — two
+        independent install/remove cycles, not one hook reused."""
+        built = fake_pipeline_factory()
+        _install_hook_lifecycle_fakes(monkeypatch, num_steps=2)
+        model = _model_with_hook_recording(built.model)
+        constraints = Constraints(pins=(Pin(position=0, token_id=1),))
+
+        run_diffusion(model, "hi", constraints=constraints)
+        assert built.model.live_hook_count == 0
+
+        run_diffusion(model, "hi", constraints=constraints)
+        assert built.model.live_hook_count == 0
+        assert built.model.install_log == [0, 1]
+        assert built.model.removal_log == [0, 1]
