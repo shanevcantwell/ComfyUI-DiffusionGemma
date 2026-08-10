@@ -111,7 +111,7 @@ The original H0-substrate was, by its own admission, not yet a hypothesis ("the 
 ## Part 4 — Carried unchanged
 
 - **H0-renoise** — as pre-registered 2026-07-13. Best-formed probe in the program; one caveat now banked alongside it: no intermediate-value argument guarantees a phase between β→1 steam and β→0 self-collapse — first-order transitions are permitted; the sweep is the only oracle. The self-collapse branch has independent a-priori support (self-sampling loops contract toward modes).
-- **H0-hold** (the seventh-seam inject-arm probe, minted in [ADR-CDG-015](../../../decisions/adr-cdg-015-latent-field-input-embedding-seam.md); that ADR's P1 mint into the experiment record had not been executed as of this landing — this entry completes it) — unchanged; now additionally load-bearing as H0-eom-embed's gate, and its outcome doubles as archaeology on the model's training recipe: a Duo-style soft-input curriculum would pass it trivially (banked 2026-08-10 session).
+- **H0-hold** (the seventh-seam inject-arm probe, minted in [ADR-CDG-015](../../../decisions/adr-cdg-015-latent-field-input-embedding-seam.md); that ADR's P1 mint into the experiment record had not been executed as of this landing — this entry completes it) — unchanged; now additionally load-bearing as H0-eom-embed's gate, and its outcome doubles as archaeology on the model's training recipe: a **soft-input training curriculum (of the kind Duo/Soft-Masked-DLM use — a constructed training choice, not the Duality equivalence)** would pass it trivially (banked 2026-08-10 session).
 
 ---
 
