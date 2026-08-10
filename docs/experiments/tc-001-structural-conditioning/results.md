@@ -4,7 +4,7 @@
 **Protocol**: [`protocol.md`](./protocol.md) (registered; pre-observation)
 **Tracking**: #286
 **Raw data**: `design-docs/experiments/ComfyUI-DiffusionGemma/tc-001-structural-conditioning/` (private annex per ADR-CDG-022 — run logs, blinded texts, blind judgments, key, `scored.json`)
-**Engine identity**: pack `4c99b68` + ComfyUI core `7cf4e783` (deployed `/srv/dev/ComfyUI`); harness from main `efb5de2`; bf16 (`quant="none"`), EB defaults, `gen_length=1024`, seeds 101–110, sequential runs.
+**Engine identity**: pack `4c99b68` + ComfyUI core `7cf4e783`; harness from main `efb5de2`; bf16 (`quant="none"`), EB defaults, `gen_length=1024`, seeds 101–110, sequential runs.
 
 ## Verdict
 
