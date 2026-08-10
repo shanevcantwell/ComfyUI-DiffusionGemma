@@ -1,8 +1,12 @@
-"""Coverage closer for the dotted-package import branch of
-`surfaces/comfyui/loader.py`, `surfaces/comfyui/sampler.py`,
-`surfaces/comfyui/trace.py`, and `surfaces/comfyui/token_trace.py` (same
-dual-context gate; relocated from `nodes/` per ADR-CDG-008 Phase 1, issue
-#52) — test-coverage-plan.md Phase 2's precedent.
+"""Coverage closer for the dotted-package import branch of the
+`surfaces/comfyui/*.py` and `consumers/*.py` dual-context gates (same gate
+family; relocated from `nodes/` per ADR-CDG-008 Phase 1, issue #52) —
+test-coverage-plan.md Phase 2's precedent. Grown incrementally as each new
+gated module landed; see issue #57 for the consolidation pass that added
+`test_import_gate_consistency.py` alongside this file as a second,
+predicate-text-level enforcement layer over the full gate population
+(this file stays execution-level and does not cover every site — see that
+module's own docstring for the split).
 
 `tests/test_comfyui_loader_context.py` already proves this branch executes
 correctly under ComfyUI's real loader mechanics — but it does so in a
@@ -168,3 +172,19 @@ def test_denoise_node_resolves_relative_import_under_dotted_package_context(synt
     assert "." in module.__package__
     assert module.DGemmaDenoise.FUNCTION == "denoise"
     assert module.run_diffusion.__module__ == f"{synthetic_pack_root}.dgemma.loop"
+
+
+def test_emission_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """Coverage closer for `surfaces/comfyui/emission.py`'s dual-context gate
+    (issue #166) — same shape as denoise.py's test above. This module had no
+    execution-level dual-context test before issue #57's consolidation pass
+    (`tests/test_import_gate_consistency.py` checks its predicate text is
+    correct, but only this test proves the relative climb to
+    `consumers.run_log.RunConfig` and `dgemma.excision.decode_frames`
+    actually resolves under a genuinely dotted `__package__`)."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.comfyui.emission")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.comfyui"
+    assert "." in module.__package__
+    assert module.RunConfig.__module__ == f"{synthetic_pack_root}.consumers.run_log"
+    assert module.decode_frames.__module__ == f"{synthetic_pack_root}.dgemma.excision"
