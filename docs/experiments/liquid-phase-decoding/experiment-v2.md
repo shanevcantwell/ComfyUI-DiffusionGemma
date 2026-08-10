@@ -1,6 +1,6 @@
 # Experiment — liquid-state decoding v2: closures, restatements, and the field's equation of motion
 
-**Status**: `proposed` — landed 2026-08-10 from an identifier-free webchat draft (per the write-adrs discipline); identifiers resolved at write time; Opus design-gate PASS flips this to `registered`
+**Status**: `registered` — Opus design-gate PASS 2026-08-10; landed from an identifier-free webchat draft (per the write-adrs discipline), identifiers resolved at write time
 **Date**: 2026-08-10 (webchat session, co-framed with operator)
 **Related**: the liquid-phase concept note ([`concept.md`](concept.md), same directory); [ADR-CDG-015](../../../decisions/adr-cdg-015-latent-field-input-embedding-seam.md) — the latent-field input-embedding seam (the seventh seam); [ADR-CDG-010](../../../decisions/adr-cdg-010-constraint-composite-and-pinned-mask.md) — the constraint composite / pinned mask (the logit door)
 **Supersedes (by name, in [`experiment.md`](experiment.md)):** the original `experiment.md`'s H0-observe, H0-project, H0-control, H0-substrate, and H0-cache interpolation-form statements. H0-renoise and the seventh-seam inject-arm probe (H0-hold) carry forward unchanged. Original statements are RETAINED with dispositions — append-only discipline: nothing deleted, everything superseded in place.
@@ -143,6 +143,7 @@ This draft is **identifier-free by design**. Do not trust, copy, or mint from an
 4. Neither flagged ADR-candidate minted; both remain candidates in the live library's queue.
 5. Residue grep: `grep -nE "(ADR-[A-Z]+-TBD|XXX|TODO|resolve (identifier|to its library identifier) at write time|⟨resolve)"` against this document — one hit, at the "Write-time handoff" section's own procedural instruction text (item 1 above, describing the resolution step performed), not an unresolved live placeholder; both flagged decisions are already resolved in the front matter and body to ADR-CDG-015 / ADR-CDG-010. No unresolved identifier residue found.
 6. Defect found and repaired during resolution: ADR-CDG-015 P1's "mint H0-hold in `experiment.md`" was never executed — H0-hold existed only in the ADR and a ROADMAP row. Part 4's H0-hold entry completes the mint.
+7. Design-gate ratification (2026-08-10, independent Opus reviewer, PASS, no blocking findings). Resolved recommendation, recorded as a decision: the file's ~4% overage past the ~5k-token salience ceiling (char-estimate) is accepted — this is a front-loaded pre-registration record, read once per program, not iterated hot; if the record grows further, the named split point is the Part 2 restatements.
 
 ## Room for observations
 
