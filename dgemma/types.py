@@ -81,6 +81,32 @@ class DiffusionFrame:
     batch dim, which would silently blend examples). The scalar
     `committed_fraction` property is a batch_size==1 convenience and raises
     on batched frames rather than inventing a blended number.
+
+    **`committed_fraction` is recomputed fresh every step, not a latched
+    commitment (issue #254, misread twice 2026-08-04):**
+    `EntropyBoundScheduler.step()` recomputes `accepted_index` from that
+    step's own entropies each call — the scheduler holds no persistent
+    commit state, and neither does this frame. A position surviving one
+    step un-renoised is emergent, not guaranteed: it must re-earn
+    acceptance from the NEXT forward pass, and can drop back out.
+    Consequently `committed_fraction` is non-monotonic across
+    `trace.frames` by design — a later frame's value can be lower than an
+    earlier one (a "de-commit"), and this is a normal trajectory outcome,
+    not a bug. Only `converged=True` (`committed_fraction == 1.0` on the
+    LAST captured frame) means every canvas position held through to the
+    end; nothing about a high `committed_fraction` mid-run promises the
+    positions it counts stay accepted afterward.
+
+    This subsumes, rather than contradicts, ADR-CDG-009/issue #26's
+    "block-local" framing (`surfaces/comfyui/trace.py`'s summary caption):
+    a block boundary (`canvas_idx` incrementing, only reachable when
+    `gen_length` spans more than one block) is one OBSERVED CAUSE of a
+    fraction drop — canvas N+1 starting fresh — not a second, competing
+    mechanism. The general rule is always "recomputed this step, over
+    whichever canvas is active"; a single-block run (`canvas_idx` constant,
+    the common case) never exercises the block-boundary trigger at all,
+    so reading its non-monotonicity as block advancement (issue #254's
+    misread) reaches for a cause that never fired in that trace.
     """
 
     canvas_idx: int
@@ -208,7 +234,10 @@ class DiffusionFrame:
 
     @property
     def committed_fraction(self) -> float:
-        """Scalar commit fraction — defined only for single-example frames."""
+        """Scalar commit fraction — defined only for single-example frames.
+        Per-step recomputed accepted-set fraction, not a latched commitment
+        (see the class docstring's `committed_fraction` section, issue
+        #254): non-monotonic across frames is expected, not a bug."""
         if len(self.committed_fraction_per_example) != 1:
             raise ValueError(
                 "committed_fraction is a batch_size==1 convenience; this frame has "

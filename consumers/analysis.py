@@ -192,7 +192,13 @@ def build_token_identity_grid(trace: CanvasTrace) -> list[list[int]]:
 def build_avalanche_curve(trace: CanvasTrace) -> list[float]:
     """The "Neither Parallel Nor Sequential" commit-fraction-over-step
     series: `DiffusionFrame.committed_fraction` (batch_size==1 convenience)
-    read off each frame in `trace.frames` order, as a plain list of floats."""
+    read off each frame in `trace.frames` order, as a plain list of floats.
+
+    Each value is a per-step recomputed accepted-set fraction, not a
+    latched commitment (issue #254) — the series is expected to be
+    non-monotonic (dips/"de-commits" mid-run are a normal trajectory, not
+    a bug); only the last value reaching `1.0` (`converged=True`) means
+    every position held through to the end."""
     return [frame.committed_fraction for frame in trace.frames]
 
 
