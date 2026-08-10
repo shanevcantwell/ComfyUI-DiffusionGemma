@@ -4,6 +4,8 @@
 **Concept note:** [`concept.md`](concept.md)
 **Target instrument:** `ComfyUI-DiffusionGemma` (per-step callback, ADR-CDG-004)
 
+**Partially superseded (2026-08-10):** H0-observe, H0-project, H0-control, H0-substrate, and the H0-cache interpolation form are superseded by [`experiment-v2.md`](experiment-v2.md) (three clauses retired-a-priori, remainder restated with pre-registered operationalizations). H0-renoise carries forward unchanged. Original prose retained below per append-only discipline.
+
 ---
 
 ## Reasoning at decision time
@@ -155,9 +157,12 @@ self-collapse branch is #6's "yes, plausible noise fools the rule."
 ## Room for observations
 
 Append-only. Never retro-fit a prediction to a result. Verdict ∈ {untested, observed, falsified,
-held}.
+held}. (Vocabulary extended 2026-08-10 by [`experiment-v2.md`](experiment-v2.md): + `retired-a-priori`, operator-ratified.)
 
 | date | H0 | setup (steps / t / entropy_bound / threshold / held positions) | observation | verdict |
 |---|---|---|---|---|
 | — | — | — | (none yet) | untested |
 | — | H0-renoise | — | (pre-registered 2026-07-13; not yet run) | untested |
+| 2026-08-10 | H0-observe (v1, clause 1) | — | dimension count: entropy level sets are (K−2)-dimensional; clause generic — argument banked in `experiment-v2.md` Part 1 | retired-a-priori |
+| 2026-08-10 | H0-observe (v1, clause 2, averaged) | — | H(X\|C) ≤ H(X); averaged narrowing is a theorem — argument banked in `experiment-v2.md` Part 1 | retired-a-priori |
+| 2026-08-10 | H0-project (v1, operator-invariance branch) | — | invariance ⇔ degenerate ⇔ frozen (owned by H0-control) — argument banked in `experiment-v2.md` Part 1 | retired-a-priori |
