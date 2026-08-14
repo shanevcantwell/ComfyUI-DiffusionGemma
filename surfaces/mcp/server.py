@@ -53,7 +53,7 @@ from mcp.server import Server  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
 from mcp.types import TextContent, Tool  # noqa: E402
 
-from surfaces.mcp.commands import generate, model
+from surfaces.mcp.commands import encode, generate, model
 from surfaces.mcp.state_manager import StateManager
 
 
@@ -70,6 +70,7 @@ _HANDLERS = {
     "model_status": model.model_status_tool,
     "generate": generate.generate,
     "cancel_run": generate.cancel_run,
+    "encode": encode.encode,
 }
 
 
@@ -80,6 +81,7 @@ async def list_tools() -> list[Tool]:
     tools: list[Tool] = []
     tools.extend(model.get_tools())
     tools.extend(generate.get_tools())
+    tools.extend(encode.get_tools())
     return tools
 
 

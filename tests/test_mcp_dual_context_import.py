@@ -1,6 +1,7 @@
 """Coverage closer for the dotted-package (ComfyUI-loader-shaped) import
 branch of `surfaces/mcp/state_manager.py`, `surfaces/mcp/commands/model.py`,
-and `surfaces/mcp/commands/generate.py` — same technique as
+`surfaces/mcp/commands/generate.py`, and `surfaces/mcp/commands/encode.py`
+(ADR-CDG-025) — same technique as
 `tests/test_dual_context_import.py` (that module's own docstring explains
 the rationale in full: `tests/test_comfyui_loader_context.py` already proves
 the real ComfyUI loader mechanics work, out-of-process; this closes the
@@ -51,6 +52,12 @@ def test_state_manager_resolves_relative_import_under_dotted_package_context(syn
     assert module.__package__ == f"{synthetic_pack_root}.surfaces.mcp"
     assert module.__package__.count(".") >= 2  # the exact condition the gate checks
     assert module.load_model.__module__ == f"{synthetic_pack_root}.dgemma.model"
+    # ADR-CDG-025: state_manager.py's dual-context gate now also resolves
+    # dgemma.kv_cache's two imports (encode_sequence/tokenizer_fingerprint)
+    # — same depth (3 dots) as load_model/DGemmaModel above, so a single
+    # extra assertion on one of the two closes the coverage gap without
+    # duplicating the whole gate's proof per imported name.
+    assert module.encode_sequence.__module__ == f"{synthetic_pack_root}.dgemma.kv_cache"
 
 
 def test_commands_model_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
@@ -67,4 +74,19 @@ def test_commands_generate_resolves_relative_import_under_dotted_package_context
     assert module.__package__ == f"{synthetic_pack_root}.surfaces.mcp.commands"
     assert module.__package__.count(".") >= 3
     assert module.run_diffusion.__module__ == f"{synthetic_pack_root}.dgemma.loop"
+    assert module.StateManager.__module__ == f"{synthetic_pack_root}.surfaces.mcp.state_manager"
+
+
+def test_commands_encode_resolves_relative_import_under_dotted_package_context(synthetic_pack_root):
+    """ADR-CDG-025: `encode.py`'s gate is the SAME 4-dots-to-`<pack>` depth
+    `generate.py`'s own comment names ("commands/ is an extra directory
+    surfaces/comfyui/*.py doesn't have") — `encode.py` only needs
+    `StateManager` (no direct `dgemma.*` import of its own; the mint/advance
+    body lives in `StateManager.encode_into_registry`), so this proves the
+    2-dots-to-`surfaces.mcp` `StateManager` resolve, not a 4th `dgemma.*`
+    name."""
+    module = importlib.import_module(f"{synthetic_pack_root}.surfaces.mcp.commands.encode")
+
+    assert module.__package__ == f"{synthetic_pack_root}.surfaces.mcp.commands"
+    assert module.__package__.count(".") >= 3
     assert module.StateManager.__module__ == f"{synthetic_pack_root}.surfaces.mcp.state_manager"
