@@ -2,7 +2,7 @@
 
 **Status**: `proposed`
 **Date**: 2026-09-06
-**Related**: ADR-CDG-026 (bidirectional control gate — the upstream producer this layer consumes), ADR-CDG-008 (MCP-center topology — the protocol surface for inter-process communication)
+**Related**: ADR-CDG-026 (out-of-band timestep reporting dispatch — the upstream producer this layer consumes), ADR-CDG-008 (MCP-center topology — the protocol surface for inter-process communication)
 
 ---
 
@@ -25,7 +25,7 @@ The decoupling was completed just before the "Great Token Crunch" of February 20
 
 3. **The decoupled UI runs as a separate process** from any execution engine. It connects via WebSocket or HTTP event stream to one or more engines simultaneously. This is not just a deployment choice — it's an architectural invariant: the observability layer must never block, crash, or degrade the performance of the engine it observes.
 
-4. **The control surface (from ADR-CDG-026) uses the same decoupled UI.** The Play/Pause/Step buttons in `obs-control.js` are part of this platform — not a ComfyUI-specific feature. They send commands to any engine that exposes the corresponding API endpoint, identified by the `engine` field in the event stream.
+4. **A future control surface may share the same decoupled UI shell.** Play/Pause/Step command semantics are not established by ADR-CDG-026; they require a separate future decision. Any such commands may use this platform's UI shell while remaining independent of a specific execution engine.
 
 ## Rationale
 
@@ -71,6 +71,6 @@ The decoupling was completed just before the "Great Token Crunch" of February 20
 
 ## References
 
-- ADR-CDG-026 (bidirectional control gate) — the upstream producer this layer consumes
+- ADR-CDG-026 (out-of-band timestep reporting dispatch) — the upstream producer this layer consumes
 - ADR-CDG-008 (MCP-center topology) — the protocol surface for inter-process communication
 - `app/web-ui/public/` — the decoupled observability layer source code

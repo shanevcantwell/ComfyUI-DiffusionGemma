@@ -161,21 +161,49 @@ tag.
   composed with a templated prompt turn per ADR-CDG-024 above. #47
   (known-provenance cache-perturbation) is **closed** (2026-08-05); its
   Tier-2 remainder is tracked by #260, parked above.
-- **Release line — v0.5.2** (operator ruling: "0.5.0 was refactor and this
-  is activating latent functionality"). PR #270 (the #263/#265 interim
-  guards) merged (`921f944`, 2026-08-05); the v0.5.2 line now waits only on
-  #163's release gate: a seat-run fresh-install + live smoke on the dev
-  host before the operator sees a version. #196's version-bump/tag-timing
-  question resolves in that same act (mint the literal and the tag at gate
-  PASS). The release's known limitations are exactly the guarded #263/#265
-  pair above plus the standing quant/GGUF state (#264-gated AutoRound,
-  #131-parked GGUF, bf16-only working path).
+- **Release line — v0.5.2; next alpha includes reporting Phase 1 only**
+  (operator ruling: "0.5.0 was refactor and this is activating latent
+  functionality"). PR #270 (the #263/#265 interim guards) merged (`921f944`,
+  2026-08-05). The next alpha cut on this existing line adds only
+  [ADR-CDG-026](decisions/adr-cdg-026-out-of-band-timestep-reporting-dispatch.md)
+  Phase 1: the dispatcher contract, immutable minimal CPU snapshots, singleton
+  bounded worker with per-run FIFO plus global active-run/event/byte budgets,
+  existing live-report/event parity, and at least one extracted pure report
+  consumer. Its exit gate is core-owned lifecycle (including caught-cancellation
+  reason capture), failure isolation, aggregate overflow/admission,
+  reserved-terminal admission/scheduling, and bounded-finish testing with
+  measured handoff overhead; terminal processing/delivery is fallible and leaves
+  reporting incomplete. Existing node signatures and
+  normal final outputs remain unchanged, and **no control ships**. Phase 2+
+  is explicitly excluded from this alpha. The line also retains #163's release
+  gate: a seat-run fresh-install + live smoke on the dev host before the
+  operator sees a version. #196's version-bump/tag-timing question resolves in
+  that same act (mint the literal and the tag at gate PASS). The release's
+  known limitations include the guarded #263/#265 pair above plus the standing
+  quant/GGUF state (#264-gated AutoRound, #131-parked GGUF, bf16-only working
+  path).
 - **#175 — in-UI node explanations.** PR #270's gate PASS (merged `921f944`)
   assessed #175 as **partially delivered** by its tooltip/`DESCRIPTION`
   build-out (the `DGemmaDenoise` prompt/kv_cache composition-vs-exclusivity
   language, the guard-rejection naming) — issue rescoped (2026-08-05) to
   the remainder: DGemmaRunLogWriter, the gen_length tooltip, and
   DGemmaTokenTrace.
+- **Out-of-band timestep reporting — later horizon after the next alpha.**
+  ADR-CDG-026 Phase 2 is unversioned: complete incremental Trace/Tally/
+  TokenTrace/RunLog consumers behind an explicit `ReportSpec`, define
+  partial/atomic artifact rules, and reuse results only through stable run
+  identity. Its exit gate is per-consumer gap/error and artifact-commit tests,
+  post-hoc equivalence, and a lossless RunLog proof or retention of the post-hoc
+  canonical writer. Phase 3 is also unversioned: benchmark snapshot, queue,
+  GIL, rendering/file, memory, and finish costs, moving heavy reporting to a
+  subprocess/service only if pre-registered thresholds warrant it. The Phase 3
+  benchmark owner and architecture reviewer version those thresholds at
+  benchmark-plan approval, before the first measurement is run or revealed;
+  schema, version, replay, and multi-engine work coordinates with proposed
+  ADR-CDG-027.
+  **Neither Phase 2 nor Phase 3 is in the next v0.5.2 alpha.** A pause/inspect/
+  mutate/resume gate and separately versioned mutation operators (including
+  WHT) are a separate future decision, never a reporting phase.
 - **Research arc.** The capture instrument is complete (Tiers 0–2 + display
   consumers, [ADR-CDG-014](decisions/adr-cdg-014-frame-capture-discipline.md)).
   Queued: #186 (bf16-vs-INT4 trace comparison), #28 (flagship global-constraint
