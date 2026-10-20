@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "baseline": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+  "release_policy": "all_current_nodes_and_supported_modes",
+  "text_only": true,
+  "image_implementation_authorized": false,
+  "initial_platforms": ["linux-x86_64-cuda-sm75", "linux-x86_64-cuda-sm86", "windows-x86_64-cuda-sm75", "windows-x86_64-cuda-sm86"],
+  "cpu": "correctness_and_portability_baseline",
+  "nodes": ["DGemmaLoader", "DGemmaSampler", "DGemmaTrace", "DGemmaTallyAudit", "DGemmaRunLogWriter", "DGemmaEncode", "DGemmaDenoise", "DGemmaTokenTrace"],
+  "required_capabilities": ["load_unload", "text_generation", "multi_canvas", "tier0_entropy", "tier1_topk", "tier2_budgeted_distribution", "constraints", "control_signals", "encode_advance", "cache_injection", "prompt_cache_composition", "cancellation_partial_trace", "thinking_excision", "frame_images", "run_log", "mcp_parity", "clean_install"],
+  "research_not_release_requirements": ["arbitrary_cache_surgery", "portable_edited_cache_persistence", "continuous_input_embedding_injection", "new_attention_treatments", "unimplemented_resume_or_fork_capabilities"],
+  "baseline_reconciliation_required": ["extract_all_node_input_output_modes", "separate_implemented_from_declared_capabilities", "characterize_existing_fail_loud_rejections", "resolve_trace_stage_semantics", "pin_hf_reference_and_weights"]
+}

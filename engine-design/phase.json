@@ -1,0 +1,7 @@
+{
+  "kind": "design-snapshot",
+  "phase": "D0",
+  "release_eligible": false,
+  "baseline": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+  "required_files": ["README.md", "requirements.json", "sources.md"]
+}

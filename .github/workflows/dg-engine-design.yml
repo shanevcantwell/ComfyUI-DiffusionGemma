@@ -1,0 +1,58 @@
+name: DG engine design snapshots
+on:
+  push:
+    branches: [design/dg-engine-20261019]
+    paths: [engine-design/phase.json]
+permissions:
+  contents: write
+jobs:
+  tag-design-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify phase manifest and create immutable design tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, re, urllib.error, urllib.request
+          repo = os.environ['GITHUB_REPOSITORY']
+          sha = os.environ['GITHUB_SHA']
+          assert repo == 'shanevcantwell/ComfyUI-DiffusionGemma'
+          assert os.environ['GITHUB_REF'] == 'refs/heads/design/dg-engine-20261019'
+          assert re.fullmatch(r'[0-9a-f]{40}', sha)
+          base = 'https://api.github.com/repos/' + repo
+          def api(path, data=None):
+              body = None if data is None else json.dumps(data).encode()
+              request = urllib.request.Request(base + path, data=body, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          item = api('/contents/engine-design/phase.json?ref=' + sha)
+          phase = json.loads(base64.b64decode(item['content']))
+          assert phase['kind'] == 'design-snapshot' and phase['release_eligible'] is False
+          assert phase['phase'] in ['D0', 'D1', 'D2', 'D3']
+          assert phase['baseline'] == 'fed377afc7b54f03cb7faa4dd798c80c15279d8a'
+          for path in phase['required_files']:
+              assert re.fullmatch(r'[A-Za-z0-9_./-]+', path) and '..' not in path and not path.startswith('/')
+              value = api('/contents/engine-design/' + path + '?ref=' + sha)
+              assert value['type'] == 'file' and value['size'] > 0
+          tag = 'dg-engine-design/2026-10-19/' + phase['phase'].lower()
+          try:
+              old = api('/git/ref/tags/' + tag)['object']
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+              old = None
+          if old is not None:
+              target = api('/git/tags/' + old['sha'])['object']['sha'] if old['type'] == 'tag' else old['sha']
+              assert target == sha, 'Existing tag points elsewhere; never overwrite it'
+          else:
+              obj = api('/git/tags', {'tag': tag, 'message': 'Design snapshot only. Not an implemented, tested, or released engine. ' + phase['phase'], 'object': sha, 'type': 'commit'})
+              api('/git/refs', {'ref': 'refs/tags/' + tag, 'sha': obj['sha']})
+          print(tag + ' -> ' + sha)
+          PY
