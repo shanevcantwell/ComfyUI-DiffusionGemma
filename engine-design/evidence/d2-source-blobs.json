@@ -1,0 +1,20 @@
+{
+  "CMakeLists.txt": "8f90780d884aea52e2a2844d4621e64bbdaa05d6",
+  "README.md": "f7d51b2cb9efebe30e3c6ff5b01ceefd08d14448",
+  "architecture.md": "8cbac91526d3140fc9587277094641d85c46893b",
+  "contract/dgemma-engine.h": "018787aa61d5e67be467901407715f6b427cb55d",
+  "decisions.md": "4391e122a8d26a130a6c2cd3dd771a482e322d54",
+  "phase.json": "82a97872a2873ef208d9aa8b8f7b7d93e08240b2",
+  "protocol.md": "642e713757d4abe20c85037a2162bdd4947eb3bd",
+  "requirements.json": "3fc41de3d1dc307d2aa13d6555c4428e7f0bb690",
+  "sources.md": "5a8cc19b65e1fd92508906864bb77ef40a4bb526",
+  "tests/header-smoke.c": "a8982618d9df9865fcda46265ebe78abc41685ad",
+  "tests/header-smoke.cpp": "ff13af5fc80e710e0db039f7868d6e61efc4816d",
+  "tests/test_workflow.py": "f927679dbfd47fd2bab2902d351bcb7877290a6f",
+  "tools/workflow.py": "fd2b934ca8c03ac25b145586c4f29ab6455b917a",
+  "verification.md": "2f8541d57af376bda3914e3b8320df139466a82f",
+  "workflows/README.md": "60cc63d128c795b6a08ce588e8e984f12a873bbc",
+  "workflows/image.json": "b4937773803ebfe6536322b5ebb150129fe4fcac",
+  "workflows/phase-scope.md": "df682a564e8d1a79b6bf0b1bf25749d976aa4f8e",
+  "workflows/text.json": "986f9b1ef7639833d2db13974dbb25d5a768207b"
+}

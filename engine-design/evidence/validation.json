@@ -1,0 +1,26 @@
+{
+  "kind": "design-tool-validation",
+  "engine_validation": false,
+  "tested_remote_commit": "274a65a2beda2992da4139fc6c82786a249e38f1",
+  "ctest_groups": 3,
+  "policy_unit_tests": 44,
+  "failed": 0,
+  "skipped": 0,
+  "remote_run_id": 39376595417,
+  "independent_design_review": "NOT_RUN",
+  "engine_phases": "NOT_RUN",
+  "files": {
+    "CMakeLists.txt": "da8bbca7f87c8f05bd977aa0864d047640020fd4f202780d2cc1e2adf88d078e",
+    "contract/dgemma-engine.h": "28d8d77049470e31a9674b80f5ed1bcc888cfb26def467e6882e429563a0aede",
+    "tests/header-smoke.c": "e50742487858a5b353ab377f402ff400482a5218fd89d4352ea39d43efcab55a",
+    "tests/header-smoke.cpp": "a5aee0da04f4015e050e44f224c0bd166dc9aae71e2b679e34f5d8d27458a9e4",
+    "tests/test_workflow.py": "70f1d13578451c8363541ed18cb356199ba3492a6aefaa17e6e1661f11480a1c",
+    "tools/workflow.py": "e2318a02bee38e2d9cea18932d724836ffd2e4984e44f2bab74878a31abc01e4",
+    "requirements.json": "29f22d412087d8e394a9c0320d4811a9ba1d5ef01ca837af5bfb9d92c22351a4",
+    "workflows/text.json": "cbed0612fb6022102bbebaced603228d829b0fbaea815dfddaa61d0fbb1e22db",
+    "workflows/image.json": "4b99c8b2c7468f8dadb7febbcf763e7058c1c2dcd120b9e8df1b0578dfb33bf0",
+    "evidence/ctest.log": "60da823f137499f06b06be599db5fbc4ae943b6e4d3aa78d4ad10eebb2c93146",
+    "evidence/toolchain.txt": "d46213901ec5ffae20f6956b9a5773c781a9e809a2608222e6b46bf228b9ebd6",
+    "evidence/d2-source-blobs.json": "4d9a4a5b10938b7ddebe3e79d08f179bf8d379adaf1484341eeecadc7f0c9b1e"
+  }
+}
