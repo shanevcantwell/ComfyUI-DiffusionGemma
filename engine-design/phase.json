@@ -1,7 +1,7 @@
 {
   "kind": "design-snapshot",
-  "phase": "D1",
+  "phase": "D2",
   "release_eligible": false,
   "baseline": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
-  "required_files": ["README.md", "requirements.json", "sources.md", "architecture.md", "decisions.md"]
+  "required_files": ["CMakeLists.txt", "README.md", "architecture.md", "contract/dgemma-engine.h", "decisions.md", "protocol.md", "requirements.json", "sources.md", "tests/header-smoke.c", "tests/header-smoke.cpp", "tests/test_workflow.py", "tools/workflow.py", "verification.md", "workflows/README.md", "workflows/image.json", "workflows/phase-scope.md", "workflows/text.json"]
 }

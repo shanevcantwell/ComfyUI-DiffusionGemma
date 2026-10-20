@@ -8,15 +8,15 @@ permissions:
 jobs:
   tag-design-snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Verify phase manifest and create immutable design tag
+      - name: Check exact design bytes and create immutable design tag
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           python3 - <<'PY'
-          import base64, json, os, re, urllib.error, urllib.request
+          import base64, hashlib, json, os, pathlib, re, subprocess, tempfile, urllib.error, urllib.request
           repo = os.environ['GITHUB_REPOSITORY']
           sha = os.environ['GITHUB_SHA']
           assert repo == 'shanevcantwell/ComfyUI-DiffusionGemma'
@@ -37,10 +37,26 @@ jobs:
           assert phase['kind'] == 'design-snapshot' and phase['release_eligible'] is False
           assert phase['phase'] in ['D0', 'D1', 'D2', 'D3']
           assert phase['baseline'] == 'fed377afc7b54f03cb7faa4dd798c80c15279d8a'
-          for path in phase['required_files']:
-              assert re.fullmatch(r'[A-Za-z0-9_./-]+', path) and '..' not in path and not path.startswith('/')
-              value = api('/contents/engine-design/' + path + '?ref=' + sha)
-              assert value['type'] == 'file' and value['size'] > 0
+          assert len(phase['required_files']) == len(set(phase['required_files']))
+          with tempfile.TemporaryDirectory(prefix='dg-design-') as directory:
+              root = pathlib.Path(directory)
+              for path in phase['required_files']:
+                  assert re.fullmatch(r'[A-Za-z0-9_./-]+', path) and '..' not in path and not path.startswith('/')
+                  value = api('/contents/engine-design/' + path + '?ref=' + sha)
+                  assert value['type'] == 'file' and 0 < value['size'] <= 1048576
+                  data = base64.b64decode(value['content'])
+                  assert len(data) == value['size']
+                  assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == value['sha']
+                  output = root / 'engine-design' / path
+                  output.parent.mkdir(parents=True, exist_ok=True)
+                  output.write_bytes(data)
+              if phase['phase'] in ['D2', 'D3']:
+                  env = {key: value for key, value in os.environ.items() if key not in ['GH_TOKEN', 'GITHUB_TOKEN']}
+                  for command in [
+                      ['cmake', '-S', 'engine-design', '-B', 'build'],
+                      ['cmake', '--build', 'build'],
+                      ['ctest', '--test-dir', 'build', '--output-on-failure', '--no-tests=error', '-V']]:
+                      subprocess.run(command, cwd=root, env=env, check=True, timeout=180)
           tag = 'dg-engine-design/2026-10-19/' + phase['phase'].lower()
           try:
               old = api('/git/ref/tags/' + tag)['object']

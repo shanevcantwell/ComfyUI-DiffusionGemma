@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "flow": "image",
+  "enabled": false,
+  "publication_authorized": false,
+  "authorization": "Plan and workflow only. Image inference implementation is not authorized.",
+  "required_review_scopes": ["model", "systems"],
+  "phases": [
+    {"id":"M0","title":"Image input feasibility and contracts","depends":[],"tests":["IMAGE-01","IMAGE-02"],"deliverables":["image-source-lock.json","image-contract.md","image-fixture-plan.md"],"tasks":["Inspect current libmtmd/Gemma4 processor and mmproj conversion; do not write image inference code.","Specify image tokens, crops, ordering, position IDs, embedding dimensions and encoder-only cache effects.","Plan repeated-image, mixed text/image, empty image, bad shape and multi-image tests."],"hitl_checkpoint":false,"release_candidate":false},
+    {"id":"M1","title":"Future image implementation after separate authorization","depends":["M0"],"tests":["IMAGE-03","IMAGE-04"],"deliverables":["future-image-test-plan.md"],"tasks":["Prerequisite: text I5 has passed and an explicit later authorization enables this workflow.","Reuse libmtmd preprocessing/projector support; do not duplicate it in the DG worker.","Compare projected embeddings and encoder K/V with HF before text-decoder integration."],"hitl_checkpoint":true,"release_candidate":false},
+    {"id":"M2","title":"Future image release qualification","depends":["M1"],"tests":["IMAGE-05"],"deliverables":["future-image-release-plan.md"],"tasks":["Extend provenance with image/processor/mmproj hashes; budget image memory separately.","Re-run text regression and all node/MCP contracts; certify only tested image shapes and backend pairs.","No execution or release is authorized by this disabled manifest."],"hitl_checkpoint":false,"release_candidate":false}
+  ]
+}
