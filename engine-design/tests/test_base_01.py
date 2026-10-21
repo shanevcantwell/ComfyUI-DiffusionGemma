@@ -13,10 +13,11 @@ from i0_testlib import (
     REPO_ROOT,
     SCHEMAS,
     derive_object_info,
-    load_authenticated_cdg_package,
+    authenticated_worker_package,
     read_authenticated_cdg_source,
     read_evidence_artifact,
     read_json,
+    repository_files_under,
     sha256,
     validate_json,
 )
@@ -43,7 +44,7 @@ class Base01InventoryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.inventory = read_json(ENGINE_DESIGN / "node-modes.json")
         cls.lock = read_json(ENGINE_DESIGN / "reference.lock.json")
-        cls.pack, cls.pack_loader = cls.enterClassContext(load_authenticated_cdg_package(cls.lock))
+        cls.pack, cls.pack_loader = authenticated_worker_package()
         loader_module = sys.modules[cls.pack.NODE_CLASS_MAPPINGS["DGemmaLoader"].__module__]
         loader_module.list_local_model_dirs = lambda: ["<runtime-local-model-directory>"]
         for node_class in cls.pack.NODE_CLASS_MAPPINGS.values():
@@ -55,11 +56,12 @@ class Base01InventoryTests(unittest.TestCase):
 
         records = [
             (ENGINE_DESIGN / "reference.lock.json", SCHEMAS / "reference-lock.schema.json"),
+            (ENGINE_DESIGN / "i0-harness.lock.json", SCHEMAS / "harness-lock.schema.json"),
             (ENGINE_DESIGN / "node-modes.json", SCHEMAS / "node-modes.schema.json"),
             (FIXTURES / "semantics.json", SCHEMAS / "semantics.schema.json"),
             (FIXTURES / "baseline-defects.json", SCHEMAS / "baseline-defects.schema.json"),
         ]
-        for schema_path in sorted(SCHEMAS.glob("*.schema.json")):
+        for schema_path in repository_files_under(SCHEMAS, ".schema.json"):
             Draft202012Validator.check_schema(read_json(schema_path))
         for record_path, schema_path in records:
             with self.subTest(record=record_path.name):

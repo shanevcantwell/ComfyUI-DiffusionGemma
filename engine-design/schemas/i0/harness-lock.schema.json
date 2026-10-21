@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/engine-design/schemas/i0/harness-lock.schema.json",
+  "title": "I0 committed-candidate and closed-environment harness lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "git_tool", "interpreter", "environment", "candidate", "sources", "test_groups", "boundary_test", "result_contract"],
+  "properties": {
+    "schema": {"const": 2},
+    "kind": {"const": "dg-engine-i0-harness-lock"},
+    "git_tool": {"$ref": "#/$defs/absoluteFile"},
+    "interpreter": {
+      "type": "object", "additionalProperties": false, "required": ["launcher_path", "image"],
+      "properties": {
+        "launcher_path": {"$ref": "#/$defs/relativePath"},
+        "image": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "size", "sha256", "dev", "ino"],
+          "properties": {
+            "path": {"$ref": "#/$defs/absolutePath"}, "size": {"type": "integer", "minimum": 1},
+            "sha256": {"$ref": "#/$defs/sha256"}, "dev": {"type": "integer", "minimum": 0},
+            "ino": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["manifest_path", "manifest_sha256", "merkle_sha256", "roots", "sys_path", "record_policy"],
+      "properties": {
+        "manifest_path": {"$ref": "#/$defs/absolutePath"}, "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "merkle_sha256": {"$ref": "#/$defs/sha256"},
+        "roots": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/environmentRoot"}},
+        "sys_path": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/absolutePath"}},
+        "record_policy": {
+          "type": "object", "additionalProperties": false, "required": ["verify_all", "allow_omitted"],
+          "properties": {"verify_all": {"const": true}, "allow_omitted": {"const": ["*.pth"]}}
+        }
+      }
+    },
+    "candidate": {
+      "type": "object", "additionalProperties": false, "required": ["relevant_paths", "inventory_sha256"],
+      "properties": {
+        "relevant_paths": {"type": "array", "minItems": 15, "uniqueItems": true, "items": {"$ref": "#/$defs/relativePath"}},
+        "inventory_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "sources": {
+      "type": "array", "minItems": 15, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "path", "size", "sha256", "groups", "kind"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,127}$"}, "path": {"$ref": "#/$defs/relativePath"},
+          "size": {"type": "integer", "minimum": 1}, "sha256": {"$ref": "#/$defs/sha256"},
+          "groups": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["COMMON", "BASE-01", "BASE-02", "BOUNDARY"]}},
+          "kind": {"enum": ["python", "json", "schema"]}
+        }
+      }
+    },
+    "test_groups": {
+      "type": "object", "additionalProperties": false, "required": ["BASE-01", "BASE-02"],
+      "properties": {"BASE-01": {"$ref": "#/$defs/testGroup"}, "BASE-02": {"$ref": "#/$defs/testGroup"}}
+    },
+    "boundary_test": {
+      "type": "object", "additionalProperties": false, "required": ["source_id", "environment", "faults"],
+      "properties": {
+        "source_id": {"const": "boundary-tests"}, "environment": {"const": "DG_ENGINE_I0_BOUNDARY_TEST"},
+        "faults": {"type": "array", "minItems": 30, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}}
+      }
+    },
+    "result_contract": {
+      "type": "object", "additionalProperties": false, "required": ["schema", "max_bytes", "max_side_bytes"],
+      "properties": {"schema": {"const": 3}, "max_bytes": {"const": 32768}, "max_side_bytes": {"const": 4096}}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolutePath": {"type": "string", "pattern": "^/[^\\u0000]+$"},
+    "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*//)[^\\u0000]+$"},
+    "absoluteFile": {
+      "type": "object", "additionalProperties": false, "required": ["path", "size", "sha256"],
+      "properties": {"path": {"$ref": "#/$defs/absolutePath"}, "size": {"type": "integer", "minimum": 1}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "environmentRoot": {
+      "type": "object", "additionalProperties": false, "required": ["id", "path", "entry_count", "merkle_sha256"],
+      "properties": {"id": {"enum": ["stdlib", "site-packages"]}, "path": {"$ref": "#/$defs/absolutePath"},
+        "entry_count": {"type": "integer", "minimum": 1}, "merkle_sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "testGroup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_ids", "test_module_ids", "test_ids", "count", "inventory_sha256"],
+      "properties": {
+        "source_ids": {"type": "array", "minItems": 8, "uniqueItems": true, "items": {"type": "string"}},
+        "test_module_ids": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+        "test_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^test_base_0[12](?:_[a-z0-9_]+)?\\.[A-Za-z0-9_]+\\.test_[A-Za-z0-9_]+$"}},
+        "count": {"type": "integer", "minimum": 1}, "inventory_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

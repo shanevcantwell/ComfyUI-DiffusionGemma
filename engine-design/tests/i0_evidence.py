@@ -1,7 +1,6 @@
 """Pure helpers and fail-closed evidence readers for I0 baseline groups."""
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 import builtins
 import dis
@@ -155,13 +154,58 @@ I0_DERIVATION_ID_PREFIXES = {
     "gguf.q4_k_m": "gguf.q4_k_m.",
 }
 BARE_PRODUCT_ROOTS = frozenset(("dgemma", "surfaces"))
-AUTHENTICATED_CONTEXT_ACQUIRE_TIMEOUT = 5.0
-_AUTHENTICATED_CONTEXT_LOCK = threading.Lock()
-_AUTHENTICATED_CONTEXT_STATE_LOCK = threading.Lock()
-_AUTHENTICATED_CONTEXT_OWNER_THREAD: int | None = None
-_AUTHENTICATED_CONTEXT_OWNER_TOKEN: object | None = None
-_ORACLE_TRUST_SNAPSHOT: _OracleTrustSnapshot | None = None
+TARGET_ORACLE_ROOTS = frozenset(("transformers", "diffusers"))
+WORKER_MARKER = "DG_ENGINE_I0_ORACLE_WORKER"
+WORKER_BOUNDARY_TEST_MARKER = "DG_ENGINE_I0_BOUNDARY_TEST"
 _MISSING = object()
+_ACTIVE_WORKER_SESSION: AuthenticatedWorkerSession | None = None
+_BOUND_REPOSITORY_ROOT: Path | None = None
+_BOUND_REPOSITORY_BYTES: dict[str, bytes] | None = None
+
+
+def install_bound_repository_files(repo_root: Path, files: dict[str, bytes]) -> None:
+    """Install the worker's parent-authenticated candidate data snapshot once.
+
+    Python modules are loaded by the worker's retained-byte loader.  This map is
+    the corresponding one-shot door for schemas, fixtures and reference locks,
+    so validation never authenticates a path and then reopens mutable bytes.
+    """
+    global _BOUND_REPOSITORY_ROOT, _BOUND_REPOSITORY_BYTES
+    if _BOUND_REPOSITORY_BYTES is not None:
+        raise EvidenceBlocked("I0-BLOCK-HARNESS", "repository-bytes", "bound repository snapshot is single-use")
+    root = Path(repo_root).resolve(strict=True)
+    normalized: dict[str, bytes] = {}
+    for relative, data in files.items():
+        path = PurePosixPath(relative)
+        if path.is_absolute() or not path.parts or any(part in ("", ".", "..") for part in path.parts):
+            raise EvidenceBlocked("I0-BLOCK-HARNESS", relative, "bound repository path is not canonical")
+        if type(data) is not bytes:
+            raise EvidenceBlocked("I0-BLOCK-HARNESS", relative, "bound repository value is not bytes")
+        normalized[path.as_posix()] = data
+    _BOUND_REPOSITORY_ROOT = root
+    _BOUND_REPOSITORY_BYTES = normalized
+
+
+def _bound_repository_data(path: Path) -> bytes | None:
+    if _BOUND_REPOSITORY_ROOT is None or _BOUND_REPOSITORY_BYTES is None:
+        return None
+    absolute = path.absolute()
+    try:
+        relative = absolute.relative_to(_BOUND_REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return None
+    return _BOUND_REPOSITORY_BYTES.get(relative)
+
+
+def repository_files_under(directory: Path, suffix: str) -> tuple[Path, ...]:
+    if _BOUND_REPOSITORY_ROOT is None or _BOUND_REPOSITORY_BYTES is None:
+        return tuple(sorted(directory.glob(f"*{suffix}")))
+    prefix = directory.absolute().relative_to(_BOUND_REPOSITORY_ROOT).as_posix().rstrip("/") + "/"
+    return tuple(
+        _BOUND_REPOSITORY_ROOT / relative
+        for relative in sorted(_BOUND_REPOSITORY_BYTES)
+        if relative.startswith(prefix) and relative.endswith(suffix) and "/" not in relative[len(prefix):]
+    )
 
 
 def _identity_sequence_matches(observed: object, expected: tuple[Any, ...]) -> bool:
@@ -177,6 +221,26 @@ def _identity_sequence_matches(observed: object, expected: tuple[Any, ...]) -> b
 def _remove_identity_from_meta_path(target: object) -> None:
     """Remove every exact target occurrence without calling any finder.__eq__."""
     sys.meta_path[:] = [finder for finder in sys.meta_path if finder is not target]
+
+
+def _exact_module_binding(name: str, expected: object) -> bool:
+    """Read one sys.modules binding without hashing or comparing foreign keys.
+
+    ``dict.get`` is not callback-free when a hostile foreign key has a stored
+    hash collision with ``name``: dict lookup may call that key's ``__eq__``.
+    The final oracle boundary therefore scans the exact dict and accepts only
+    exact ``str`` keys, comparing those with ``str.__eq__`` directly.
+    """
+    modules = sys.modules
+    if type(modules) is not dict or type(name) is not str:
+        return False
+    found = False
+    for key, value in dict.items(modules):
+        if type(key) is str and str.__eq__(key, name):
+            if found or value is not expected:
+                return False
+            found = True
+    return found
 
 # Every export below is imported by the authenticated product at module scope.
 # The exact source module is part of the trust statement: package-root lazy
@@ -350,12 +414,17 @@ def _strict_json_loads(data: bytes | str) -> Any:
     return json.loads(data, object_pairs_hook=_reject_duplicate_pairs)
 
 
+def _read_repository_or_path(path: Path) -> bytes:
+    retained = _bound_repository_data(path)
+    return retained if retained is not None else path.read_bytes()
+
+
 def read_json(path: Path) -> Any:
-    return _strict_json_loads(path.read_bytes())
+    return _strict_json_loads(_read_repository_or_path(path))
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_read_repository_or_path(path)).hexdigest()
 
 
 def validate_json_data(instance: Any, schema_path: Path) -> None:
@@ -367,8 +436,8 @@ def validate_json_data(instance: Any, schema_path: Path) -> None:
 
 
 def validate_json(instance_path: Path, schema_path: Path) -> None:
-    """Validate exactly the in-memory bytes read from instance_path."""
-    validate_json_data(_strict_json_loads(instance_path.read_bytes()), schema_path)
+    """Validate exactly the retained candidate or external evidence bytes."""
+    validate_json_data(_strict_json_loads(_read_repository_or_path(instance_path)), schema_path)
 
 
 def _artifact_set_sha256(entries: list[dict[str, Any]]) -> str:
@@ -1424,7 +1493,9 @@ class _BareProductImportGuard(importlib.abc.MetaPathFinder):
 
     @staticmethod
     def is_bare_product(fullname: str) -> bool:
-        root = fullname.partition(".")[0]
+        if type(fullname) is not str:
+            return False
+        root = str.partition(fullname, ".")[0]
         return root in BARE_PRODUCT_ROOTS
 
     def reject(self, fullname: str, mechanism: str) -> None:
@@ -1648,6 +1719,7 @@ class _OracleTraversalBudget:
     nodes: int = 0
     container_items: int = 0
     encoded_bytes: int = 0
+    sort_token_bytes: int = 0
 
     def _blocked(self, artifact_id: str, limit: str) -> EvidenceBlocked:
         return EvidenceBlocked(
@@ -1681,6 +1753,12 @@ class _OracleTraversalBudget:
     def add_encoded_bytes(self, artifact_id: str, count: int) -> None:
         self.ensure_encoded_allocation(artifact_id, count)
         self.encoded_bytes += count
+
+    def add_sort_token_bytes(self, artifact_id: str, count: int) -> None:
+        """Charge transient canonical-sort material exactly once per token."""
+        if count < 0 or count > self.max_encoded_bytes - self.sort_token_bytes:
+            raise self._blocked(artifact_id, f"sort-token-bytes={self.max_encoded_bytes}")
+        self.sort_token_bytes += count
 
     def remaining_encoded_bytes(self) -> int:
         return self.max_encoded_bytes - self.encoded_bytes
@@ -1796,17 +1874,45 @@ class _ClassIntegrityEncoder:
         return False
 
     def _sort_token(self, value: object) -> tuple[str, str, bytes]:
-        type_name = f"{type(value).__module__}:{type(value).__qualname__}"
+        value_type = type(value)
+        module_name = value_type.__module__
+        qualname = value_type.__qualname__
+        # Charge a conservative upper bound before allocating any variable-size
+        # payload.  This is a separate transient-work budget from digest output:
+        # every key is charged once here, then may safely enter the bounded list
+        # that is sorted below.
+        token_prefix_bytes = (len(module_name) + len(module_name) + len(qualname) + 1) * 4
+        if value is None:
+            payload_bound = 4
+        elif isinstance(value, str):
+            payload_bound = len(value) * 4
+        elif isinstance(value, bytes):
+            payload_bound = len(value)
+        elif isinstance(value, bool):
+            payload_bound = 5
+        elif isinstance(value, int):
+            payload_bound = value.bit_length() // 3 + 3
+        elif isinstance(value, (float, complex)):
+            payload_bound = 128
+        elif isinstance(value, (FunctionType, type)):
+            payload_bound = (
+                len(getattr(value, "__module__", ""))
+                + len(getattr(value, "__qualname__", ""))
+                + 1
+            ) * 10 + 32
+        else:
+            payload_bound = 32
+        self._budget.add_sort_token_bytes(
+            self._artifact_id, token_prefix_bytes + payload_bound
+        )
+        type_name = f"{module_name}:{qualname}"
         if value is None:
             payload = b"None"
         elif isinstance(value, str):
             payload = self._encoded_text(value, "utf-8", "surrogatepass")
         elif isinstance(value, bytes):
-            self._budget.ensure_encoded_allocation(self._artifact_id, len(value))
             payload = value
         elif isinstance(value, (bool, int, float, complex)):
-            if isinstance(value, int) and value.bit_length() > self._budget.remaining_encoded_bytes() * 3:
-                raise self._budget._blocked(self._artifact_id, f"encoded-bytes={self._budget.max_encoded_bytes}")
             payload = self._encoded_text(repr(value), "ascii")
         elif isinstance(value, (FunctionType, type)):
             payload = self._encoded_text(
@@ -1816,7 +1922,7 @@ class _ClassIntegrityEncoder:
             )
         else:
             payload = str(id(value)).encode("ascii")
-        return type(value).__module__, type_name, payload
+        return module_name, type_name, payload
 
     def add(self, value: object, depth: int = 0) -> None:
         self._budget.visit(self._artifact_id, depth)
@@ -1894,10 +2000,9 @@ class _ClassIntegrityEncoder:
                 return
             self._budget.add_container_items(self._artifact_id, len(value))
             self._field(b"dict", str(len(value)).encode())
-            items = [
-                (self._sort_token(key), key, item_value)
-                for key, item_value in list(dict.items(value))
-            ]
+            items: list[tuple[tuple[str, str, bytes], object, object]] = []
+            for key, item_value in dict.items(value):
+                items.append((self._sort_token(key), key, item_value))
             for (module_name, type_name, payload), key, item_value in sorted(items, key=lambda item: item[0]):
                 self._field(b"key-module", self._encoded_text(module_name, "utf-8", "backslashreplace"))
                 self._field(b"key-type", self._encoded_text(type_name, "utf-8", "backslashreplace"))
@@ -1908,9 +2013,9 @@ class _ClassIntegrityEncoder:
             if self._reference(value):
                 return
             self._budget.add_container_items(self._artifact_id, len(value))
-            children: list[tuple[tuple[str, str, bytes], object]] = [
-                (self._sort_token(item), item) for item in value
-            ]
+            children: list[tuple[tuple[str, str, bytes], object]] = []
+            for item in value:
+                children.append((self._sort_token(item), item))
             self._field(type(value).__name__.encode(), str(len(children)).encode())
             for _sort_key, item in sorted(children, key=lambda pair: pair[0]):
                 self.add(item, depth + 1)
@@ -2087,6 +2192,90 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
         stack: tuple["_ReferencedGlobalIntegrityEncoder._FlowValue", ...]
         locals: tuple[tuple[str, "_ReferencedGlobalIntegrityEncoder._FlowValue"], ...]
 
+    def _validate_call_protocols(
+        self,
+        code: CodeType,
+        instructions: list[dis.Instruction],
+        *,
+        version: tuple[int, int],
+        function_name: str,
+    ) -> None:
+        """Reject malformed call marker sequences before abstract stack flow.
+
+        KW_NAMES and PRECALL are interpreter protocol markers rather than
+        ordinary values.  Requiring their version-specific adjacent CALL here
+        prevents malformed bytecode from carrying a marker into an unrelated
+        operation that could consume an older receiver and appear valid.
+        """
+        for index, instruction in enumerate(instructions):
+            opname = instruction.opname
+            if opname == "KW_NAMES":
+                if (
+                    instruction.arg is None
+                    or instruction.arg < 0
+                    or instruction.arg >= len(code.co_consts)
+                    or type(code.co_consts[instruction.arg]) is not tuple
+                ):
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported KW_NAMES protocol at offset {instruction.offset} in {function_name}",
+                    )
+                call_index = index + (2 if version == (3, 11) else 1)
+                precall = instructions[index + 1] if index + 1 < len(instructions) else None
+                call = instructions[call_index] if call_index < len(instructions) else None
+                if version == (3, 11) and (precall is None or precall.opname != "PRECALL"):
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"KW_NAMES without PRECALL/CALL at offset {instruction.offset} in {function_name}",
+                    )
+                if call is None or call.opname != "CALL":
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"KW_NAMES without CALL at offset {instruction.offset} in {function_name}",
+                    )
+                names = code.co_consts[instruction.arg]
+                if (
+                    call.arg is None
+                    or call.arg < len(names)
+                    or any(type(name) is not str for name in names)
+                ):
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"mismatched KW_NAMES/CALL protocol at offset {instruction.offset} in {function_name}",
+                    )
+            elif opname == "PRECALL":
+                call = instructions[index + 1] if index + 1 < len(instructions) else None
+                if (
+                    version != (3, 11)
+                    or instruction.arg is None
+                    or instruction.arg < 0
+                    or call is None
+                    or call.opname != "CALL"
+                ):
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"PRECALL without CALL at offset {instruction.offset} in {function_name}",
+                    )
+                if call.arg != instruction.arg:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"mismatched PRECALL/CALL protocol at offset {instruction.offset} in {function_name}",
+                    )
+            elif opname == "CALL" and version == (3, 11):
+                precall = instructions[index - 1] if index else None
+                if precall is None or precall.opname != "PRECALL":
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"missing PRECALL protocol at offset {instruction.offset} in {function_name}",
+                    )
+
     def _bytecode_dependencies(
         self,
         value: FunctionType,
@@ -2105,15 +2294,34 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
         fingerprinted or evidence-blocked.
         """
         code = value.__code__
+        if sys.version_info[:2] not in {(3, 11), (3, 12)}:
+            raise EvidenceBlocked(
+                "I0-BLOCK-ORACLE-BINDING",
+                self._artifact_id,
+                f"unsupported Python bytecode contract {sys.version_info[0]}.{sys.version_info[1]}",
+            )
         if len(code.co_code) > MAX_ORACLE_SINGLE_CODE_BYTES:
             raise self._budget._blocked(
                 self._artifact_id, f"single-code-bytes={MAX_ORACLE_SINGLE_CODE_BYTES}"
             )
         self._budget.add_container_items(self._artifact_id, len(code.co_consts))
-        instructions = tuple(dis.get_instructions(code))
+        instructions: list[dis.Instruction] = []
+        for instruction in dis.get_instructions(code):
+            if len(instructions) >= MAX_ORACLE_SINGLE_CONTAINER_ITEMS:
+                raise self._budget._blocked(
+                    self._artifact_id,
+                    f"bytecode-instructions={MAX_ORACLE_SINGLE_CONTAINER_ITEMS}",
+                )
+            instructions.append(instruction)
         self._budget.add_container_items(self._artifact_id, len(instructions))
         if not instructions:
             return (), {}, code.co_consts
+        self._validate_call_protocols(
+            code,
+            instructions,
+            version=sys.version_info[:2],
+            function_name=f"{value.__module__}.{value.__qualname__}",
+        )
 
         roots: dict[tuple[str, str], object] = {}
         closure_values: dict[str, object] = {}
@@ -2251,6 +2459,11 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                     root_kind, binding = "missing-global", _MISSING
                 roots[(root_kind, name)] = binding
                 symbol = self._FlowValue("ref", root_kind, name)
+                # In 3.11+ LOAD_GLOBAL's low argument bit requests the NULL
+                # protocol slot consumed by CALL.  Model it explicitly so an
+                # inner call cannot erase an older expression receiver.
+                if instruction.arg is not None and instruction.arg & 1:
+                    stack.append(null)
                 stack.append(symbol)
                 ref_dependency(symbol)
             elif opname == "LOAD_DEREF" and isinstance(instruction.argval, str):
@@ -2279,8 +2492,85 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 stack.append(self._FlowValue("const", const_index=int(instruction.arg or 0)))
             elif opname == "PUSH_NULL":
                 stack.append(null)
+            elif opname == "LOAD_ASSERTION_ERROR":
+                # Assertion compilation uses [AssertionError, message] with
+                # CALL 0's method/self form to pass the message implicitly.
+                stack.append(self._FlowValue("callable"))
+            elif opname in {"BUILD_TUPLE", "BUILD_LIST", "BUILD_SET", "BUILD_STRING"}:
+                item_count = int(instruction.arg or 0)
+                if instruction.arg is None or item_count < 0 or len(stack) < item_count:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported {opname} stack at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                if item_count:
+                    del stack[-item_count:]
+                stack.append(unknown)
+            elif opname == "MAKE_FUNCTION":
+                flags = int(instruction.arg or 0)
+                if instruction.arg is None or flags & ~0x0F:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported MAKE_FUNCTION flags at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                required = 1 + sum(bool(flags & bit) for bit in (0x01, 0x02, 0x04, 0x08))
+                if len(stack) < required:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported MAKE_FUNCTION stack at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                del stack[-required:]
+                stack.append(self._FlowValue("callable"))
+            elif opname == "LOAD_SUPER_ATTR" and isinstance(instruction.argval, str):
+                # CPython 3.12 encodes explicit-super in bit 1 and method-load
+                # layout in bit 0 (Python/compile.c and Python/bytecodes.c).
+                # All forms consume global_super/class/self.  Attribute forms
+                # push one result; method forms push method/self (two slots).
+                # A version whose opcode contract is not this exact one must be
+                # reviewed rather than silently borrowing the 3.12 transfer.
+                if sys.version_info[:2] != (3, 12) or instruction.arg is None or instruction.arg < 0:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported LOAD_SUPER_ATTR contract at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                if len(stack) < 3:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported LOAD_SUPER_ATTR stack at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                del stack[-3:]
+                if instruction.arg & 1:
+                    stack.append(self._FlowValue("method-callable"))
+                    stack.append(self._FlowValue("method-self"))
+                else:
+                    stack.append(unknown)
             elif opname in {"LOAD_ATTR", "LOAD_METHOD"} and isinstance(instruction.argval, str):
                 base = pop()
+                if opname == "LOAD_METHOD":
+                    if sys.version_info[:2] != (3, 11):
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"unsupported LOAD_METHOD contract at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    method_call_layout = True
+                else:
+                    method_call_layout = (
+                        sys.version_info[:2] == (3, 12)
+                        and instruction.arg is not None
+                        and bool(instruction.arg & 1)
+                    )
                 selected: list[_ReferencedGlobalIntegrityEncoder._FlowValue] = []
                 for reference in alternatives(base):
                     if len(reference.path) >= self._budget.max_depth:
@@ -2306,7 +2596,15 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                             base = union_value(base, alternate)
                     else:
                         base = unknown
-                stack.append(base)
+                if method_call_layout:
+                    # LOAD_METHOD (3.11) and flagged LOAD_ATTR (3.12) produce
+                    # either method/self or NULL/callable.  The dependency was
+                    # emitted above; model the valid method/self protocol pair
+                    # so CALL can reject unmarked two-slot lookalikes.
+                    stack.append(self._FlowValue("method-callable"))
+                    stack.append(self._FlowValue("method-self"))
+                else:
+                    stack.append(base)
             elif opname == "BINARY_SUBSCR":
                 key = pop()
                 base = pop()
@@ -2338,6 +2636,13 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 base = pop()
                 ref_dependency(base, deep=True)
                 stack.append(base if opname == "GET_ITER" else unknown)
+            elif opname == "BEFORE_WITH":
+                # CPython retains __exit__ below the __enter__ result.  Its
+                # cleanup CALL uses the method/self layout, with the first
+                # exception-state value occupying CALL's self slot.
+                pop()
+                stack.append(self._FlowValue("method-callable"))
+                stack.append(unknown)
             elif opname == "FOR_ITER":
                 # Branch-specific stack effects are applied when successors are
                 # enqueued below; keeping one shared effect would grow the stack
@@ -2347,13 +2652,138 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 stack.append(stack[-instruction.arg] if len(stack) >= instruction.arg else unknown)
             elif opname == "SWAP" and instruction.arg and len(stack) >= instruction.arg:
                 stack[-1], stack[-instruction.arg] = stack[-instruction.arg], stack[-1]
+            elif opname == "KW_NAMES":
+                if (
+                    instruction.arg is None
+                    or instruction.arg < 0
+                    or instruction.arg >= len(code.co_consts)
+                    or type(code.co_consts[instruction.arg]) is not tuple
+                    or (stack and stack[-1].kind in {"kw-names", "precall"})
+                ):
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported KW_NAMES protocol at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                stack.append(self._FlowValue("kw-names", const_index=instruction.arg))
+            elif opname == "PRECALL":
+                # PRECALL is only the 3.11 half of CALL.  Record its argument
+                # count without applying a second stack effect; CALL validates
+                # and consumes the complete protocol pair atomically.
+                if (
+                    sys.version_info[:2] != (3, 11)
+                    or instruction.arg is None
+                    or instruction.arg < 0
+                    or (stack and stack[-1].kind == "precall")
+                ):
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported PRECALL protocol at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                stack.append(self._FlowValue("precall", const_index=instruction.arg))
             elif opname in {"CALL", "CALL_FUNCTION_EX"}:
-                # All callable/argument dependencies have already been emitted.
-                # CPython 3.11+ method-call stack layouts vary by LOAD_ATTR flag;
-                # retaining a guessed residual stack leaks unrelated receivers
-                # across control-flow joins and creates false dependency paths.
-                # A call result is runtime data, so reset to one unknown value.
-                stack[:] = [unknown]
+                argument = int(instruction.arg or 0)
+                if instruction.arg is None or instruction.arg < 0:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        self._artifact_id,
+                        f"unsupported {opname} argument at offset {instruction.offset} in "
+                        f"{value.__module__}.{value.__qualname__}",
+                    )
+                if opname == "CALL":
+                    if stack and stack[-1].kind == "precall":
+                        precall = pop()
+                        if precall.const_index != argument:
+                            raise EvidenceBlocked(
+                                "I0-BLOCK-ORACLE-BINDING",
+                                self._artifact_id,
+                                f"mismatched PRECALL/CALL protocol at offset {instruction.offset} in "
+                                f"{value.__module__}.{value.__qualname__}",
+                            )
+                    elif sys.version_info[:2] == (3, 11):
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"missing PRECALL protocol at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    if stack and stack[-1].kind == "kw-names":
+                        kw_names = pop()
+                        keyword_names = code.co_consts[kw_names.const_index]
+                        if len(keyword_names) > argument or any(type(name) is not str for name in keyword_names):
+                            raise EvidenceBlocked(
+                                "I0-BLOCK-ORACLE-BINDING",
+                                self._artifact_id,
+                                f"invalid keyword CALL protocol at offset {instruction.offset} in "
+                                f"{value.__module__}.{value.__qualname__}",
+                            )
+                    if stack and stack[-1].kind in {"kw-names", "precall"}:
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"misordered CALL protocol at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    required = argument + 2
+                    if len(stack) < required:
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"unsupported CALL stack at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    protocol, callable_slot = stack[-required], stack[-required + 1]
+                    null_layout = protocol.kind == "null" and callable_slot.kind not in {
+                        "null", "method-callable", "method-self", "kw-names", "precall"
+                    }
+                    method_layout = protocol.kind in {"method-callable", "callable", "call-result"} and callable_slot.kind not in {
+                        "null", "kw-names", "precall"
+                    }
+                    if not (null_layout or method_layout):
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"invalid CALL protocol layout at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    del stack[-required:]
+                else:
+                    # In 3.11/3.12 CALL_FUNCTION_EX accepts only flag bit 0 and
+                    # requires [NULL, callable, positional_tuple, kwargs?].  It
+                    # does not consume the method/self protocol used by CALL.
+                    if sys.version_info[:2] not in {(3, 11), (3, 12)} or argument & ~1:
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"unsupported CALL_FUNCTION_EX flags at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    required = 4 if argument & 1 else 3
+                    if len(stack) < required:
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"unsupported CALL_FUNCTION_EX stack at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    protocol, callable_slot = stack[-required], stack[-required + 1]
+                    if protocol.kind != "null" or callable_slot.kind in {
+                        "null", "method-callable", "method-self", "kw-names", "precall"
+                    }:
+                        raise EvidenceBlocked(
+                            "I0-BLOCK-ORACLE-BINDING",
+                            self._artifact_id,
+                            f"invalid CALL_FUNCTION_EX protocol layout at offset {instruction.offset} in "
+                            f"{value.__module__}.{value.__qualname__}",
+                        )
+                    del stack[-required:]
+                # Preserve every older stack entry (notably an outer subscript
+                # receiver).  A result is value-unknown but remains a supported
+                # callable producer for decorator and chained-call bytecode.
+                stack.append(self._FlowValue("call-result"))
             elif opname in {"BINARY_OP", "COMPARE_OP", "IS_OP"}:
                 pop()
                 pop()
@@ -2368,7 +2798,7 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 for _ in range(min(len(stack), max(0, -effect))):
                     pop()
             elif opname not in {
-                "CACHE", "RESUME", "NOP", "EXTENDED_ARG", "PRECALL",
+                "CACHE", "RESUME", "NOP", "EXTENDED_ARG",
                 "RETURN_VALUE", "RETURN_CONST", "POP_TOP",
             }:
                 try:
@@ -2393,7 +2823,14 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
             unconditional = opname.startswith("JUMP") and "IF" not in opname
             if opname == "FOR_ITER":
                 if target_index is not None:
-                    exhausted_stack = stack[:-1] if stack else []
+                    # Python 3.12 targets END_FOR, which consumes the iterator
+                    # and sentinel itself; 3.11 jumps past the loop and consumes
+                    # only the iterator at FOR_ITER.  Do not apply both models.
+                    exhausted_stack = (
+                        [*stack, unknown]
+                        if instructions[target_index].opname == "END_FOR"
+                        else (stack[:-1] if stack else [])
+                    )
                     enqueue(
                         target_index,
                         self._FlowState(tuple(exhausted_stack), tuple(sorted(local_values.items()))),
@@ -2525,7 +2962,7 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                     )
             elif operation == "subscript-dynamic":
                 self._field(b"dependency-dynamic-subscript")
-                if isinstance(current, (dict, list, tuple, set, frozenset)):
+                if type(current) in {dict, list, tuple, set, frozenset}:
                     self.add_binding(current, depth + 1, deep_container=True)
                     return
                 if root_kind == "receiver":
@@ -2542,6 +2979,35 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 found, implementation = self._static_attribute(current, "__getitem__")
                 if found:
                     self._field(b"dependency-custom-dynamic-subscript")
+                    # A custom mapping's selected behavior can depend on mutable
+                    # receiver state not visible in __getitem__ bytecode (for
+                    # example _LazyAutoMapping._extra_content).  Close only the
+                    # finite source-reviewed receiver paths declared above.
+                    for forced_path in sorted(forced_paths):
+                        if not forced_path:
+                            continue
+                        forced_current = binding
+                        self._field(b"dependency-forced-receiver-path")
+                        for forced_attribute in forced_path:
+                            self._field(
+                                b"dependency-forced-receiver-attr",
+                                self._encoded_text(
+                                    forced_attribute, "utf-8", "surrogatepass"
+                                ),
+                            )
+                            forced_found, forced_current = self._static_attribute(
+                                forced_current, forced_attribute
+                            )
+                            if not forced_found:
+                                self._field(b"dependency-forced-receiver-missing")
+                                break
+                        else:
+                            self.add_binding(
+                                forced_current, depth + 1, deep_container=True
+                            )
+                    # Traverse the implementation after forced receiver state;
+                    # its own shallow receiver paths must not claim a mutable
+                    # object identity before the reviewed deep path is encoded.
                     self.add_binding(implementation, depth + 1, deep_container=False)
                     return
                 raise EvidenceBlocked(
@@ -2778,10 +3244,9 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 return
             self._budget.add_container_items(self._artifact_id, len(value))
             self._field(b"dict", str(len(value)).encode("ascii"))
-            items = [
-                (self._sort_token(key), key, item_value)
-                for key, item_value in list(dict.items(value))
-            ]
+            items: list[tuple[tuple[str, str, bytes], object, object]] = []
+            for key, item_value in dict.items(value):
+                items.append((self._sort_token(key), key, item_value))
             for (module_name, type_name, payload), key, item_value in sorted(items, key=lambda item: item[0]):
                 self._field(b"key-module", self._encoded_text(module_name, "utf-8", "backslashreplace"))
                 self._field(b"key-type", self._encoded_text(type_name, "utf-8", "backslashreplace"))
@@ -2798,7 +3263,10 @@ class _ReferencedGlobalIntegrityEncoder(_ClassIntegrityEncoder):
                 )
                 return
             self._budget.add_container_items(self._artifact_id, len(value))
-            children = sorted(((self._sort_token(item), item) for item in value), key=lambda pair: pair[0])
+            children: list[tuple[tuple[str, str, bytes], object]] = []
+            for item in value:
+                children.append((self._sort_token(item), item))
+            children.sort(key=lambda pair: pair[0])
             self._field(type(value).__name__.encode(), str(len(children)).encode("ascii"))
             for _sort_key, item in children:
                 self.add_binding(item, depth + 1)
@@ -2884,11 +3352,46 @@ def _module_global_integrity_fingerprint(
         for module_name, class_name, method_name in ORACLE_SELECTED_INHERITED_METHOD_DEPENDENCIES
         if module_name == trusted_class.__module__ and class_name == trusted_class.__qualname__
     ))
+    forced_mutables = tuple(sorted(
+        (global_name, dependency_path)
+        for module_name, global_name, dependency_path in ORACLE_DEEP_MUTABLE_DEPENDENCIES
+        if module_name == trusted_class.__module__
+    ))
     budget.add_container_items(artifact_id, len(functions))
+    budget.add_container_items(artifact_id, len(forced_mutables))
     budget.add_container_items(artifact_id, len(selected_names))
     encoder._field(b"trusted-method-count", str(len(functions)).encode("ascii"))
     encoder._field(b"selected-inherited-count", str(len(selected_names)).encode("ascii"))
     try:
+        # Seed finite reviewed deep mutables before bytecode closure traversal.
+        # An earlier identity-only encounter must never suppress their content
+        # fingerprint; later references become ordinary graph references.
+        for global_name, dependency_path in forced_mutables:
+            namespace = next(
+                (function.__globals__ for _role, function in functions if global_name in function.__globals__),
+                None,
+            )
+            if namespace is None:
+                raise EvidenceBlocked(
+                    "I0-BLOCK-ORACLE-BINDING",
+                    artifact_id,
+                    f"forced mutable global {global_name!r} is absent",
+                )
+            current = namespace[global_name]
+            encoder._field_text(b"forced-mutable-root", global_name, "utf-8", "surrogatepass")
+            for attribute_name in dependency_path:
+                found, current = encoder._static_attribute(current, attribute_name)
+                if not found:
+                    raise EvidenceBlocked(
+                        "I0-BLOCK-ORACLE-BINDING",
+                        artifact_id,
+                        f"forced mutable path {global_name}.{attribute_name} is absent",
+                    )
+                encoder._field_text(
+                    b"forced-mutable-attr", attribute_name, "utf-8", "surrogatepass"
+                )
+            encoder.add_binding(current, 1, deep_container=True)
+
         for role, function in functions:
             encoder._field(b"trusted-method", encoder._encoded_text(role, "utf-8", "surrogatepass"))
             encoder.add_referenced_function(function, 1)
@@ -2932,6 +3435,7 @@ class _OracleTrustSnapshot:
         self.snapshots: dict[str, dict[str, Any]] = {}
         self.owned_side_effect_finders: tuple[Any, ...] = ()
         self.locked_sources: dict[str, tuple[str, str]] = {}
+        self.distribution_identities: dict[str, tuple[str, str]] = {}
         self.lock_fingerprint = self._lock_fingerprint(lock)
         self._establish(lock, assert_import_state)
 
@@ -3062,8 +3566,17 @@ class _OracleTrustSnapshot:
             packages = {item["name"]: item for item in lock["oracle_packages"]}
             for package_name, package in packages.items():
                 distribution = importlib.metadata.distribution(package_name)
-                if distribution.version != package["version"]:
+                distribution_version = distribution.version
+                if distribution_version != package["version"]:
                     raise self._blocked(package_name, "installed package version differs from the reference lock")
+                # Distribution discovery is callback-capable through
+                # sys.meta_path find_distributions.  Authenticate it only at
+                # this controlled establishment boundary and retain immutable
+                # identity for every recurring/final integrity check.
+                self.distribution_identities[package_name] = (
+                    package_name,
+                    distribution_version,
+                )
                 package_root = Path(distribution.locate_file(package_name)).resolve()
                 root_identity = package["root_source"]
                 if root_identity["path"] != f"src/{package_name}/__init__.py":
@@ -3208,9 +3721,12 @@ class _OracleTrustSnapshot:
                 self.snapshots[export] = {
                     "binding": binding,
                     "root_module": root_module,
+                    "root_spec": root_spec,
                     "exact_module": exact_module,
+                    "exact_spec": spec,
                     "object": exact_object,
                     "origin": expected_origin,
+                    "origin_text": origin_text,
                     "source_artifact_id": binding["source"],
                     "sha256": locked_digest,
                     "source_size": len(controlled_sources[binding["module"]][1]),
@@ -3218,7 +3734,7 @@ class _OracleTrustSnapshot:
                     "root_artifact_id": packages[package_name]["root_source"]["path"],
                     "root_sha256": packages[package_name]["root_source"]["sha256"],
                     "root_source_size": len(controlled_sources[package_name][1]),
-                    "version": packages[package_name]["version"],
+                    "distribution_identity": self.distribution_identities[package_name],
                     "class_fingerprint": fingerprint,
                     "mro": mro,
                 }
@@ -3278,104 +3794,166 @@ class _OracleTrustSnapshot:
     def object_for(self, export: str) -> Any:
         return self.snapshots[export]["object"]
 
-    def assert_integrity(self, loader: AuthenticatedCdgLoader | None = None) -> None:
+    def initialize_product_bindings(self, loader: AuthenticatedCdgLoader) -> None:
+        """Import exact product bytes, then seal their initialized oracle closure.
+
+        Importing the locked product legitimately realizes lazy framework maps.
+        The one-shot worker therefore seals the dependency fingerprints once,
+        after every required product binding has captured the already-authenticated
+        oracle class identities.  No reusable context can trigger another seal.
+        """
+        for snapshot in self.snapshots.values():
+            loader.import_module(snapshot["binding"]["product_module"])
         for export, snapshot in self.snapshots.items():
             binding = snapshot["binding"]
-            package_name = binding["package"]
-            root_module = snapshot["root_module"]
-            exact_module = snapshot["exact_module"]
+            product_fullname = f"{loader.package_name}.{binding['product_module']}"
+            product_module = loader.loaded_modules.get(product_fullname)
             trusted_object = snapshot["object"]
-            if sys.modules.get(package_name) is not root_module:
-                raise self._blocked(export, "package-root module identity changed after trust initialization")
-            if sys.modules.get(binding["module"]) is not exact_module:
-                raise self._blocked(export, "trusted source module identity changed after trust initialization")
-            if getattr(root_module, export, None) is not trusted_object:
-                raise self._blocked(export, "package-root export identity changed after trust initialization")
-            if exact_module.__dict__.get(export) is not trusted_object:
-                raise self._blocked(export, "trusted submodule class identity changed after trust initialization")
-            origin_text = getattr(getattr(exact_module, "__spec__", None), "origin", None)
-            if not origin_text or Path(origin_text).resolve() != snapshot["origin"]:
-                raise self._blocked(export, "trusted source module origin changed after trust initialization")
-            _assert_authenticated_oracle_source(
-                snapshot["origin"],
-                snapshot["sha256"],
-                snapshot["source_artifact_id"],
-                snapshot["source_size"],
-            )
-            _assert_authenticated_oracle_source(
-                snapshot["root_origin"],
-                snapshot["root_sha256"],
-                snapshot["root_artifact_id"],
-                snapshot["root_source_size"],
-            )
-            if importlib.metadata.version(package_name) != snapshot["version"]:
-                raise self._blocked(export, "oracle distribution version changed after trust initialization")
-            fingerprint, mro = _class_integrity_fingerprint(trusted_object)
-            expected_mro = snapshot["mro"]
-            if len(mro) != len(expected_mro) or any(
-                observed is not expected for observed, expected in zip(mro, expected_mro, strict=True)
+            if (
+                not isinstance(product_module, ModuleType)
+                or not _exact_module_binding(product_fullname, product_module)
+                or product_module.__dict__.get(export, _MISSING) is not trusted_object
             ):
-                raise self._blocked(export, "trusted class MRO identity changed after trust initialization")
-            if fingerprint != snapshot["class_fingerprint"]:
-                raise self._blocked(export, "trusted class contents changed after trust initialization")
-            global_fingerprint = _module_global_integrity_fingerprint(trusted_object, self.locked_sources)
-            if global_fingerprint != snapshot["module_global_fingerprint"]:
-                raise self._blocked(export, "trusted module-global dependency graph changed after trust initialization")
-            if loader is not None:
-                product_module = loader.import_module(binding["product_module"])
-                if getattr(product_module, export, None) is not trusted_object:
-                    raise self._blocked(
-                        export,
-                        f"authenticated {binding['product_module']} did not capture the trusted class object",
-                    )
+                raise self._blocked(export, "locked product failed to capture the authenticated oracle identity")
+            fingerprint, mro = _class_integrity_fingerprint(trusted_object)
+            snapshot["class_fingerprint"] = fingerprint
+            snapshot["mro"] = mro
+        previous: dict[str, str] | None = None
+        for _attempt in range(MAX_ORACLE_FINGERPRINT_STABILIZATION_PASSES):
+            current = {
+                export: _module_global_integrity_fingerprint(snapshot["object"], self.locked_sources)
+                for export, snapshot in self.snapshots.items()
+            }
+            if current == previous:
+                for export, fingerprint_value in current.items():
+                    self.snapshots[export]["module_global_fingerprint"] = fingerprint_value
+                break
+            previous = current
+        else:
+            raise self._blocked(
+                "oracle-dependency-graph",
+                "post-product dependency fingerprint did not stabilize within the declared pass limit",
+            )
+
+    def _assert_export_integrity(
+        self,
+        export: str,
+        snapshot: dict[str, Any],
+        loader: AuthenticatedCdgLoader | None,
+    ) -> None:
+        binding = snapshot["binding"]
+        package_name = binding["package"]
+        root_module = snapshot["root_module"]
+        exact_module = snapshot["exact_module"]
+        trusted_object = snapshot["object"]
+        if not _exact_module_binding(package_name, root_module):
+            raise self._blocked(export, "package-root module identity changed after trust initialization")
+        if not _exact_module_binding(binding["module"], exact_module):
+            raise self._blocked(export, "trusted source module identity changed after trust initialization")
+        if root_module.__dict__.get(export, _MISSING) is not trusted_object:
+            raise self._blocked(export, "package-root export identity changed after trust initialization")
+        if exact_module.__dict__.get(export, _MISSING) is not trusted_object:
+            raise self._blocked(export, "trusted submodule class identity changed after trust initialization")
+        root_spec = root_module.__dict__.get("__spec__", _MISSING)
+        exact_spec = exact_module.__dict__.get("__spec__", _MISSING)
+        if root_spec is not snapshot["root_spec"] or exact_spec is not snapshot["exact_spec"]:
+            raise self._blocked(export, "trusted module spec identity changed after trust initialization")
+        exact_spec_dict = object.__getattribute__(exact_spec, "__dict__")
+        if exact_spec_dict.get("origin", _MISSING) != snapshot["origin_text"]:
+            raise self._blocked(export, "trusted source module origin changed after trust initialization")
+        _assert_authenticated_oracle_source(
+            snapshot["origin"],
+            snapshot["sha256"],
+            snapshot["source_artifact_id"],
+            snapshot["source_size"],
+        )
+        _assert_authenticated_oracle_source(
+            snapshot["root_origin"],
+            snapshot["root_sha256"],
+            snapshot["root_artifact_id"],
+            snapshot["root_source_size"],
+        )
+        distribution_identity = snapshot["distribution_identity"]
+        if (
+            self.distribution_identities.get(package_name) is not distribution_identity
+            or not any(
+                locked_name == distribution_identity[0] == package_name
+                and locked_version == distribution_identity[1]
+                for locked_name, locked_version, _locked_source in self.lock_fingerprint
+            )
+        ):
+            raise self._blocked(export, "retained oracle distribution identity changed after trust initialization")
+        fingerprint, mro = _class_integrity_fingerprint(trusted_object)
+        expected_mro = snapshot["mro"]
+        if len(mro) != len(expected_mro) or any(
+            observed is not expected for observed, expected in zip(mro, expected_mro, strict=True)
+        ):
+            raise self._blocked(export, "trusted class MRO identity changed after trust initialization")
+        if fingerprint != snapshot["class_fingerprint"]:
+            raise self._blocked(export, "trusted class contents changed after trust initialization")
+        global_fingerprint = _module_global_integrity_fingerprint(trusted_object, self.locked_sources)
+        if global_fingerprint != snapshot["module_global_fingerprint"]:
+            raise self._blocked(export, "trusted module-global dependency graph changed after trust initialization")
+        if loader is not None:
+            product_fullname = f"{loader.package_name}.{binding['product_module']}"
+            product_module = loader.loaded_modules.get(product_fullname)
+            if (
+                not isinstance(product_module, ModuleType)
+                or not _exact_module_binding(product_fullname, product_module)
+                or product_module.__dict__.get(export, _MISSING) is not trusted_object
+            ):
+                raise self._blocked(
+                    export,
+                    f"authenticated {binding['product_module']} did not capture the trusted class object",
+                )
+
+    def assert_integrity(
+        self,
+        loader: AuthenticatedCdgLoader | None = None,
+        *,
+        complete_vector: bool = False,
+    ) -> None:
+        first_failure: BaseException | None = None
+        for export, snapshot in self.snapshots.items():
+            try:
+                self._assert_export_integrity(export, snapshot, loader)
+            except BaseException as error:
+                if not complete_vector:
+                    raise
+                if first_failure is None:
+                    first_failure = error
+        if first_failure is not None:
+            raise first_failure
 
 
-class OracleBindingGuard:
-    """Share and continuously verify the independently established oracle snapshot."""
+class _WorkerOracleGuard:
+    """Own one retained-byte oracle snapshot for one worker process lifetime."""
 
     def __init__(
         self,
+        session: AuthenticatedWorkerSession,
         lock: dict[str, Any],
         assert_import_state: Callable[[str], None],
-        owner_token: object,
     ) -> None:
-        global _ORACLE_TRUST_SNAPSHOT
-        with _AUTHENTICATED_CONTEXT_STATE_LOCK:
-            if (
-                _AUTHENTICATED_CONTEXT_OWNER_THREAD != threading.get_ident()
-                or _AUTHENTICATED_CONTEXT_OWNER_TOKEN is not owner_token
-                or not _AUTHENTICATED_CONTEXT_LOCK.locked()
-            ):
-                raise EvidenceBlocked(
-                    "I0-BLOCK-AUTHENTICATED-CONTEXT-OWNERSHIP",
-                    "oracle-snapshot",
-                    "OracleBindingGuard requires the authenticated context owner token and process lock",
-                )
-        if _ORACLE_TRUST_SNAPSHOT is None:
-            _ORACLE_TRUST_SNAPSHOT = _OracleTrustSnapshot(lock, assert_import_state)
-        else:
-            _ORACLE_TRUST_SNAPSHOT.assert_lock(lock)
-        self._snapshot: _OracleTrustSnapshot | None = _ORACLE_TRUST_SNAPSHOT
+        if type(session) is not AuthenticatedWorkerSession:
+            raise EvidenceBlocked(
+                "I0-BLOCK-ORACLE-WORKER-CONTRACT",
+                "oracle-worker",
+                "oracle guard can only be minted by the authenticated worker session",
+            )
+        session._validate_launch(preload_check=False)
+        self._snapshot = _OracleTrustSnapshot(lock, assert_import_state)
         self._snapshot.assert_integrity()
 
     @property
     def exports(self) -> tuple[str, ...]:
-        assert self._snapshot is not None
         return self._snapshot.exports
 
     def object_for(self, export: str) -> Any:
-        assert self._snapshot is not None
         return self._snapshot.object_for(export)
 
     def assert_integrity(self, loader: AuthenticatedCdgLoader | None = None) -> None:
-        if self._snapshot is None:
-            raise EvidenceBlocked("I0-BLOCK-ORACLE-BINDING", "oracle-snapshot", "oracle guard was released")
         self._snapshot.assert_integrity(loader)
-
-    def release(self) -> None:
-        # The independently established snapshot intentionally survives later
-        # contexts; per-context guards drop only their own reference.
-        self._snapshot = None
 
 
 class _SafeBuiltinsProxy(ModuleType):
@@ -3396,7 +3974,7 @@ class AuthenticatedCdgLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader)
         package_name: str,
         sources: dict[str, bytes],
         import_guard: _BareProductImportGuard | None = None,
-        oracle_guard: OracleBindingGuard | None = None,
+        oracle_guard: _WorkerOracleGuard | None = None,
         assert_import_state: Callable[[str], None] | None = None,
         guarded_import: _OwnedImportHook | None = None,
     ) -> None:
@@ -3549,529 +4127,245 @@ class AuthenticatedCdgLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader)
             raise RuntimeError("oracle bindings were not requested for this authenticated package")
         return self._oracle_guard.object_for(export)
 
-    def release(self) -> None:
-        """Drop retained source/module/finder references after global cleanup."""
-        self._source_by_module.clear()
-        self.loaded_modules.clear()
-        self.loaded_paths.clear()
-        self._import_guard = None
-        self._oracle_guard = None
-        self._assert_import_state = None
-        self._guarded_import = None
-        self._safe_builtins = None
+class AuthenticatedWorkerSession:
+    """One authenticated import session whose only cleanup boundary is process exit.
 
+    This object is deliberately not a context manager.  It may be created once,
+    only by the isolated oracle worker, and remains active until ``os._exit``.
+    No import hook, module, oracle object, or global namespace is restored for
+    reuse.  All authenticated product access must flow through this session.
+    """
 
-class AuthenticatedCdgPackage(AbstractContextManager[tuple[ModuleType, AuthenticatedCdgLoader]]):
-    """Own one authenticated package under exclusive process-global import state."""
+    PACKAGE_NAME = "_dg_engine_i0_pack"
 
     def __init__(
         self,
         lock: dict[str, Any],
-        package_name: str,
         *,
-        verify_oracle_bindings: bool = False,
-        acquisition_timeout: float = AUTHENTICATED_CONTEXT_ACQUIRE_TIMEOUT,
+        nonce: str,
+        worker_path: Path,
+        repo_root: Path,
+        tests_root: Path,
+        lock_path: Path,
+        evidence_path: Path,
+        interpreter_path: Path,
+        interpreter_sha256: str,
     ) -> None:
-        if not package_name or "." in package_name:
-            raise ValueError("authenticated package name must be one top-level component")
-        if acquisition_timeout <= 0:
-            raise ValueError("authenticated context acquisition timeout must be positive")
         self.lock = lock
-        self.package_name = package_name
-        self.verify_oracle_bindings = verify_oracle_bindings
-        self.acquisition_timeout = acquisition_timeout
+        self.nonce = nonce
+        self.worker_path = worker_path
+        self.repo_root = repo_root
+        self.tests_root = tests_root
+        self.lock_path = lock_path
+        self.evidence_path = evidence_path
+        self.interpreter_path = interpreter_path
+        self.interpreter_sha256 = interpreter_sha256
+        self.owner_thread = threading.get_ident()
+        self.baseline_meta_path = tuple(sys.meta_path)
+        self.active_meta_path: tuple[Any, ...] = ()
+        self.owned_import_side_effect_finders: tuple[Any, ...] = ()
+        self.original_import = builtins.__import__
+        self.oracle_guard: _WorkerOracleGuard | None = None
+        self.guard: _BareProductImportGuard | None = None
         self.loader: AuthenticatedCdgLoader | None = None
         self.module: ModuleType | None = None
-        self.closed_import_audit: tuple[tuple[str, str], ...] = ()
-        self.closed_cleanup_audit: tuple[str, ...] = ()
-        self.closed_oracle_audit: tuple[str, ...] = ()
-        self._guard: _BareProductImportGuard | None = None
-        self._oracle_guard: OracleBindingGuard | None = None
-        self._oracle_bound = False
-        self._original_import: Any = None
-        self._guarded_import: _OwnedImportHook | None = None
-        self._quarantined_bare_modules: dict[str, ModuleType] = {}
-        self._bare_quarantine_active = False
-        self._ownership_token = object()
-        self._owner_thread_id: int | None = None
-        self._owns_process_lock = False
-        self._namespace_reserved = False
-        self._namespace_ever_reserved = False
-        self._baseline_meta_path: tuple[Any, ...] = ()
-        self._active_meta_path: tuple[Any, ...] = ()
-        self._owned_synthetic_modules: tuple[ModuleType, ...] = ()
-        self._owned_import_side_effect_finders: tuple[Any, ...] = ()
-        self._closed = False
-        self._cleanup_complete = False
+        self.product_bound = False
+        self._validate_launch(preload_check=True)
+        self._initialize()
 
     @staticmethod
-    def _failure_group(message: str, failures: list[BaseException]) -> BaseException:
-        if len(failures) == 1:
-            return failures[0]
-        if all(isinstance(error, Exception) for error in failures):
-            return ExceptionGroup(message, list(failures))  # type: ignore[arg-type]
-        return BaseExceptionGroup(message, failures)
+    def _blocked(detail: str) -> EvidenceBlocked:
+        return EvidenceBlocked("I0-BLOCK-ORACLE-WORKER-CONTRACT", "oracle-worker", detail)
 
-    def _blocked_ownership(self, detail: str) -> EvidenceBlocked:
-        return EvidenceBlocked(
-            "I0-BLOCK-AUTHENTICATED-CONTEXT-OWNERSHIP",
-            self.package_name,
-            detail,
+    @staticmethod
+    def _target_modules() -> list[str]:
+        roots = TARGET_ORACLE_ROOTS | BARE_PRODUCT_ROOTS | frozenset((AuthenticatedWorkerSession.PACKAGE_NAME,))
+        return sorted(
+            name for name in sys.modules
+            if type(name) is str and any(name == root or name.startswith(root + ".") for root in roots)
         )
 
-    def _acquire_process_ownership(self) -> None:
-        global _AUTHENTICATED_CONTEXT_OWNER_THREAD, _AUTHENTICATED_CONTEXT_OWNER_TOKEN
-        thread_id = threading.get_ident()
-        with _AUTHENTICATED_CONTEXT_STATE_LOCK:
-            if _AUTHENTICATED_CONTEXT_OWNER_THREAD == thread_id:
-                raise EvidenceBlocked(
-                    "I0-BLOCK-AUTHENTICATED-CONTEXT-OVERLAP",
-                    self.package_name,
-                    "same-thread nested authenticated context is forbidden",
-                )
-        if not _AUTHENTICATED_CONTEXT_LOCK.acquire(timeout=self.acquisition_timeout):
-            raise EvidenceBlocked(
-                "I0-BLOCK-AUTHENTICATED-CONTEXT-OVERLAP",
-                self.package_name,
-                f"another authenticated context remained active for {self.acquisition_timeout:g} seconds",
-            )
-        try:
-            with _AUTHENTICATED_CONTEXT_STATE_LOCK:
-                if (
-                    _AUTHENTICATED_CONTEXT_OWNER_THREAD is not None
-                    or _AUTHENTICATED_CONTEXT_OWNER_TOKEN is not None
-                ):
-                    raise RuntimeError("authenticated context ownership state is inconsistent")
-                _AUTHENTICATED_CONTEXT_OWNER_THREAD = thread_id
-                _AUTHENTICATED_CONTEXT_OWNER_TOKEN = self._ownership_token
-                self._owner_thread_id = thread_id
-                self._owns_process_lock = True
-        except BaseException:
-            _AUTHENTICATED_CONTEXT_LOCK.release()
-            raise
-
-    def _validate_close_ownership(self) -> None:
-        thread_id = threading.get_ident()
-        if self._owner_thread_id is not None and self._owner_thread_id != thread_id:
-            raise self._blocked_ownership("only the thread that entered the context may close it")
-        if not self._owns_process_lock:
-            return
-        with _AUTHENTICATED_CONTEXT_STATE_LOCK:
-            if _AUTHENTICATED_CONTEXT_OWNER_THREAD != thread_id:
-                raise self._blocked_ownership("process ownership thread identity no longer matches")
-            if _AUTHENTICATED_CONTEXT_OWNER_TOKEN is not self._ownership_token:
-                raise self._blocked_ownership("process ownership token no longer matches")
-
-    def _release_process_ownership(self) -> None:
-        global _AUTHENTICATED_CONTEXT_OWNER_THREAD, _AUTHENTICATED_CONTEXT_OWNER_TOKEN
-        if not self._owns_process_lock:
-            return
-        self._validate_close_ownership()
-        with _AUTHENTICATED_CONTEXT_STATE_LOCK:
-            # Re-check under the state lock immediately before changing either
-            # ownership field.  A mismatch never releases the primitive lock.
-            if (
-                _AUTHENTICATED_CONTEXT_OWNER_THREAD != threading.get_ident()
-                or _AUTHENTICATED_CONTEXT_OWNER_TOKEN is not self._ownership_token
-            ):
-                raise self._blocked_ownership("ownership changed at release boundary")
-            _AUTHENTICATED_CONTEXT_OWNER_THREAD = None
-            _AUTHENTICATED_CONTEXT_OWNER_TOKEN = None
-            self._owns_process_lock = False
-            _AUTHENTICATED_CONTEXT_LOCK.release()
+    def _validate_launch(self, *, preload_check: bool) -> None:
+        if (
+            sys.flags.isolated != 1
+            or sys.flags.ignore_environment != 1
+            or not sys.dont_write_bytecode
+            or not sys.flags.safe_path
+        ):
+            raise self._blocked("worker requires Python -I -B isolated/no-bytecode/safe-path mode")
+        if os.environ.get(WORKER_MARKER) != self.nonce or not self.nonce:
+            raise self._blocked("worker marker/nonce contract is absent or mismatched")
+        if os.environ.get("PYTHONPATH") is not None:
+            raise self._blocked("PYTHONPATH must be absent in the worker environment")
+        if threading.get_ident() != self.owner_thread or len(threading.enumerate()) != 1:
+            raise self._blocked("worker must retain exactly one active Python thread")
+        expected = {
+            "worker": (Path(__file__).resolve().with_name("i0_oracle_worker.py"), self.worker_path),
+            "repo": (REPO_ROOT.resolve(), self.repo_root),
+            "tests": (Path(__file__).resolve().parent, self.tests_root),
+            "lock": ((ENGINE_DESIGN / "reference.lock.json").resolve(), self.lock_path),
+        }
+        for role, (canonical, supplied) in expected.items():
+            if supplied != canonical:
+                raise self._blocked(f"{role} path is not the exact I0 candidate path")
+        if not self.evidence_path.is_absolute() or self.evidence_path != self.evidence_path.resolve():
+            raise self._blocked("evidence root must be an explicit canonical absolute path")
+        proc_executable = Path("/proc/self/exe")
+        if not proc_executable.exists() or proc_executable.resolve() != self.interpreter_path:
+            raise self._blocked("running /proc/self/exe differs from the parent-authenticated image")
+        if sha256(proc_executable) != self.interpreter_sha256:
+            raise self._blocked("running interpreter image bytes differ from the parent-authenticated executable")
+        if preload_check:
+            contaminated = self._target_modules()
+            if contaminated:
+                raise self._blocked(f"target oracle/product module was preloaded: {contaminated[0]}")
+        if builtins.__import__ is not self.original_import:
+            raise self._blocked("process-global importer was replaced before worker initialization")
+        if preload_check and not _identity_sequence_matches(sys.meta_path, self.baseline_meta_path):
+            raise self._blocked("sys.meta_path changed before worker initialization")
 
     def _assert_pristine_import_state(self, stage: str) -> None:
-        if builtins.__import__ is not self._original_import:
-            raise EvidenceBlocked(
-                "I0-BLOCK-AUTHENTICATED-IMPORT-STATE",
-                self.package_name,
-                f"builtins.__import__ changed {stage}",
-            )
-        if not _identity_sequence_matches(sys.meta_path, self._baseline_meta_path):
-            raise EvidenceBlocked(
-                "I0-BLOCK-AUTHENTICATED-IMPORT-STATE",
-                self.package_name,
-                f"sys.meta_path changed {stage}",
-            )
+        self._validate_launch(preload_check=False)
+        if builtins.__import__ is not self.original_import:
+            raise self._blocked(f"process-global importer changed {stage}")
+        if not _identity_sequence_matches(sys.meta_path, self.baseline_meta_path):
+            raise self._blocked(f"sys.meta_path changed {stage}")
 
     def _assert_active_import_state(self, stage: str, *, verify_oracle: bool = False) -> None:
-        # Only the exact six finder instances minted by authenticated oracle
-        # establishment may be normalized.  Name-compatible foreign objects
-        # are preserved and block below.
-        if self._oracle_guard is not None and self._oracle_guard._snapshot is not None:
-            self._oracle_guard._snapshot.discard_owned_import_side_effect_finders(self._active_meta_path)
-        # BASE-01 may first import six through authenticated retained product
-        # source without establishing the BASE-02 oracle.  Bind only six's
-        # actual module-owned `_importer` object created during this import;
-        # class-name lookalikes are never normalized.
-        for finder in _OracleTrustSnapshot._new_six_importers(self._active_meta_path):
-            if not any(finder is item for item in self._owned_import_side_effect_finders):
-                self._owned_import_side_effect_finders = (*self._owned_import_side_effect_finders, finder)
+        self._validate_launch(preload_check=False)
+        if self.oracle_guard is not None:
+            self.oracle_guard._snapshot.discard_owned_import_side_effect_finders(self.active_meta_path)
+        for finder in _OracleTrustSnapshot._new_six_importers(self.active_meta_path):
+            if not any(finder is item for item in self.owned_import_side_effect_finders):
+                self.owned_import_side_effect_finders = (*self.owned_import_side_effect_finders, finder)
             _remove_identity_from_meta_path(finder)
-        if builtins.__import__ is not self._original_import:
-            raise EvidenceBlocked(
-                "I0-BLOCK-AUTHENTICATED-IMPORT-STATE",
-                self.package_name,
-                f"foreign builtins.__import__ replacement detected {stage}",
-            )
-        if not _identity_sequence_matches(sys.meta_path, self._active_meta_path):
-            raise EvidenceBlocked(
-                "I0-BLOCK-AUTHENTICATED-IMPORT-STATE",
-                self.package_name,
-                f"foreign sys.meta_path mutation detected {stage}",
-            )
-        if verify_oracle and self._oracle_guard is not None:
-            self._oracle_guard.assert_integrity()
+        if builtins.__import__ is not self.original_import:
+            raise self._blocked(f"process-global importer changed {stage}")
+        if not _identity_sequence_matches(sys.meta_path, self.active_meta_path):
+            raise self._blocked(f"sys.meta_path changed {stage}")
+        if verify_oracle and self.oracle_guard is not None:
+            self.oracle_guard.assert_integrity(self.loader if self.product_bound else None)
 
-    @staticmethod
-    def _pop_module(name: str) -> object:
-        return sys.modules.pop(name, _MISSING)
-
-    def __enter__(self) -> tuple[ModuleType, AuthenticatedCdgLoader]:
-        if self._closed or self.loader is not None:
-            raise RuntimeError("authenticated package context is single-use")
-        self._acquire_process_ownership()
-        try:
-            self._original_import = builtins.__import__
-            self._baseline_meta_path = tuple(sys.meta_path)
-            self._assert_pristine_import_state("at context entry")
-            prefix = self.package_name + "."
-            conflicts = [name for name in sys.modules if name == self.package_name or name.startswith(prefix)]
-            if conflicts:
-                raise EvidenceBlocked(
-                    "I0-BLOCK-CDG-SOURCE",
-                    self.package_name,
-                    f"synthetic namespace is already occupied: {', '.join(sorted(conflicts))}",
-                )
-            self._namespace_reserved = True
-            self._namespace_ever_reserved = True
-            oracle_guard = (
-                OracleBindingGuard(self.lock, self._assert_pristine_import_state, self._ownership_token)
-                if self.verify_oracle_bindings
-                else None
-            )
-            self._oracle_guard = oracle_guard
-            self._assert_pristine_import_state("after oracle trust initialization")
-            sources = authenticated_current_cdg_sources(self.lock)
-            self._assert_pristine_import_state("after product source authentication")
-            guard = _BareProductImportGuard()
-            self._guard = guard
-            self._guarded_import = _OwnedImportHook(guard, self._original_import)
-            loader = AuthenticatedCdgLoader(
-                self.package_name,
-                sources,
-                guard,
-                oracle_guard,
-                self._assert_active_import_state,
-                self._guarded_import,
-            )
-            self.loader = loader
-            self._bare_quarantine_active = True
-            self._quarantined_bare_modules = {
-                name: module
-                for name, module in tuple(sys.modules.items())
-                if _BareProductImportGuard.is_bare_product(name)
-            }
-            for name, module in self._quarantined_bare_modules.items():
-                removed = self._pop_module(name)
-                if removed is not module:
-                    if removed is not _MISSING:
-                        sys.modules.setdefault(name, removed)  # never overwrite a newer insertion
-                    raise EvidenceBlocked(
-                        "I0-BLOCK-CDG-SOURCE", name, "bare product module changed during quarantine"
-                    )
-            sys.meta_path[0:0] = [guard, loader]
-            self._active_meta_path = (guard, loader, *self._baseline_meta_path)
-            self._assert_active_import_state("after owned finder installation", verify_oracle=True)
-            self.module = importlib.import_module(self.package_name)
-            self._assert_active_import_state("after authenticated package import", verify_oracle=True)
-            loader.assert_namespace_bound()
-            if oracle_guard is not None:
-                oracle_guard.assert_integrity(loader)
-                self._oracle_bound = True
-            return self.module, loader
-        except BaseException as body_error:
-            try:
-                self.close()
-            except BaseException as cleanup_error:
-                raise self._failure_group(
-                    "authenticated context entry and cleanup both failed",
-                    [body_error, cleanup_error],
-                ) from None
-            raise
-
-    def _remove_owned_finders(self, guard: _BareProductImportGuard | None, loader: AuthenticatedCdgLoader | None) -> None:
-        for finder in (guard, loader, *self._owned_import_side_effect_finders):
-            if finder is not None:
-                _remove_identity_from_meta_path(finder)
-
-    def _is_owned_synthetic_module(self, value: object) -> bool:
-        return any(value is module for module in self._owned_synthetic_modules)
-
-    def _cleanup_synthetic_modules(self, cleanup_failures: list[BaseException]) -> None:
-        if not self._namespace_reserved:
-            return
-        prefix = self.package_name + "."
-        aliases: set[str] = set()
-        # The prefix is uniquely reserved.  Exact owned module objects are also
-        # removed under every alias in sys.modules, without touching unrelated
-        # values or invoking value equality.
-        for _attempt in range(8):
-            found = False
-            for name, module in tuple(sys.modules.items()):
-                canonical = name == self.package_name or name.startswith(prefix)
-                alias = not canonical and self._is_owned_synthetic_module(module)
-                if not canonical and not alias:
-                    continue
-                found = True
-                if alias:
-                    aliases.add(name)
-                if sys.modules.get(name, _MISSING) is module:
-                    self._pop_module(name)
-            if not found:
-                break
-        if aliases:
-            cleanup_failures.append(EvidenceBlocked(
-                "I0-BLOCK-CDG-SOURCE",
-                ", ".join(sorted(aliases)),
-                "foreign sys.modules alias to an owned synthetic module was removed",
-            ))
-        stale = sorted(
-            name for name, module in tuple(sys.modules.items())
-            if name == self.package_name
-            or name.startswith(prefix)
-            or self._is_owned_synthetic_module(module)
+    def _initialize(self) -> None:
+        self.oracle_guard = _WorkerOracleGuard(self, self.lock, self._assert_pristine_import_state)
+        self._assert_pristine_import_state("after oracle trust initialization")
+        sources = authenticated_current_cdg_sources(self.lock)
+        self._assert_pristine_import_state("after product source authentication")
+        self.guard = _BareProductImportGuard()
+        guarded_import = _OwnedImportHook(self.guard, self.original_import)
+        self.loader = AuthenticatedCdgLoader(
+            self.PACKAGE_NAME,
+            sources,
+            self.guard,
+            self.oracle_guard,
+            self._assert_active_import_state,
+            guarded_import,
         )
-        if stale:
-            cleanup_failures.append(EvidenceBlocked(
-                "I0-BLOCK-CDG-SOURCE",
-                stale[0],
-                "synthetic namespace or owned-object alias remained populated after cleanup",
-            ))
+        sys.meta_path[0:0] = [self.guard, self.loader]
+        self.active_meta_path = (self.guard, self.loader, *self.baseline_meta_path)
+        self._assert_active_import_state("after retained-byte finder installation", verify_oracle=True)
+        self.module = importlib.import_module(self.PACKAGE_NAME)
+        self._assert_active_import_state("after authenticated product import", verify_oracle=True)
+        self.oracle_guard._snapshot.initialize_product_bindings(self.loader)
+        self.product_bound = True
+        self.loader.assert_namespace_bound()
+        self.oracle_guard.assert_integrity(self.loader)
 
-    def _final_namespace_alias_audit(self, cleanup_failures: list[BaseException]) -> None:
-        """Last process-global namespace audit immediately before lock release."""
-        if not self._namespace_ever_reserved and not self._owned_synthetic_modules:
-            return
-        prefix = self.package_name + "."
-        stale: list[str] = []
-        for name, module in tuple(sys.modules.items()):
-            if (
-                name == self.package_name
-                or name.startswith(prefix)
-                or self._is_owned_synthetic_module(module)
-            ):
-                stale.append(name)
-                if sys.modules.get(name, _MISSING) is module:
-                    sys.modules.pop(name, None)
-        if stale:
-            cleanup_failures.append(EvidenceBlocked(
-                "I0-BLOCK-CDG-SOURCE",
-                ", ".join(sorted(stale)),
-                "final synthetic namespace/alias audit removed late process-global residue",
-            ))
+    def package(self) -> tuple[ModuleType, AuthenticatedCdgLoader]:
+        self._assert_active_import_state("before authenticated package access", verify_oracle=True)
+        if self.module is None or self.loader is None:
+            raise self._blocked("authenticated package session was not initialized")
+        return self.module, self.loader
 
-    def _restore_bare_modules(self, cleanup_failures: list[BaseException]) -> None:
-        if not self._bare_quarantine_active:
-            return
-        conflicts: set[str] = set()
-        for name, module in self._quarantined_bare_modules.items():
-            current = sys.modules.setdefault(name, module)
-            if current is not module:
-                conflicts.add(name)
-        for name, module in tuple(sys.modules.items()):
-            if not _BareProductImportGuard.is_bare_product(name):
-                continue
-            original = self._quarantined_bare_modules.get(name, _MISSING)
-            if original is _MISSING or module is not original:
-                conflicts.add(name)
-        if conflicts:
-            cleanup_failures.append(EvidenceBlocked(
-                "I0-BLOCK-CDG-SOURCE",
-                ", ".join(sorted(conflicts)),
-                "foreign bare product module appeared while authenticated context was active; preserved",
-            ))
-
-    @staticmethod
-    def _capture_cleanup_phase(
-        cleanup_failures: list[BaseException],
-        phase: str,
-        operation: Callable[[], None],
-    ) -> None:
-        try:
-            operation()
-        except BaseException as error:
-            cleanup_failures.append(error if isinstance(error, EvidenceBlocked) else EvidenceBlocked(
-                "I0-BLOCK-AUTHENTICATED-CLEANUP",
-                phase,
-                f"cleanup phase raised {type(error).__name__}: {error}",
-            ))
-
-    def _perform_cleanup(self) -> list[BaseException]:
-        loader = self.loader
-        guard = self._guard
-        oracle_guard = self._oracle_guard
-        cleanup_failures: list[BaseException] = []
-        owned: list[ModuleType] = []
-        if loader is not None:
-            for module in loader.loaded_modules.values():
-                if not any(module is item for item in owned):
-                    owned.append(module)
-        self._owned_synthetic_modules = tuple(owned)
-
-        try:
-            if oracle_guard is not None and loader is not None and self._oracle_bound:
-                def final_oracle() -> None:
-                    self._assert_active_import_state("before final oracle integrity assertion")
-                    oracle_guard.assert_integrity(loader)
-                    self.closed_oracle_audit = oracle_guard.exports
-                self._capture_cleanup_phase(cleanup_failures, "oracle-integrity", final_oracle)
-
-            # Foreign global importer changes are preserved but invalidate the
-            # context; the owned module-local hook is always detached below.
-            if self._original_import is not None and builtins.__import__ is not self._original_import:
-                cleanup_failures.append(EvidenceBlocked(
-                    "I0-BLOCK-AUTHENTICATED-IMPORT-STATE",
-                    self.package_name,
-                    "preserved unrelated builtins.__import__ replacement",
-                ))
-            if self._guarded_import is not None:
-                self._capture_cleanup_phase(cleanup_failures, "detach-import-hook", self._guarded_import.detach)
-
-            self._capture_cleanup_phase(
-                cleanup_failures, "remove-owned-finders", lambda: self._remove_owned_finders(guard, loader)
-            )
-            if not _identity_sequence_matches(sys.meta_path, self._baseline_meta_path):
-                cleanup_failures.append(EvidenceBlocked(
-                    "I0-BLOCK-AUTHENTICATED-IMPORT-STATE",
-                    self.package_name,
-                    "preserved foreign sys.meta_path mutation during cleanup",
-                ))
-
-            self._capture_cleanup_phase(
-                cleanup_failures,
-                "synthetic-module-cleanup",
-                lambda: self._cleanup_synthetic_modules(cleanup_failures),
-            )
-            self._capture_cleanup_phase(
-                cleanup_failures,
-                "bare-module-restoration",
-                lambda: self._restore_bare_modules(cleanup_failures),
-            )
-            # Do not call importlib.invalidate_caches() here.  Baseline finders
-            # are foreign arbitrary objects; invoking their callbacks after an
-            # oracle check would create an unauthenticated mutation boundary.
-
-            if guard is not None:
-                self.closed_import_audit = tuple(guard.requests)
-            if loader is not None:
-                self._capture_cleanup_phase(cleanup_failures, "loader-release", loader.release)
-            if guard is not None:
-                self._capture_cleanup_phase(cleanup_failures, "import-guard-clear", guard.clear)
-        finally:
-            # Plain ownership-field clearing is deliberately in the outermost
-            # finally.  No cleanup phase, including a foreign finder callback,
-            # can prevent close() from reaching lock release.
-            self.module = None
-            self.loader = None
-            self._guard = None
-            # Keep the plain per-context guard until close() performs the final
-            # post-cleanup integrity assertion.  No foreign callback is invoked
-            # after that assertion and before process-lock release.
-            self._oracle_bound = False
-            self._original_import = None
-            self._guarded_import = None
-            self._quarantined_bare_modules.clear()
-            self._bare_quarantine_active = False
-            self._namespace_reserved = False
-            self._active_meta_path = ()
-            self._owned_import_side_effect_finders = ()
-            self._cleanup_complete = True
-        return cleanup_failures
-
-    def close(self) -> None:
-        # This owner check precedes every mutation so an intruder can neither
-        # clean resources nor release another thread's lock.
-        self._validate_close_ownership()
-        if self._closed:
-            return
-        cleanup_failures: list[BaseException] = []
-        try:
-            if not self._cleanup_complete:
-                try:
-                    cleanup_failures.extend(self._perform_cleanup())
-                except BaseException as error:
-                    cleanup_failures.append(error)
-            self._capture_cleanup_phase(
-                cleanup_failures,
-                "final-namespace-alias-audit",
-                lambda: self._final_namespace_alias_audit(cleanup_failures),
-            )
-            # This is the truly final mutation-capable operation before process
-            # ownership is released.  All finder/module/hook cleanup has already
-            # happened, and no foreign callback is invoked below this point.
-            oracle_guard = self._oracle_guard
-            if oracle_guard is not None:
-                oracle_guard.assert_integrity()
-                self.closed_oracle_audit = oracle_guard.exports
-        except BaseException as error:
-            # The pre-cleanup product-binding check and the mandatory final
-            # snapshot check can report the same unchanged mutation.  Keep one
-            # finding while still executing both boundaries.
-            if not any(type(existing) is type(error) and str(existing) == str(error) for existing in cleanup_failures):
-                cleanup_failures.append(error)
-        finally:
-            # release() only drops a plain reference; it invokes no foreign
-            # callback and the process-lifetime snapshot remains globally held.
-            if self._oracle_guard is not None:
-                self._oracle_guard.release()
-                self._oracle_guard = None
-            try:
-                self._release_process_ownership()
-            except BaseException as ownership_error:
-                cleanup_failures.append(ownership_error)
-        if not self._owns_process_lock:
-            self._closed = True
-            self._owned_synthetic_modules = ()
-            self._namespace_ever_reserved = False
-        self.closed_cleanup_audit = tuple(str(error) for error in cleanup_failures)
-        if cleanup_failures:
-            raise self._failure_group("authenticated context cleanup failed", cleanup_failures) from None
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        _traceback: object,
-    ) -> bool:
-        try:
-            self.close()
-        except BaseException as cleanup_error:
-            if exc is not None:
-                raise self._failure_group(
-                    "authenticated context body and cleanup both failed",
-                    [exc, cleanup_error],
-                ) from None
-            raise
-        return False
-
-def assert_oracle_suite_integrity() -> None:
-    """Fail the group if the process-lifetime oracle changed after its final context."""
-    if _ORACLE_TRUST_SNAPSHOT is not None:
-        _ORACLE_TRUST_SNAPSHOT.assert_integrity()
+    def assert_final_integrity(self, *, dependency_closure: bool = True) -> None:
+        """Final trusted operation; caller must only ``os.write`` then ``os._exit``."""
+        self._assert_active_import_state(
+            "at final worker integrity boundary", verify_oracle=dependency_closure
+        )
+        assert self.loader is not None and self.oracle_guard is not None
+        self.loader.assert_namespace_bound()
+        if dependency_closure:
+            self.oracle_guard.assert_integrity(self.loader)
+        else:
+            # BASE-01 certifies source/inventory, not oracle semantics.  Its
+            # product projection calls legitimately populate framework maps;
+            # retain exact class/module/product identities without claiming
+            # that this group's mutable dependency closure stayed frozen.
+            for export, snapshot in self.oracle_guard._snapshot.snapshots.items():
+                binding = snapshot["binding"]
+                trusted = snapshot["object"]
+                product_name = f"{self.loader.package_name}.{binding['product_module']}"
+                product = self.loader.loaded_modules.get(product_name)
+                if (
+                    not _exact_module_binding(binding["package"], snapshot["root_module"])
+                    or not _exact_module_binding(binding["module"], snapshot["exact_module"])
+                    or not isinstance(product, ModuleType)
+                    or product.__dict__.get(export, _MISSING) is not trusted
+                ):
+                    raise self._blocked("BASE-01 oracle/product identity changed before result emission")
 
 
-def load_authenticated_cdg_package(
+def initialize_authenticated_worker(
     lock: dict[str, Any],
-    package_name: str = "_dg_engine_i0_pack",
     *,
-    verify_oracle_bindings: bool = False,
-    acquisition_timeout: float = AUTHENTICATED_CONTEXT_ACQUIRE_TIMEOUT,
-) -> AuthenticatedCdgPackage:
-    """Return a serialized retained-byte package context with owned cleanup."""
-    return AuthenticatedCdgPackage(
+    nonce: str,
+    worker_path: Path,
+    repo_root: Path,
+    tests_root: Path,
+    lock_path: Path,
+    evidence_path: Path,
+    interpreter_path: Path,
+    interpreter_sha256: str,
+) -> AuthenticatedWorkerSession:
+    """Create the process-lifetime session once; never repairs it for reuse."""
+    global _ACTIVE_WORKER_SESSION
+    if _ACTIVE_WORKER_SESSION is not None:
+        raise EvidenceBlocked(
+            "I0-BLOCK-ORACLE-WORKER-CONTRACT",
+            "oracle-worker",
+            "authenticated worker session is non-reentrant and non-reusable",
+        )
+    session = AuthenticatedWorkerSession(
         lock,
-        package_name,
-        verify_oracle_bindings=verify_oracle_bindings,
-        acquisition_timeout=acquisition_timeout,
+        nonce=nonce,
+        worker_path=worker_path.resolve(),
+        repo_root=repo_root.resolve(),
+        tests_root=tests_root.resolve(),
+        lock_path=lock_path.resolve(),
+        evidence_path=evidence_path.resolve(),
+        interpreter_path=interpreter_path.absolute(),
+        interpreter_sha256=interpreter_sha256,
+    )
+    _ACTIVE_WORKER_SESSION = session
+    return session
+
+
+def authenticated_worker_package() -> tuple[ModuleType, AuthenticatedCdgLoader]:
+    """Return the one worker package; fail outside the authenticated child."""
+    if _ACTIVE_WORKER_SESSION is None:
+        raise EvidenceBlocked(
+            "I0-BLOCK-ORACLE-WORKER-CONTRACT",
+            "oracle-worker",
+            "authenticated product access is supported only inside the one-shot oracle worker",
+        )
+    return _ACTIVE_WORKER_SESSION.package()
+
+
+def assert_oracle_suite_integrity(*, dependency_closure: bool = True) -> None:
+    """Perform the worker's final integrity operation without cleanup callbacks."""
+    if _ACTIVE_WORKER_SESSION is None:
+        raise EvidenceBlocked(
+            "I0-BLOCK-ORACLE-WORKER-CONTRACT",
+            "oracle-worker",
+            "final oracle integrity is supported only inside the one-shot oracle worker",
+        )
+    _ACTIVE_WORKER_SESSION.assert_final_integrity(dependency_closure=dependency_closure)
+
+
+def load_authenticated_cdg_package(*_args: Any, **_kwargs: Any) -> None:
+    """Reject the obsolete reusable in-process context API."""
+    raise EvidenceBlocked(
+        "I0-BLOCK-ORACLE-WORKER-CONTRACT",
+        "oracle-worker",
+        "reusable authenticated contexts were deleted; use the dedicated one-shot worker",
     )

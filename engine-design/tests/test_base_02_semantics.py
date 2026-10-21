@@ -20,7 +20,7 @@ from i0_testlib import (
     decoder_visible_positions,
     entropy_bound_accept,
     inverse_cdf,
-    load_authenticated_cdg_package,
+    authenticated_worker_package,
     read_authenticated_cdg_source,
     read_evidence_artifact,
     read_json,
@@ -51,9 +51,7 @@ class Base02SemanticBindings(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.lock = read_json(ENGINE_DESIGN / "reference.lock.json")
-        cls.pack, cls.pack_loader = cls.enterClassContext(
-            load_authenticated_cdg_package(cls.lock, verify_oracle_bindings=True)
-        )
+        cls.pack, cls.pack_loader = authenticated_worker_package()
         cls.semantic = read_json(FIXTURES / "semantics.json")
         cls.defects = read_json(FIXTURES / "baseline-defects.json")
 

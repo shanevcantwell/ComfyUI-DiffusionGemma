@@ -38,20 +38,33 @@ set(
     "External I0 evidence root containing i0-evidence.json and relative artifacts"
 )
 add_test(
+    NAME design-worker-boundary
+    COMMAND ${DG_ENGINE_ORACLE_PYTHON} -I -S -B -u -m unittest
+            discover -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_i0_worker_boundary.py -v
+)
+set_tests_properties(
+    design-worker-boundary PROPERTIES
+    LABELS "I0;security"
+    TIMEOUT 1200
+    ENVIRONMENT "DG_ENGINE_I0_TEST_EVIDENCE_ROOT=${DG_ENGINE_I0_EVIDENCE_ROOT};DG_ENGINE_I0_BOUNDARY_TEST=1"
+)
+add_test(
     NAME BASE-01
-    COMMAND ${DG_ENGINE_ORACLE_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_i0_group.py
+    COMMAND ${DG_ENGINE_ORACLE_PYTHON} -I -S -B -u ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_i0_group.py
             BASE-01 --evidence-root ${DG_ENGINE_I0_EVIDENCE_ROOT}
 )
 add_test(
     NAME BASE-02
-    COMMAND ${DG_ENGINE_ORACLE_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_i0_group.py
+    COMMAND ${DG_ENGINE_ORACLE_PYTHON} -I -S -B -u ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_i0_group.py
             BASE-02 --evidence-root ${DG_ENGINE_I0_EVIDENCE_ROOT}
 )
-# run_i0_group.py verifies collection and execution counts and rejects skips,
-# failures, errors, expected failures, and unavailable mandatory evidence.  The
-# BASE-01's short timeout is a fail-closed anti-hang guard for FIFO/special-file
-# security regressions.  BASE-02 may stream-hash roughly 146 GB of checkpoint
-# and GGUF gate evidence, so its fail-closed limit allows realistic slow/network
-# evidence stores instead of misreporting valid I/O as a semantic failure.
+# Production BASE evidence is accepted only from a clean committed candidate.
+# run_i0_group.py reads the harness lock from HEAD, verifies the exact tree/blob
+# inventory, retains every source/schema/lock descriptor, verifies the external
+# closed-environment Merkle/RECORD contract, and launches the fd-bound image and
+# worker with -I -S -B -u.  Bounded selector drains and pidfd/subreaper process-
+# tree containment make every output/protocol/timeout failure BLOCKED.
+# BASE-02 may stream-hash roughly 146 GB of checkpoint and GGUF gate evidence,
+# so its fail-closed limit allows realistic slow/network evidence stores.
 set_tests_properties(BASE-01 PROPERTIES LABELS "I0" TIMEOUT 180)
 set_tests_properties(BASE-02 PROPERTIES LABELS "I0" TIMEOUT 3600)
