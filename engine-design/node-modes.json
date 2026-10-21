@@ -1,0 +1,1262 @@
+{
+ "$schema": "urn:comfyui-diffusiongemma:dg-engine:i0:node-modes:v1",
+ "schema": 1,
+ "kind": "dg-engine-i0-node-modes",
+ "draft": false,
+ "gate_eligible": false,
+ "baseline": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+ "observed_worktree": "7febb631a4e24173c8bd643e3ddbfa61dda078ef",
+ "baseline_delta": {
+  "status": "NO_PRODUCT_SOURCE_DELTA",
+  "changed_preexisting_paths": [],
+  "note": "All node/core paths are byte-identical to the pinned product baseline; engine-design is additive."
+ },
+ "registered_node_count": 8,
+ "registered_mapping_evidence": "__init__.py:72-90",
+ "object_info_contract": {
+  "comfyui_repository": "https://github.com/comfyanonymous/ComfyUI",
+  "comfyui_revision": "7cf4e7833519cbe9eff0e45767d01fd365d12a86",
+  "source": {
+   "server.py": {
+    "lines": "733-801",
+    "sha256": "0831037168cef27fd0b8e495acc7e82a875f145e0410cf3df6b659d0f222687f",
+    "artifact_id": "comfy.server",
+    "url": "https://github.com/comfyanonymous/ComfyUI/blob/7cf4e7833519cbe9eff0e45767d01fd365d12a86/server.py"
+   },
+   "nodes.py": {
+    "lines": "2276-2279",
+    "sha256": "b8dfdde1de8975be762b085048143cc2dda8fc9202695e460ecc2c8dfe44bc4b",
+    "artifact_id": "comfy.nodes",
+    "url": "https://github.com/comfyanonymous/ComfyUI/blob/7cf4e7833519cbe9eff0e45767d01fd365d12a86/nodes.py"
+   }
+  },
+  "endpoints": [
+   "/object_info",
+   "/object_info/{node_class}"
+  ],
+  "outer_shape": "{<node mapping key>: <node info object>}",
+  "input_encoding": "INPUT_TYPES values; COMBO choices remain arrays and socket types remain strings",
+  "always_present": [
+   "input",
+   "input_order",
+   "is_input_list",
+   "output",
+   "output_is_list",
+   "output_name",
+   "name",
+   "display_name",
+   "description",
+   "python_module",
+   "category",
+   "output_node",
+   "has_intermediate_output",
+   "search_aliases"
+  ],
+  "conditional": [
+   "output_tooltips",
+   "deprecated",
+   "experimental",
+   "dev_only",
+   "api_node",
+   "essentials_category"
+  ],
+  "runtime_variability": {
+   "DGemmaLoader.local_model_dir": "choices are supplied by list_local_model_dirs(); inventory uses <runtime-local-model-directory> sentinel and tests patch only that provider"
+  },
+  "double_evaluation": "ComfyUI calls INPUT_TYPES twice while constructing object_info; implementations must be side-effect free.",
+  "python_module": "custom_nodes.ComfyUI-DiffusionGemma"
+ },
+ "nodes": [
+  {
+   "mapping_key": "DGemmaLoader",
+   "registered_class": "DGemmaLoader",
+   "display_name": "DiffusionGemma Loader",
+   "source": "surfaces/comfyui/loader.py",
+   "source_range": "surfaces/comfyui/loader.py:258-356",
+   "function": "load",
+   "category": "DiffusionGemma",
+   "description": "",
+   "input_is_list": false,
+   "output_node": false,
+   "call_topology": [
+    "INPUT_TYPES quant/local directory",
+    "resolve_local_model_dir for optional path",
+    "dgemma.model.load_model(repo_id=<resolved path or None>, quant, local_files_only)",
+    "transformers DiffusionGemmaForBlockDiffusion.from_pretrained + AutoProcessor.from_pretrained",
+    "DGemmaModel"
+   ],
+   "modes": [
+    {
+     "name": "transformers-bf16",
+     "selector": "quant=none",
+     "implemented": true,
+     "checkpoint_default": "google/diffusiongemma-26B-A4B-it",
+     "status": "working path per AGENTS.md:164-165"
+    },
+    {
+     "name": "transformers-autoround-int4",
+     "selector": "quant=autoround",
+     "implemented": "load code exists",
+     "checkpoint_default": "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound",
+     "status": "declared but known non-functional end-to-end: _assert_tie_integrity reaches QuantLinear without .weight; AGENTS.md:166-169",
+     "native_engine_distribution": "excluded",
+     "release_qualification": "excluded; inventory and defect evidence only"
+    },
+    {
+     "name": "local-folder",
+     "selector": "local_model_dir wired",
+     "implemented": true,
+     "notes": "forces local_files_only and path guard"
+    },
+    {
+     "name": "native-gguf",
+     "implemented": false,
+     "notes": "not in current node contract"
+    }
+   ],
+   "backend_modes": [
+    "transformers:none",
+    "transformers:autoround"
+   ],
+   "cancellation": {
+    "implemented": true,
+    "granularity": "four phase boundaries only; cannot interrupt inside blocking from_pretrained",
+    "surface_behavior": "LoadInterrupted translated to comfy.model_management.InterruptProcessingException",
+    "evidence": "dgemma/model.py:924-972,1089-1110; surfaces/comfyui/loader.py:293-356"
+   },
+   "capabilities": {
+    "implemented": [
+     "HF/local checkpoint resolution",
+     "bf16 device_map=auto load",
+     "AutoRound patch path and preflight guards",
+     "model+processor socket"
+    ],
+    "declared_but_broken": [
+     "autoround end-to-end"
+    ],
+    "not_exposed": [
+     "native GGUF/backend selection",
+     "explicit repo_id",
+     "local_files_only widget",
+     "unload"
+    ],
+    "excluded_from_native_engine_distribution": [
+     "AutoRound model/assets",
+     "AutoRound backend release qualification"
+    ]
+   },
+   "fail_loud": [
+    "unknown quant",
+    "unresolved/traversal local_model_dir",
+    "quant/checkpoint mismatch",
+    "AutoRound free-VRAM floor",
+    "missing auto-round",
+    "unresolvable repo/cache",
+    "stranded meta tensors",
+    "tie-integrity corruption",
+    "no CUDA"
+   ],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "quant": [
+       [
+        "none",
+        "autoround"
+       ],
+       {
+        "default": "none",
+        "tooltip": "none = full bf16 (~53GB VRAM) \u00b7 autoround = pre-quantized INT4 (~30GB VRAM, requires auto-round extra)"
+       }
+      ]
+     },
+     "optional": {
+      "local_model_dir": [
+       [
+        "<runtime-local-model-directory>"
+       ]
+      ]
+     }
+    },
+    "input_order": {
+     "required": [
+      "quant"
+     ],
+     "optional": [
+      "local_model_dir"
+     ]
+    },
+    "is_input_list": false,
+    "output": [
+     "DGEMMA_MODEL"
+    ],
+    "output_is_list": [
+     false
+    ],
+    "output_name": [
+     "model"
+    ],
+    "name": "DGemmaLoader",
+    "display_name": "DiffusionGemma Loader",
+    "description": "",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "666e68391ca1347087b67cd1f37364c70191d1dd58a172b7ec24c3c02f2ae5ca",
+   "baseline_git_blob_sha1": "fb58a14a16111aeeb5cf3b533ba49ef6e8c6ef2f"
+  },
+  {
+   "mapping_key": "DGemmaSampler",
+   "registered_class": "DGemmaSampler",
+   "display_name": "DiffusionGemma Sampler",
+   "source": "surfaces/comfyui/sampler.py",
+   "source_range": "surfaces/comfyui/sampler.py:216-419",
+   "function": "sample",
+   "category": "DiffusionGemma",
+   "description": "Drives the denoising loop for one prompt. Six outputs: text, canvas_state, canvas_trace, frames, images, run_config (wire the last four into DGemmaRunLogWriter for a run log, or canvas_trace into DGemmaTrace/DGemmaTokenTrace for analysis). Use DGemmaDenoise instead if you need to condition on a KV-cache.",
+   "input_is_list": false,
+   "output_node": false,
+   "call_topology": [
+    "build_on_frame(unique_id) and _build_should_cancel()",
+    "dgemma.loop.run_diffusion with scalar widgets and thinking",
+    "EntropyBoundScheduler + DGemmaPipeline + StepEndComposite",
+    "build_sampler_shaped_outputs",
+    "decode_frames + render_frames_to_image_batch + RunConfig"
+   ],
+   "modes": [
+    {
+     "name": "text-default",
+     "selector": "thinking=false",
+     "implemented": true
+    },
+    {
+     "name": "thinking-experimental",
+     "selector": "thinking=true",
+     "implemented": true,
+     "status": "one newline token short of native enable_thinking render; behavioral parity unverified"
+    },
+    {
+     "name": "tier0-trace",
+     "selector": "always when callback logits reachable",
+     "implemented": true
+    },
+    {
+     "name": "constraints/control/topk/full-distribution",
+     "implemented_in_core": true,
+     "exposed_by_node": false
+    }
+   ],
+   "backend_modes": [
+    "loaded DGemmaModel only; current loader yields transformers:none or transformers:autoround"
+   ],
+   "cancellation": {
+    "implemented": true,
+    "poll": "once per callback step",
+    "ordering": "capture then cancellation before writers",
+    "result": "partial standard six-output shape; includes cancelled step frame",
+    "display_callback_failures": "swallowed at display closure; engine analysis callback failures otherwise propagate",
+    "evidence": "surfaces/comfyui/sampler.py:361-399; dgemma/composite.py:214-248; dgemma/loop.py:898-940"
+   },
+   "capabilities": {
+    "implemented": [
+     "single prompt text generation",
+     "seeded generation",
+     "multi-canvas by gen_length ceiling",
+     "Tier-0 entropy",
+     "raw trace",
+     "thinking path",
+     "frame strings",
+     "IMAGE batch",
+     "run config",
+     "live view",
+     "partial cancellation"
+    ],
+    "core_only_not_exposed": [
+     "constraints",
+     "control_signals",
+     "capture top_k",
+     "capture full distribution",
+     "KV injection"
+    ],
+    "not_implemented": [
+     "native backend selector"
+    ]
+   },
+   "fail_loud": [
+    "t_min>=t_max",
+    "invalid core ingress if called programmatically",
+    "pipeline gen_length/step count <=0",
+    "callback errors except guarded display",
+    "model/runtime failures"
+   ],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "model": [
+       "DGEMMA_MODEL",
+       {
+        "tooltip": "Loaded DiffusionGemma model (from DGemmaLoader)."
+       }
+      ],
+      "prompt": [
+       "STRING",
+       {
+        "multiline": true,
+        "default": "",
+        "tooltip": "The user turn to generate a response to."
+       }
+      ],
+      "seed": [
+       "INT",
+       {
+        "default": 0,
+        "min": 0,
+        "max": 18446744073709551615,
+        "tooltip": "RNG seed for the generator driving canvas initialization/renoise (a plain integer, not unit-bearing). Omit/leave unset for a nondeterministic run."
+       }
+      ],
+      "num_inference_steps": [
+       "INT",
+       {
+        "default": 48,
+        "min": 1,
+        "max": 1024,
+        "tooltip": "Requested denoising step budget N (a plain count, not a physical unit) \u2014 the schedule-position denominator: t = (N - step_idx)/N."
+       }
+      ],
+      "t_min": [
+       "FLOAT",
+       {
+        "default": 0.4,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "tooltip": "Cold end of the temperature anneal (dimensionless, applied as the divisor T in softmax(z/T)). Despite the lowercase-t name this is a TEMPERATURE, not a schedule position \u2014 t bottoms out at 1/num_inference_steps, so t_min itself is a virtual endpoint no step actually reaches. T = t_min + (t_max - t_min) * t, t decreasing 1 -> 1/num_inference_steps across the run."
+       }
+      ],
+      "t_max": [
+       "FLOAT",
+       {
+        "default": 0.8,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "tooltip": "Hot end of the temperature anneal (dimensionless, same softmax(z/T) divisor as t_min) \u2014 the temperature applied at the very first step, where the schedule position t == 1."
+       }
+      ],
+      "entropy_bound": [
+       "FLOAT",
+       {
+        "default": 0.1,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.001,
+        "tooltip": "Per-step joint acceptance budget, in NATS (natural-log entropy, matching torch.distributions.Categorical.entropy() \u2014 not bits). A position commits this step only once its acceptance entropy clears this bound. Default 0.1 nats; for scale, the uniform-vocab noise draw's 18 bits/position is ~12.48 nats."
+       }
+      ],
+      "confidence": [
+       "FLOAT",
+       {
+        "default": 0.005,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.001,
+        "tooltip": "Early-stop threshold: a dimensionless probability the pipeline's adaptive-stop check compares a candidate's confidence against."
+       }
+      ],
+      "gen_length": [
+       "INT",
+       {
+        "default": 256,
+        "min": 1,
+        "max": 8192,
+        "tooltip": "Canvas length in tokens (a token count) \u2014 how many positions the denoising loop allocates for the generated turn. This is split into blocks of DEFAULT_GEN_LENGTH (256) tokens each: gen_length is processed as ceil(gen_length / 256) blocks, each denoised over num_inference_steps substeps (e.g. gen_length 1024 -> 4 blocks, each denoised over num_inference_steps steps). Larger gen_length costs proportionally more block passes."
+       }
+      ],
+      "thinking": [
+       "BOOLEAN",
+       {
+        "default": false,
+        "tooltip": "EXPERIMENTAL boolean toggle: injects the <|think|> control token via a system turn. Structurally one token short of native enable_thinking=True (the chat template's `| trim` eats the newline after <|think|>) \u2014 see run_diffusion's own docstring for the honest gap. Behavioral impact unverified pending an E2E thinking-mode run on real weights."
+       }
+      ]
+     },
+     "hidden": {
+      "unique_id": "UNIQUE_ID",
+      "dgemma_live_view": "DGEMMA_LIVE_VIEW"
+     }
+    },
+    "input_order": {
+     "required": [
+      "model",
+      "prompt",
+      "seed",
+      "num_inference_steps",
+      "t_min",
+      "t_max",
+      "entropy_bound",
+      "confidence",
+      "gen_length",
+      "thinking"
+     ],
+     "hidden": [
+      "unique_id",
+      "dgemma_live_view"
+     ]
+    },
+    "is_input_list": false,
+    "output": [
+     "STRING",
+     "DGEMMA_CANVAS_STATE",
+     "DGEMMA_CANVAS_TRACE",
+     "STRING",
+     "IMAGE",
+     "DGEMMA_RUN_CONFIG"
+    ],
+    "output_is_list": [
+     false,
+     false,
+     false,
+     true,
+     false,
+     false
+    ],
+    "output_name": [
+     "text",
+     "canvas_state",
+     "canvas_trace",
+     "frames",
+     "images",
+     "run_config"
+    ],
+    "name": "DGemmaSampler",
+    "display_name": "DiffusionGemma Sampler",
+    "description": "Drives the denoising loop for one prompt. Six outputs: text, canvas_state, canvas_trace, frames, images, run_config (wire the last four into DGemmaRunLogWriter for a run log, or canvas_trace into DGemmaTrace/DGemmaTokenTrace for analysis). Use DGemmaDenoise instead if you need to condition on a KV-cache.",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "0eb2e432733f8628adb24ad8b80dd4f7c605c0c921305fe8c4b767c7a7013688",
+   "baseline_git_blob_sha1": "50e67d953654330aecd7dcdc24d69d30937d5876"
+  },
+  {
+   "mapping_key": "DGemmaTrace",
+   "registered_class": "DGemmaTrace",
+   "display_name": "DiffusionGemma Trace",
+   "source": "surfaces/comfyui/trace.py",
+   "source_range": "surfaces/comfyui/trace.py:148-237",
+   "function": "render",
+   "category": "DiffusionGemma",
+   "description": "Post-hoc analysis over a complete canvas_trace. Renders a heatmap IMAGE plus a STRING summary (avalanche/commit curve + mask-token corroboration verdict). mode selects the heatmap signal: commit (which positions changed per step) or entropy (per-position predictive entropy, normalized per render). cell_px upscales the raw steps\u00d7positions grid so it's readable.",
+   "input_is_list": false,
+   "output_node": false,
+   "call_topology": [
+    "build_avalanche_curve + corroborate_no_mask_token",
+    "commit -> build_commit_heatmap or entropy -> build_entropy_heatmap",
+    "surface converts plain grid to RGB IMAGE",
+    "format summary"
+   ],
+   "modes": [
+    {
+     "name": "commit",
+     "implemented": true,
+     "semantics": "changed/unchanged token-id grid, not scheduler accepted mask"
+    },
+    {
+     "name": "entropy",
+     "implemented": true,
+     "semantics": "captured nats min-max normalized per render; renders not cross-comparable"
+    }
+   ],
+   "backend_modes": [
+    "backend-neutral pure consumer"
+   ],
+   "cancellation": {
+    "implemented": false,
+    "behavior": "accepts empty/partial traces post hoc"
+   },
+   "capabilities": {
+    "implemented": [
+     "commit heatmap",
+     "entropy heatmap",
+     "avalanche summary",
+     "mask-sentinel corroboration"
+    ],
+    "declared_but_not_implemented": []
+   },
+   "fail_loud": [
+    "unknown mode",
+    "cell_px<1",
+    "entropy mode when any frame.entropy is None"
+   ],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "canvas_trace": [
+       "DGEMMA_CANVAS_TRACE",
+       {
+        "tooltip": "A complete per-step trace from a sampler-class node."
+       }
+      ],
+      "cell_px": [
+       "INT",
+       {
+        "default": 6,
+        "min": 1,
+        "max": 32,
+        "tooltip": "Nearest-neighbor upscale factor for the heatmap (a raw steps\u00d7positions grid is unreadably small)."
+       }
+      ],
+      "mode": [
+       [
+        "commit",
+        "entropy"
+       ],
+       {
+        "default": "commit",
+        "tooltip": "Heatmap signal: commit = which positions changed each step; entropy = per-position predictive entropy (normalized per render)."
+       }
+      ]
+     }
+    },
+    "input_order": {
+     "required": [
+      "canvas_trace",
+      "cell_px",
+      "mode"
+     ]
+    },
+    "is_input_list": false,
+    "output": [
+     "IMAGE",
+     "STRING"
+    ],
+    "output_is_list": [
+     false,
+     false
+    ],
+    "output_name": [
+     "heatmap",
+     "summary"
+    ],
+    "name": "DGemmaTrace",
+    "display_name": "DiffusionGemma Trace",
+    "description": "Post-hoc analysis over a complete canvas_trace. Renders a heatmap IMAGE plus a STRING summary (avalanche/commit curve + mask-token corroboration verdict). mode selects the heatmap signal: commit (which positions changed per step) or entropy (per-position predictive entropy, normalized per render). cell_px upscales the raw steps\u00d7positions grid so it's readable.",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "beea0fad7f4e27d5aff7278b9dd14c39a4509b0e869fb01d1fca51c66766a789",
+   "baseline_git_blob_sha1": "b7cc23bdb6567f09145216952ccf0a1877876150"
+  },
+  {
+   "mapping_key": "DGemmaTallyAudit",
+   "registered_class": "DGemmaTallyAudit",
+   "display_name": "DiffusionGemma Tally Audit",
+   "source": "surfaces/comfyui/tally_audit.py",
+   "source_range": "surfaces/comfyui/tally_audit.py:90-111",
+   "function": "audit",
+   "category": "DiffusionGemma",
+   "description": "",
+   "input_is_list": true,
+   "output_node": false,
+   "call_topology": [
+    "list(frames)",
+    "consumers.tally_audit.audit_frames",
+    "format per-frame parse/revision/final arithmetic report"
+   ],
+   "modes": [
+    {
+     "name": "inline_list",
+     "implemented": true
+    },
+    {
+     "name": "pipe_table",
+     "implemented": true
+    },
+    {
+     "name": "dash_bullet_list",
+     "implemented": true
+    },
+    {
+     "name": "unrecognized",
+     "implemented": true,
+     "behavior": "reported honestly, not raised"
+    }
+   ],
+   "backend_modes": [
+    "backend-neutral pure consumer"
+   ],
+   "cancellation": {
+    "implemented": false,
+    "behavior": "can audit partial decoded frame lists"
+   },
+   "capabilities": {
+    "implemented": [
+     "three structure matchers",
+     "per-cell partial parse",
+     "revision events",
+     "final internal arithmetic check"
+    ]
+   },
+   "fail_loud": [],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "frames": [
+       "STRING",
+       {
+        "forceInput": true
+       }
+      ]
+     }
+    },
+    "input_order": {
+     "required": [
+      "frames"
+     ]
+    },
+    "is_input_list": true,
+    "output": [
+     "STRING"
+    ],
+    "output_is_list": [
+     false
+    ],
+    "output_name": [
+     "audit_report"
+    ],
+    "name": "DGemmaTallyAudit",
+    "display_name": "DiffusionGemma Tally Audit",
+    "description": "",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "d7a74a3988ed794a1c8eca202f96683fd050699342f473082f8675a0bc7af7d9",
+   "baseline_git_blob_sha1": "faa742b2d6b535618350047daf378659bef69724"
+  },
+  {
+   "mapping_key": "DGemmaRunLogWriter",
+   "registered_class": "DGemmaRunLogWriter",
+   "display_name": "DiffusionGemma Run Log Writer",
+   "source": "surfaces/comfyui/run_log_writer.py",
+   "source_range": "surfaces/comfyui/run_log_writer.py:150-281",
+   "function": "write",
+   "category": "DiffusionGemma",
+   "description": "Writes a schema'd JSONL run log to disk \u2014 one header record, one record per captured frame (with its decoded step text), one final record. Wire it from ONE sampler-class node (DGemmaSampler or DGemmaDenoise): run_config, canvas_trace, frames, and canvas_state all come from that same node's outputs. debug_log_path is always a directory and filename_prefix names the file \u2014 the writer creates the directory if missing and writes {filename_prefix}_{timestamp}.jsonl inside it; leave debug_log_path empty to use ComfyUI's output directory. Returns the written log's path.",
+   "input_is_list": true,
+   "output_node": true,
+   "call_topology": [
+    "unwrap listed inputs",
+    "_resolve_output_path",
+    "write_run_log",
+    "consumers.run_log header/frame/final builders",
+    "one JSON object per physical line"
+   ],
+   "modes": [
+    {
+     "name": "comfy-output",
+     "selector": "debug_log_path empty",
+     "implemented": true
+    },
+    {
+     "name": "explicit-directory",
+     "selector": "debug_log_path nonempty",
+     "implemented": true
+    }
+   ],
+   "backend_modes": [
+    "backend-neutral file consumer"
+   ],
+   "cancellation": {
+    "implemented": false,
+    "behavior": "writes partial runs if partial trace/state/frames are supplied consistently"
+   },
+   "capabilities": {
+    "implemented": [
+     "dg-runlog/1 JSONL",
+     "injection provenance stamp",
+     "Tier-0 entropy summaries",
+     "timestamped file"
+    ],
+    "not_implemented": [
+     "atomic temp-file rename",
+     "Tier1/Tier2 serialization"
+    ]
+   },
+   "fail_loud": [
+    "frames/trace length mismatch",
+    "folder_paths absent with no override",
+    "directory creation/permission errors",
+    "file write errors"
+   ],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "canvas_trace": [
+       "DGEMMA_CANVAS_TRACE",
+       {
+        "tooltip": "Per-step trace from the sampler-class node that produced this run."
+       }
+      ],
+      "run_config": [
+       "DGEMMA_RUN_CONFIG",
+       {
+        "tooltip": "Run header bundle from the SAME sampler-class node (seed, knobs, model identity)."
+       }
+      ],
+      "frames": [
+       "STRING",
+       {
+        "forceInput": true,
+        "tooltip": "The decoded per-step strings from the same node's frames output."
+       }
+      ],
+      "canvas_state": [
+       "DGEMMA_CANVAS_STATE",
+       {
+        "tooltip": "The final save-state from the same node's canvas_state output."
+       }
+      ],
+      "filename_prefix": [
+       "STRING",
+       {
+        "default": "dgemma_run_log",
+        "tooltip": "The FILE name stem. The log is written as {filename_prefix}_{timestamp}.jsonl."
+       }
+      ]
+     },
+     "optional": {
+      "debug_log_path": [
+       "STRING",
+       {
+        "default": "",
+        "tooltip": "A DIRECTORY to write into (created if missing) \u2014 NOT a file path. The file name comes from filename_prefix. Leave empty to use ComfyUI's output directory. A trailing slash or a .jsonl-looking value is still treated as a directory."
+       }
+      ]
+     }
+    },
+    "input_order": {
+     "required": [
+      "canvas_trace",
+      "run_config",
+      "frames",
+      "canvas_state",
+      "filename_prefix"
+     ],
+     "optional": [
+      "debug_log_path"
+     ]
+    },
+    "is_input_list": true,
+    "output": [
+     "STRING"
+    ],
+    "output_is_list": [
+     false
+    ],
+    "output_name": [
+     "log_path"
+    ],
+    "name": "DGemmaRunLogWriter",
+    "display_name": "DiffusionGemma Run Log Writer",
+    "description": "Writes a schema'd JSONL run log to disk \u2014 one header record, one record per captured frame (with its decoded step text), one final record. Wire it from ONE sampler-class node (DGemmaSampler or DGemmaDenoise): run_config, canvas_trace, frames, and canvas_state all come from that same node's outputs. debug_log_path is always a directory and filename_prefix names the file \u2014 the writer creates the directory if missing and writes {filename_prefix}_{timestamp}.jsonl inside it; leave debug_log_path empty to use ComfyUI's output directory. Returns the written log's path.",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": true,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "80a7ea13cf260dfd8387e1ece2d6f8b4032b70ff42c12fa4301cb2e93dd383f6",
+   "baseline_git_blob_sha1": "d65d97a36097e51921283b738dc143b44f04c0b2"
+  },
+  {
+   "mapping_key": "DGemmaEncode",
+   "registered_class": "DGemmaEncode",
+   "display_name": "DiffusionGemma Encode (KV Cache)",
+   "source": "surfaces/comfyui/encode.py",
+   "source_range": "surfaces/comfyui/encode.py:34-111",
+   "function": "encode",
+   "category": "DiffusionGemma",
+   "description": "Mints or advances a DiffusionGemma KV-cache from raw-encoded text (context, not a chat-templated prompt/turn). The optional kv_cache input is a dual door: leave it UNWIRED to mint a fresh cache from text alone (IN-1); WIRE an existing kv_cache in to ADVANCE it with the newly-committed text (IN-3). Same node, one call \u2014 the presence of a wired cache is the only thing that switches mint vs. advance. Feed the output cache into DGemmaDenoise's kv_cache input to condition a run on it \u2014 the turn text itself belongs on DGemmaDenoise's prompt widget. Caution: if DGemmaDenoise's decoder composes a prompt onto this node's output cache (ADR-CDG-024), the cache object is grown in place; ComfyUI's node-result caching can then silently hand a later run the already-grown cache. If you see the wrong/stale turn echoed back, invalidate this node (change its input, or force re-execution) rather than reusing its cached output (#265).",
+   "input_is_list": false,
+   "output_node": false,
+   "call_topology": [
+    "processor.tokenizer.encode(text)",
+    "dgemma.kv_cache.encode_sequence(model, ids, into=kv_cache)",
+    "model.model.encoder",
+    "new KVCache envelope"
+   ],
+   "modes": [
+    {
+     "name": "mint",
+     "selector": "kv_cache unwired",
+     "implemented": true
+    },
+    {
+     "name": "advance",
+     "selector": "kv_cache wired",
+     "implemented": true,
+     "defect": "same mutable into.cache is passed to encoder and advanced in place despite fresh envelope"
+    }
+   ],
+   "backend_modes": [
+    "transformers DynamicCache only"
+   ],
+   "cancellation": {
+    "implemented": false,
+    "behavior": "no polling during tokenization/encoder call"
+   },
+   "capabilities": {
+    "implemented": [
+     "raw sequence cache mint",
+     "cache advance",
+     "geometry/provenance emission"
+    ],
+    "not_implemented": [
+     "template-aware encode mode",
+     "save/load",
+     "tier-2 surgery",
+     "native cache"
+    ],
+    "defects": [
+     "node does not call validate_kv_cache_ingress before optional input advance",
+     "advance mutates input cache object"
+    ]
+   },
+   "fail_loud": [
+    "empty token_ids after tokenization",
+    "encoder OOM with diagnostic",
+    "substrate/model errors"
+   ],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "model": [
+       "DGEMMA_MODEL",
+       {
+        "tooltip": "Loaded DiffusionGemma model (from DGemmaLoader)."
+       }
+      ],
+      "text": [
+       "STRING",
+       {
+        "multiline": true,
+        "default": "",
+        "tooltip": "Raw-encoded CONTEXT \u2014 NOT a prompt slot. Tokenized directly (no chat role markers, no generation-prompt suffix, no thinking mechanism) and conditions as background; it cannot restrict output the way a prompt does. The current-turn text belongs on DGemmaDenoise's prompt widget, not here. On a fresh mint this is the full context; when advancing a wired cache, this is the newly-committed continuation."
+       }
+      ]
+     },
+     "optional": {
+      "kv_cache": [
+       "DGEMMA_KV_CACHE",
+       {
+        "tooltip": "UNWIRED = mint a fresh cache from text. WIRED = advance the incoming cache with text. This one connection is what switches mint vs. advance \u2014 there is no separate mode widget."
+       }
+      ]
+     }
+    },
+    "input_order": {
+     "required": [
+      "model",
+      "text"
+     ],
+     "optional": [
+      "kv_cache"
+     ]
+    },
+    "is_input_list": false,
+    "output": [
+     "DGEMMA_KV_CACHE"
+    ],
+    "output_is_list": [
+     false
+    ],
+    "output_name": [
+     "kv_cache"
+    ],
+    "name": "DGemmaEncode",
+    "display_name": "DiffusionGemma Encode (KV Cache)",
+    "description": "Mints or advances a DiffusionGemma KV-cache from raw-encoded text (context, not a chat-templated prompt/turn). The optional kv_cache input is a dual door: leave it UNWIRED to mint a fresh cache from text alone (IN-1); WIRE an existing kv_cache in to ADVANCE it with the newly-committed text (IN-3). Same node, one call \u2014 the presence of a wired cache is the only thing that switches mint vs. advance. Feed the output cache into DGemmaDenoise's kv_cache input to condition a run on it \u2014 the turn text itself belongs on DGemmaDenoise's prompt widget. Caution: if DGemmaDenoise's decoder composes a prompt onto this node's output cache (ADR-CDG-024), the cache object is grown in place; ComfyUI's node-result caching can then silently hand a later run the already-grown cache. If you see the wrong/stale turn echoed back, invalidate this node (change its input, or force re-execution) rather than reusing its cached output (#265).",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "ddac40328ae9a8c4b1602cc5a324cd611df059b0db895bed5c9120e5a8e801b3",
+   "baseline_git_blob_sha1": "3e039e9c21432f093cc61a1381dd5f2bfa00dde3"
+  },
+  {
+   "mapping_key": "DGemmaDenoise",
+   "registered_class": "DGemmaDenoise",
+   "display_name": "DiffusionGemma Denoise (KV Cache)",
+   "source": "surfaces/comfyui/denoise.py",
+   "source_range": "surfaces/comfyui/denoise.py:115-371",
+   "function": "denoise",
+   "category": "DiffusionGemma",
+   "description": "Drives the denoising loop for one prompt, optionally conditioned on a KV-cache. Identical knob surface and six outputs to DGemmaSampler, plus one extra input: the optional kv_cache (from DGemmaEncode) \u2014 wire it to inject a known-provenance cache (IN-2); leave it unwired for an unconditioned run. prompt is the TURN, kv_cache is independent CONTEXT \u2014 they compose (ADR-CDG-024, issue #257): a non-empty prompt alongside a connected kv_cache is chat-templated and prefilled onto the cache before decoding begins (this is what the run crystallizes onto). Leave prompt empty alongside a connected kv_cache for pure injection \u2014 this deliberately does NOT anneal to coherent text. Two rejections to recognize: (1) gen_length > canvas_length with both prompt and kv_cache wired is blocked pending #263's multi-block splice fix \u2014 shrink gen_length to one canvas_length or clear prompt instead; (2) a kv_cache already grown by a prior composed run (e.g. a cached DGemmaEncode node output reused across runs) is rejected \u2014 re-run DGemmaEncode (#265). Outputs: text (decoded result), canvas_state (a resumable/validity save-state), canvas_trace (per-step analysis data \u2014 feeds DGemmaTrace/DGemmaTokenTrace), frames (one decoded string per captured step), images (those frames as a watchable batch), run_config (the run's header bundle \u2014 feeds DGemmaRunLogWriter). The <|think|> block-boundary KV output (\"OUT-1\") is deferred until the live mid-run stop point exists; a wired cache's provenance is already readable off canvas_trace.",
+   "input_is_list": false,
+   "output_node": false,
+   "call_topology": [
+    "build_on_frame(unique_id)",
+    "run_diffusion(..., kv_cache=kv_cache) WITHOUT should_cancel",
+    "no cache -> DiffusionGemmaPipeline; cache -> V1-V7 + composed guard + _run_pipeline_with_injected_cache",
+    "build_sampler_shaped_outputs"
+   ],
+   "modes": [
+    {
+     "name": "no-cache",
+     "selector": "kv_cache unwired",
+     "implemented": true
+    },
+    {
+     "name": "pure-injection",
+     "selector": "kv_cache wired + empty prompt",
+     "implemented": true,
+     "status": "explicitly documented not to anneal to coherent text"
+    },
+    {
+     "name": "single-block-composed",
+     "selector": "kv_cache wired + nonempty prompt + gen_length<=canvas_length",
+     "implemented": true
+    },
+    {
+     "name": "multi-block-pure-injection",
+     "selector": "kv_cache wired + empty prompt + gen_length>canvas_length",
+     "implemented": true
+    },
+    {
+     "name": "multi-block-composed",
+     "selector": "kv_cache wired + nonempty prompt + gen_length>canvas_length",
+     "implemented": false,
+     "status": "fail-loud interim rejection #263"
+    },
+    {
+     "name": "advanced-cache-output/stop-at-block",
+     "implemented": false
+    }
+   ],
+   "backend_modes": [
+    "transformers DynamicCache only; no native cache"
+   ],
+   "cancellation": {
+    "implemented_in_core": true,
+    "wired_by_node": false,
+    "behavior": "ComfyUI interrupt does not stop this node; unlike DGemmaSampler it passes no should_cancel",
+    "evidence": "surfaces/comfyui/denoise.py:337-349 versus surfaces/comfyui/sampler.py:388-399"
+   },
+   "capabilities": {
+    "implemented": [
+     "sampler six-output parity",
+     "cache provenance",
+     "pure and composed cache paths",
+     "thinking path",
+     "live view"
+    ],
+    "core_only_not_exposed": [
+     "constraints",
+     "control signals",
+     "capture tiers"
+    ],
+    "not_implemented": [
+     "OUT-1 advanced cache output",
+     "stop-at-block",
+     "native cache"
+    ],
+    "defects": [
+     "missing ComfyUI cancellation wiring",
+     "composed prefill mutates caller cache",
+     "block>0 composed offset guarded rather than repaired"
+    ]
+   },
+   "fail_loud": [
+    "all run_diffusion scalar/ingress failures",
+    "KV V1-V7 mismatch/orphan/device/alias failures",
+    "batch>1 injected cache",
+    "composed multi-block #263 rejection"
+   ],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "model": [
+       "DGEMMA_MODEL",
+       {
+        "tooltip": "Loaded DiffusionGemma model (from DGemmaLoader)."
+       }
+      ],
+      "prompt": [
+       "STRING",
+       {
+        "multiline": true,
+        "default": "",
+        "tooltip": "The TURN: chat-templated (role markers + generation-prompt suffix) and, when kv_cache is connected, prefilled onto the cache before decoding \u2014 this is what generation crystallizes onto (ADR-CDG-024, issue #257). EMPTY prompt alongside a connected kv_cache is pure injection, which deliberately does NOT anneal to coherent text. Rejected if gen_length > canvas_length while both prompt and kv_cache are set \u2014 multi-block composed runs are blocked pending #263's splice-offset fix; single-block composed and multi-block pure injection remain allowed."
+       }
+      ],
+      "seed": [
+       "INT",
+       {
+        "default": 0,
+        "min": 0,
+        "max": 18446744073709551615,
+        "tooltip": "RNG seed for the generator driving canvas initialization/renoise (a plain integer, not unit-bearing). Omit/leave unset for a nondeterministic run."
+       }
+      ],
+      "num_inference_steps": [
+       "INT",
+       {
+        "default": 48,
+        "min": 1,
+        "max": 1024,
+        "tooltip": "Requested denoising step budget N (a plain count, not a physical unit) \u2014 the schedule-position denominator: t = (N - step_idx)/N."
+       }
+      ],
+      "t_min": [
+       "FLOAT",
+       {
+        "default": 0.4,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "tooltip": "Cold end of the temperature anneal (dimensionless, applied as the divisor T in softmax(z/T)). Despite the lowercase-t name this is a TEMPERATURE, not a schedule position \u2014 t bottoms out at 1/num_inference_steps, so t_min itself is a virtual endpoint no step actually reaches. T = t_min + (t_max - t_min) * t, t decreasing 1 -> 1/num_inference_steps across the run."
+       }
+      ],
+      "t_max": [
+       "FLOAT",
+       {
+        "default": 0.8,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "tooltip": "Hot end of the temperature anneal (dimensionless, same softmax(z/T) divisor as t_min) \u2014 the temperature applied at the very first step, where the schedule position t == 1."
+       }
+      ],
+      "entropy_bound": [
+       "FLOAT",
+       {
+        "default": 0.1,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.001,
+        "tooltip": "Per-step joint acceptance budget, in NATS (natural-log entropy, matching torch.distributions.Categorical.entropy() \u2014 not bits). A position commits this step only once its acceptance entropy clears this bound. Default 0.1 nats; for scale, the uniform-vocab noise draw's 18 bits/position is ~12.48 nats."
+       }
+      ],
+      "confidence": [
+       "FLOAT",
+       {
+        "default": 0.005,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.001,
+        "tooltip": "Early-stop threshold: a dimensionless probability the pipeline's adaptive-stop check compares a candidate's confidence against."
+       }
+      ],
+      "gen_length": [
+       "INT",
+       {
+        "default": 256,
+        "min": 1,
+        "max": 8192,
+        "tooltip": "Canvas length in tokens (a token count) \u2014 how many positions the denoising loop allocates for the generated turn. This is split into blocks of DEFAULT_GEN_LENGTH (256) tokens each: gen_length is processed as ceil(gen_length / 256) blocks, each denoised over num_inference_steps substeps (e.g. gen_length 1024 -> 4 blocks, each denoised over num_inference_steps steps). Larger gen_length costs proportionally more block passes."
+       }
+      ],
+      "thinking": [
+       "BOOLEAN",
+       {
+        "default": false,
+        "tooltip": "EXPERIMENTAL boolean toggle: injects the <|think|> control token via a system turn. Structurally one token short of native enable_thinking=True (the chat template's `| trim` eats the newline after <|think|>) \u2014 see run_diffusion's own docstring for the honest gap. Behavioral impact unverified pending an E2E thinking-mode run on real weights."
+       }
+      ]
+     },
+     "optional": {
+      "kv_cache": [
+       "DGEMMA_KV_CACHE",
+       {
+        "tooltip": "Optional KV-cache from DGemmaEncode: independent CONTEXT (raw-encoded, no chat framing) that conditions this run as background \u2014 it cannot restrict output the way prompt does. Leave unwired for an unconditioned run. Composes with prompt (ADR-CDG-024, issue #257): a non-empty prompt is the current-turn text, chat-templated and prefilled onto this cache before decoding. Leave prompt empty for pure injection (no prefill \u2014 does not anneal to coherent text). Rejected if this cache was already grown by a prior composed run \u2014 e.g. a cached DGemmaEncode node output reused across runs; re-run DGemmaEncode to mint a fresh cache (#265). Also rejected together with a non-empty prompt when gen_length exceeds one canvas_length \u2014 multi-block composed runs are blocked pending #263's splice-offset fix."
+       }
+      ]
+     },
+     "hidden": {
+      "unique_id": "UNIQUE_ID",
+      "dgemma_live_view": "DGEMMA_LIVE_VIEW"
+     }
+    },
+    "input_order": {
+     "required": [
+      "model",
+      "prompt",
+      "seed",
+      "num_inference_steps",
+      "t_min",
+      "t_max",
+      "entropy_bound",
+      "confidence",
+      "gen_length",
+      "thinking"
+     ],
+     "optional": [
+      "kv_cache"
+     ],
+     "hidden": [
+      "unique_id",
+      "dgemma_live_view"
+     ]
+    },
+    "is_input_list": false,
+    "output": [
+     "STRING",
+     "DGEMMA_CANVAS_STATE",
+     "DGEMMA_CANVAS_TRACE",
+     "STRING",
+     "IMAGE",
+     "DGEMMA_RUN_CONFIG"
+    ],
+    "output_is_list": [
+     false,
+     false,
+     false,
+     true,
+     false,
+     false
+    ],
+    "output_name": [
+     "text",
+     "canvas_state",
+     "canvas_trace",
+     "frames",
+     "images",
+     "run_config"
+    ],
+    "name": "DGemmaDenoise",
+    "display_name": "DiffusionGemma Denoise (KV Cache)",
+    "description": "Drives the denoising loop for one prompt, optionally conditioned on a KV-cache. Identical knob surface and six outputs to DGemmaSampler, plus one extra input: the optional kv_cache (from DGemmaEncode) \u2014 wire it to inject a known-provenance cache (IN-2); leave it unwired for an unconditioned run. prompt is the TURN, kv_cache is independent CONTEXT \u2014 they compose (ADR-CDG-024, issue #257): a non-empty prompt alongside a connected kv_cache is chat-templated and prefilled onto the cache before decoding begins (this is what the run crystallizes onto). Leave prompt empty alongside a connected kv_cache for pure injection \u2014 this deliberately does NOT anneal to coherent text. Two rejections to recognize: (1) gen_length > canvas_length with both prompt and kv_cache wired is blocked pending #263's multi-block splice fix \u2014 shrink gen_length to one canvas_length or clear prompt instead; (2) a kv_cache already grown by a prior composed run (e.g. a cached DGemmaEncode node output reused across runs) is rejected \u2014 re-run DGemmaEncode (#265). Outputs: text (decoded result), canvas_state (a resumable/validity save-state), canvas_trace (per-step analysis data \u2014 feeds DGemmaTrace/DGemmaTokenTrace), frames (one decoded string per captured step), images (those frames as a watchable batch), run_config (the run's header bundle \u2014 feeds DGemmaRunLogWriter). The <|think|> block-boundary KV output (\"OUT-1\") is deferred until the live mid-run stop point exists; a wired cache's provenance is already readable off canvas_trace.",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "a6b89324599042ac1af00e4a3fd44abb7ae7da34fa9276cdad8021a88c9bb0d1",
+   "baseline_git_blob_sha1": "5eeb18d6ee5463c1c06424f9c6f423b7cfe291a6"
+  },
+  {
+   "mapping_key": "DGemmaTokenTrace",
+   "registered_class": "DGemmaTokenTrace",
+   "display_name": "DiffusionGemma Token Trace",
+   "source": "surfaces/comfyui/token_trace.py",
+   "source_range": "surfaces/comfyui/token_trace.py:57-93",
+   "function": "render",
+   "category": "DiffusionGemma",
+   "description": "Debug node: renders the pre-excision final canvas token ids (raw_canvas_ids) and a per-step raw token-id grid from a canvas_trace, as a STRING report. Shows integer ids, not decoded text (it has no tokenizer \u2014 take a DGemmaTrace/sampler path for decoded views).",
+   "input_is_list": false,
+   "output_node": false,
+   "call_topology": [
+    "consumers.analysis.build_token_identity_grid",
+    "format raw_canvas_ids and each frame row"
+   ],
+   "modes": [
+    {
+     "name": "raw-final-present",
+     "implemented": true
+    },
+    {
+     "name": "legacy-raw-final-absent",
+     "implemented": true,
+     "behavior": "reports not captured; still renders per-step grid"
+    }
+   ],
+   "backend_modes": [
+    "backend-neutral pure consumer"
+   ],
+   "cancellation": {
+    "implemented": false,
+    "behavior": "renders partial traces"
+   },
+   "capabilities": {
+    "implemented": [
+     "pre-excision final token ids",
+     "per-step raw token-id grid"
+    ],
+    "not_implemented": [
+     "decoded token strings/tokenizer view"
+    ]
+   },
+   "fail_loud": [],
+   "object_info_projection": {
+    "input": {
+     "required": {
+      "canvas_trace": [
+       "DGEMMA_CANVAS_TRACE",
+       {
+        "tooltip": "A complete per-step trace from a sampler-class node. Rendered as raw integer token ids, not decoded text."
+       }
+      ]
+     }
+    },
+    "input_order": {
+     "required": [
+      "canvas_trace"
+     ]
+    },
+    "is_input_list": false,
+    "output": [
+     "STRING"
+    ],
+    "output_is_list": [
+     false
+    ],
+    "output_name": [
+     "token_report"
+    ],
+    "name": "DGemmaTokenTrace",
+    "display_name": "DiffusionGemma Token Trace",
+    "description": "Debug node: renders the pre-excision final canvas token ids (raw_canvas_ids) and a per-step raw token-id grid from a canvas_trace, as a STRING report. Shows integer ids, not decoded text (it has no tokenizer \u2014 take a DGemmaTrace/sampler path for decoded views).",
+    "python_module": "custom_nodes.ComfyUI-DiffusionGemma",
+    "category": "DiffusionGemma",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+   },
+   "source_sha256": "e5c852db3cf35831b64fadb594a5cbb8bfb0dd0d68b3d9da126a392cafdf79f1",
+   "baseline_git_blob_sha1": "6d44239c83e877e7e7da149efa9f200bb1230856"
+  }
+ ],
+ "confirmed_deltas_and_defects": [
+  {
+   "id": "NODE-DELTA-001",
+   "fact": "DGemmaDenoise lacks DGemmaSampler cancellation wiring despite output parity.",
+   "evidence": [
+    "surfaces/comfyui/denoise.py:337-349",
+    "surfaces/comfyui/sampler.py:388-399"
+   ]
+  },
+  {
+   "id": "NODE-DELTA-002",
+   "fact": "DGemmaEncode optional-cache advance does not validate ingress and advances the same underlying DynamicCache object.",
+   "evidence": [
+    "surfaces/comfyui/encode.py:104-111",
+    "dgemma/kv_cache.py:434-455"
+   ]
+  },
+  {
+   "id": "NODE-DELTA-003",
+   "fact": "constraints, control signals and Tier1/Tier2 capture are implemented core parameters but have no sockets/widgets on either sampler-class node.",
+   "evidence": [
+    "dgemma/loop.py:391-415",
+    "surfaces/comfyui/sampler.py:229-349",
+    "surfaces/comfyui/denoise.py:148-298"
+   ]
+  }
+ ],
+ "schema_document": "schemas/i0/node-modes.schema.json"
+}

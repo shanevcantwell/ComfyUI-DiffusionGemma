@@ -1,0 +1,53 @@
+{
+  "$schema": "urn:comfyui-diffusiongemma:dg-engine:i0:baseline-defects:v1",
+  "schema": 1,
+  "kind": "dg-engine-i0-baseline-defect-fixtures",
+  "schema_document": "schemas/i0/baseline-defects.schema.json",
+  "baseline": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+  "cases": [
+    {
+      "id": "CACHE-ADVANCE-MUTATION",
+      "source": "dgemma/kv_cache.py:434-455",
+      "reproduction": "encode_sequence(..., into=input) passes input.cache to an encoder whose cache update mutates that same object",
+      "observed": "input cache length and content change while a new KVCache envelope is returned",
+      "classification": "defect-to-repair",
+      "frozen_native_expectation": "advance returns a new immutable snapshot/COW result; input digest and length remain unchanged on success and failure"
+    },
+    {
+      "id": "ISSUE-265-COMPOSED-PREFILL-ALIAS",
+      "issue": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/265",
+      "source": "dgemma/kv_cache.py:501-539 and dgemma/kv_cache.py:284-315",
+      "reproduction": "prefill_templated_turn returns the same cache identity after growing it; a second ingress sees actual length greater than envelope cumulative_length and V7 rejects",
+      "observed": "first composed call mutates shared input; later reuse fails loud instead of silently inheriting content",
+      "classification": "defect-to-repair-with-supported-interim-rejection",
+      "frozen_native_expectation": "prefill never mutates borrowed input; two calls from one input are independent and failed prefill rolls back"
+    },
+    {
+      "id": "ISSUE-263-COMPOSED-MULTIBLOCK-OFFSET",
+      "issue": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/263",
+      "source": "dgemma/loop.py:314-333 and dgemma/ingress.py:306-369",
+      "reproduction": "nonempty prompt plus cache with requested length 257 is rejected because block>0 uses the pre-prefill cached length",
+      "observed": "single-block composition and multi-block pure injection remain allowed; composed multi-block fails before work",
+      "classification": "defect-to-repair-with-supported-interim-rejection",
+      "frozen_native_expectation": "after repair, every block position starts after injected prefix plus templated prefill plus committed prior blocks"
+    },
+    {
+      "id": "DENOISE-CANCELLATION-OMISSION",
+      "source": "surfaces/comfyui/denoise.py:337-349 and surfaces/comfyui/sampler.py:388-399",
+      "reproduction": "mock the shared run_diffusion door: DGemmaSampler passes should_cancel while DGemmaDenoise does not",
+      "observed": "ComfyUI interrupt reaches Sampler but not Denoise",
+      "classification": "defect-to-repair",
+      "frozen_native_expectation": "both sampler-class nodes return the last complete captured partial result at the same capture-before-cancel boundary"
+    },
+    {
+      "id": "AUTOROUND-DECLARED-BROKEN",
+      "source": "surfaces/comfyui/loader.py:262-291 and dgemma/model.py:_assert_tie_integrity",
+      "asset": "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound@63a0dca884ce803e03567fd9d57359064104c471",
+      "reproduction": "a QuantLinear-shaped q_proj exposing qweight but no weight reaches _assert_tie_integrity, which accesses .weight and raises AttributeError",
+      "observed": "quant=autoround is declared by INPUT_TYPES and load code exists, but the current end-to-end mode is broken",
+      "classification": "declared-but-broken-mode",
+      "frozen_native_expectation": "never silently map autoround to GGUF; retain a distinct backend mode and fail loud until separately repaired",
+      "license_disposition": "EXCLUDED: license remains unresolved; native-engine package/release evidence must not distribute or rely on this asset; inclusion requires a future explicit scope and license decision"
+    }
+  ]
+}

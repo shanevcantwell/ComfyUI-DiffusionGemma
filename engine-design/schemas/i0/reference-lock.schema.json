@@ -1,0 +1,2142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:comfyui-diffusiongemma:dg-engine:i0:reference-lock-schema:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "kind",
+    "draft",
+    "gate_eligible",
+    "product_baseline",
+    "i0_starting_commit",
+    "source_baselines",
+    "oracle_packages",
+    "oracle_environment",
+    "official_model",
+    "converter",
+    "large_artifact_prerequisites",
+    "rejected_artifacts",
+    "autoround_derivative",
+    "fixtures",
+    "reconnaissance",
+    "evidence_root_contract",
+    "unresolved_blockers",
+    "phase_scope_note",
+    "schema_document",
+    "observed_date",
+    "oracle_hierarchy",
+    "gguf_remote_reference",
+    "gguf_lineage_policy",
+    "cdg_source_identities",
+    "prohibited_claims"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "urn:comfyui-diffusiongemma:dg-engine:i0:reference-lock:v1"
+    },
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "dg-engine-i0-reference-lock"
+    },
+    "draft": {
+      "type": "boolean"
+    },
+    "gate_eligible": {
+      "type": "boolean"
+    },
+    "product_baseline": {
+      "$ref": "#/$defs/commit"
+    },
+    "i0_starting_commit": {
+      "$ref": "#/$defs/commit"
+    },
+    "source_baselines": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "repository",
+          "revision",
+          "revision_url",
+          "license",
+          "role"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "format": "uri"
+          },
+          "revision": {
+            "$ref": "#/$defs/commit"
+          },
+          "revision_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "license": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "spdx",
+              "sha256",
+              "evidence"
+            ],
+            "properties": {
+              "spdx": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "evidence": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "url",
+                      "git_blob_sha1",
+                      "sha256"
+                    ],
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "git_blob_sha1": {
+                        "$ref": "#/$defs/blob"
+                      },
+                      "sha256": {
+                        "$ref": "#/$defs/sha256"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseline_delta": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pull_request": {
+            "type": "string",
+            "format": "uri"
+          },
+          "correctness_authority": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "oracle_packages": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "git_tag",
+          "git_commit",
+          "repository",
+          "license",
+          "pypi",
+          "root_source",
+          "files"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "git_tag": {
+            "type": "string",
+            "minLength": 1
+          },
+          "git_commit": {
+            "$ref": "#/$defs/commit"
+          },
+          "repository": {
+            "type": "string",
+            "format": "uri"
+          },
+          "license": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "spdx",
+              "sha256"
+            ],
+            "properties": {
+              "spdx": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "pypi": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "wheel",
+              "sdist"
+            ],
+            "properties": {
+              "wheel": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sha256",
+                  "size"
+                ],
+                "properties": {
+                  "sha256": {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "sdist": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sha256",
+                  "size"
+                ],
+                "properties": {
+                  "sha256": {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          },
+          "root_source": {
+            "$ref": "#/$defs/fileIdentity"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/fileIdentity"
+            }
+          }
+        }
+      }
+    },
+    "oracle_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "python",
+        "isolation",
+        "path_contract",
+        "transformers_version",
+        "diffusers_version",
+        "wheel_sha256",
+        "installed_source_sha256",
+        "forbidden_substitution"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python": {
+          "type": "string",
+          "minLength": 1
+        },
+        "isolation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path_contract": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformers_version": {
+          "const": "5.13.0"
+        },
+        "diffusers_version": {
+          "const": "0.39.0"
+        },
+        "wheel_sha256": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "transformers-5.13.0-py3-none-any.whl",
+            "diffusers-0.39.0-py3-none-any.whl"
+          ],
+          "properties": {
+            "transformers-5.13.0-py3-none-any.whl": {
+              "$ref": "#/$defs/sha256"
+            },
+            "diffusers-0.39.0-py3-none-any.whl": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "installed_source_sha256": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "transformers:modeling_diffusion_gemma.py",
+            "transformers:generation_diffusion_gemma.py",
+            "transformers:configuration_diffusion_gemma.py",
+            "transformers:processing_auto.py",
+            "diffusers:scheduling_entropy_bound.py",
+            "diffusers:pipeline_diffusion_gemma.py"
+          ],
+          "properties": {
+            "transformers:modeling_diffusion_gemma.py": {
+              "$ref": "#/$defs/sha256"
+            },
+            "transformers:generation_diffusion_gemma.py": {
+              "$ref": "#/$defs/sha256"
+            },
+            "transformers:configuration_diffusion_gemma.py": {
+              "$ref": "#/$defs/sha256"
+            },
+            "transformers:processing_auto.py": {
+              "$ref": "#/$defs/sha256"
+            },
+            "diffusers:scheduling_entropy_bound.py": {
+              "$ref": "#/$defs/sha256"
+            },
+            "diffusers:pipeline_diffusion_gemma.py": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "forbidden_substitution": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "official_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "revision_url",
+        "gated",
+        "private",
+        "license",
+        "small_files",
+        "checkpoint_shards",
+        "architecture_facts",
+        "sampler_profile",
+        "scheduler_subdir_delta"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "revision_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "gated": {
+          "type": "boolean"
+        },
+        "private": {
+          "type": "boolean"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "spdx",
+            "authority"
+          ],
+          "properties": {
+            "spdx": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "small_files": {
+          "type": "array",
+          "minItems": 9,
+          "items": {
+            "$ref": "#/$defs/fileIdentity"
+          }
+        },
+        "checkpoint_shards": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "size",
+              "git_blob_sha1",
+              "lfs_sha256",
+              "hash_authority",
+              "url"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "git_blob_sha1": {
+                "$ref": "#/$defs/blob"
+              },
+              "lfs_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "hash_authority": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          }
+        },
+        "architecture_facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "canvas_length",
+            "vocab_size",
+            "dtype",
+            "layers",
+            "sliding_window",
+            "layer_pattern",
+            "evidence"
+          ],
+          "properties": {
+            "canvas_length": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "vocab_size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "dtype": {
+              "type": "string",
+              "minLength": 1
+            },
+            "layers": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sliding_window": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "layer_pattern": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "sampler_profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "canvas_length",
+            "vocab_size",
+            "num_inference_steps",
+            "entropy_bound",
+            "t_min",
+            "t_max",
+            "confidence_threshold",
+            "stability_threshold",
+            "self_conditioning",
+            "source_sha256"
+          ],
+          "properties": {
+            "canvas_length": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "vocab_size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "num_inference_steps": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "entropy_bound": {
+              "type": "number",
+              "minimum": 0
+            },
+            "t_min": {
+              "type": "number",
+              "minimum": 0
+            },
+            "t_max": {
+              "type": "number",
+              "minimum": 0
+            },
+            "confidence_threshold": {
+              "type": "number",
+              "minimum": 0
+            },
+            "stability_threshold": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "self_conditioning": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "scheduler_subdir_delta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "class",
+            "sha256",
+            "disposition"
+          ],
+          "properties": {
+            "class": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "disposition": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "converter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selection",
+        "repository",
+        "revision",
+        "pull_request",
+        "path",
+        "git_blob_sha1",
+        "sha256",
+        "license",
+        "selection_relation_to_adr_cdg_020",
+        "correctness_authority",
+        "rationale"
+      ],
+      "properties": {
+        "selection": {
+          "const": "DG27"
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "pull_request": {
+          "type": "string",
+          "format": "uri"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_blob_sha1": {
+          "$ref": "#/$defs/blob"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "spdx",
+            "license_sha256"
+          ],
+          "properties": {
+            "spdx": {
+              "type": "string",
+              "minLength": 1
+            },
+            "license_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "selection_relation_to_adr_cdg_020": {
+          "type": "string",
+          "minLength": 1
+        },
+        "correctness_authority": {
+          "const": false
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "large_artifact_prerequisites": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "format",
+              "repository",
+              "revision",
+              "manifest",
+              "status",
+              "requirement"
+            ],
+            "properties": {
+              "format": {
+                "type": "string",
+                "minLength": 1
+              },
+              "repository": {
+                "type": "string",
+                "minLength": 1
+              },
+              "revision": {
+                "$ref": "#/$defs/commit"
+              },
+              "status": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requirement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "manifest": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "format",
+              "repository",
+              "revision",
+              "filename",
+              "size",
+              "sha256",
+              "status",
+              "requirement",
+              "lineage_status"
+            ],
+            "properties": {
+              "format": {
+                "type": "string",
+                "minLength": 1
+              },
+              "repository": {
+                "type": "string",
+                "minLength": 1
+              },
+              "revision": {
+                "$ref": "#/$defs/commit"
+              },
+              "status": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requirement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "filename": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "lineage_status": {
+                "enum": [
+                  "UNBOUND",
+                  "BOUND"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "rejected_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "format",
+          "observed_size",
+          "observed_sha256",
+          "required_size",
+          "required_sha256",
+          "disposition",
+          "reason"
+        ],
+        "properties": {
+          "format": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed_size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "observed_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "required_size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "required_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "disposition": {
+            "const": "REJECTED_AS_SUBSTITUTE"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "autoround_derivative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "license",
+        "distribution_disposition",
+        "mode_status",
+        "role",
+        "native_engine_distribution"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "spdx",
+            "observed_statement"
+          ],
+          "properties": {
+            "spdx": {
+              "type": "null"
+            },
+            "observed_statement": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "distribution_disposition": {
+          "const": "EXCLUDED_FROM_NATIVE_ENGINE_DISTRIBUTION_AND_RELEASE_QUALIFICATION"
+        },
+        "mode_status": {
+          "const": "declared-but-broken"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "native_engine_distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "artifact_inclusion",
+            "release_qualification",
+            "evidence_artifact_ids",
+            "future_reentry_requirement"
+          ],
+          "properties": {
+            "status": {
+              "const": "EXCLUDED"
+            },
+            "artifact_inclusion": {
+              "const": "FORBIDDEN"
+            },
+            "release_qualification": {
+              "const": "NOT_RELIED_ON"
+            },
+            "evidence_artifact_ids": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "future_reentry_requirement": {
+              "const": "EXPLICIT_SCOPE_AND_LICENSE_DECISION_REQUIRED"
+            }
+          }
+        }
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "reconnaissance": {
+      "type": "object",
+      "required": [
+        "ten_current_model_reads",
+        "three_recent_merged_model_additions",
+        "developer_document_reads"
+      ],
+      "properties": {
+        "ten_current_model_reads": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/reconIdentity"
+          }
+        },
+        "three_recent_merged_model_additions": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/reconIdentity"
+          }
+        },
+        "developer_document_reads": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/reconIdentity"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_root_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_variable",
+        "manifest",
+        "manifest_schema",
+        "path_rule",
+        "artifact_set_sha256",
+        "artifacts",
+        "required_gate_categories"
+      ],
+      "properties": {
+        "environment_variable": {
+          "const": "DG_ENGINE_I0_EVIDENCE_ROOT"
+        },
+        "manifest": {
+          "const": "i0-evidence.json"
+        },
+        "manifest_schema": {
+          "const": "schemas/i0/evidence-manifest.schema.json"
+        },
+        "path_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_set_sha256": {
+          "const": "b66b5081df7e9a2ccc58dcdd00008e8a7c051021548fe76b7bd6f966426dbfbe"
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 91,
+          "maxItems": 91,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/evidenceIdentity"
+          },
+          "contains": {
+            "type": "object",
+            "required": [
+              "lineage_lock"
+            ]
+          },
+          "minContains": 3,
+          "maxContains": 3,
+          "allOf": [
+            {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "lineage_lock"
+                ],
+                "properties": {
+                  "id": {
+                    "const": "gguf.bf16"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "lineage_lock"
+                ],
+                "properties": {
+                  "id": {
+                    "const": "gguf.q8_0"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "lineage_lock"
+                ],
+                "properties": {
+                  "id": {
+                    "const": "gguf.q4_k_m"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        },
+        "required_gate_categories": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "checkpoint_identity",
+            "gguf_identity",
+            "gguf_authenticated_lineage"
+          ],
+          "properties": {
+            "checkpoint_identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expected",
+                "id_prefix"
+              ],
+              "properties": {
+                "expected": {
+                  "const": 11
+                },
+                "id_prefix": {
+                  "const": "official.checkpoint."
+                }
+              }
+            },
+            "gguf_identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expected",
+                "id_prefix"
+              ],
+              "properties": {
+                "expected": {
+                  "const": 3
+                },
+                "id_prefix": {
+                  "const": "gguf."
+                }
+              }
+            },
+            "gguf_authenticated_lineage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expected",
+                "id_prefix"
+              ],
+              "properties": {
+                "expected": {
+                  "const": 3
+                },
+                "id_prefix": {
+                  "const": "gguf."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "unresolved_blockers": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/evidenceCheckpointBlocker"
+        },
+        {
+          "$ref": "#/$defs/evidenceGgufBlocker"
+        },
+        {
+          "$ref": "#/$defs/phasePolicyBlocker"
+        }
+      ],
+      "items": false
+    },
+    "phase_scope_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_document": {
+      "const": "schemas/i0/reference-lock.schema.json"
+    },
+    "observed_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "oracle_hierarchy": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "gguf_remote_reference": {
+      "type": "object",
+      "required": [
+        "repository",
+        "revision",
+        "artifacts",
+        "lineage_status",
+        "lineage_disposition"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "revision_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "spdx",
+            "card_link"
+          ],
+          "properties": {
+            "spdx": {
+              "type": "string",
+              "minLength": 1
+            },
+            "card_link": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        },
+        "lineage_status": {
+          "enum": [
+            "UNBOUND",
+            "BOUND"
+          ]
+        },
+        "lineage_disposition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "size",
+              "git_blob_sha1",
+              "lfs_sha256",
+              "hash_authority",
+              "url",
+              "identity_status",
+              "lineage_status",
+              "lineage_claim"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "git_blob_sha1": {
+                "$ref": "#/$defs/blob"
+              },
+              "lfs_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "hash_authority": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "identity_status": {
+                "const": "KNOWN_BYTES"
+              },
+              "lineage_status": {
+                "enum": [
+                  "UNBOUND",
+                  "BOUND"
+                ]
+              },
+              "lineage_claim": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "lineage_status": {
+                      "const": "UNBOUND"
+                    }
+                  },
+                  "required": [
+                    "lineage_status"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "lineage_claim": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "lineage_status": {
+                      "const": "BOUND"
+                    }
+                  },
+                  "required": [
+                    "lineage_status"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "lineage_claim": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "lineage_status": {
+                "const": "UNBOUND"
+              }
+            },
+            "required": [
+              "lineage_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifacts": {
+                "items": {
+                  "properties": {
+                    "lineage_status": {
+                      "const": "UNBOUND"
+                    }
+                  },
+                  "required": [
+                    "lineage_status"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lineage_status": {
+                "const": "BOUND"
+              }
+            },
+            "required": [
+              "lineage_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifacts": {
+                "items": {
+                  "properties": {
+                    "lineage_status": {
+                      "const": "BOUND"
+                    }
+                  },
+                  "required": [
+                    "lineage_status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "gguf_lineage_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "gate_rule",
+        "required_record_fields",
+        "numerical_parity_phase"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "UNBOUND",
+            "BOUND"
+          ]
+        },
+        "gate_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_record_fields": {
+          "type": "array",
+          "minItems": 7,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "numerical_parity_phase": {
+          "const": "I2 GRAPH-04"
+        }
+      }
+    },
+    "cdg_source_identities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/cdgSourceIdentity"
+      }
+    },
+    "prohibited_claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "unresolvedBlocker": {
+      "type": "object",
+      "required": ["id", "classification", "reason"],
+      "properties": {
+        "id": {"type": "string"},
+        "classification": {"enum": ["evidence", "phase-policy"]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "evidenceCheckpointBlocker": {
+      "allOf": [
+        {"$ref": "#/$defs/unresolvedBlocker"},
+        {"properties": {
+          "id": {"const": "I0-BLOCK-CHECKPOINT-EVIDENCE"},
+          "classification": {"const": "evidence"}
+        }}
+      ]
+    },
+    "evidenceGgufBlocker": {
+      "allOf": [
+        {"$ref": "#/$defs/unresolvedBlocker"},
+        {"properties": {
+          "id": {"const": "I0-BLOCK-GGUF-EVIDENCE"},
+          "classification": {"const": "evidence"}
+        }}
+      ]
+    },
+    "phasePolicyBlocker": {
+      "allOf": [
+        {"$ref": "#/$defs/unresolvedBlocker"},
+        {"properties": {
+          "id": {"const": "I0-BLOCK-ADR-CDG-020"},
+          "classification": {"const": "phase-policy"}
+        }}
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "blob": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*\\/$).+$"
+    },
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "git_blob_sha1": {
+          "$ref": "#/$defs/blob"
+        },
+        "hash_authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "git_blob_kind": {
+          "enum": [
+            "content",
+            "lfs-pointer"
+          ]
+        }
+      }
+    },
+    "reconIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "path",
+        "git_blob_sha1",
+        "size",
+        "lines",
+        "sha256",
+        "read_in_full"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_blob_sha1": {
+          "$ref": "#/$defs/blob"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "read_in_full": {
+          "const": true
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "pull_request": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "merge_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "pr_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "cdgSourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "repository",
+        "revision",
+        "path",
+        "git_blob_sha1",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "pattern": "^cdg\\.source\\."
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_blob_sha1": {
+          "$ref": "#/$defs/blob"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "sourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "path",
+        "git_blob_sha1"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_blob_sha1": {
+          "$ref": "#/$defs/blob"
+        }
+      }
+    },
+    "derivationRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_schema",
+        "command_log_schema",
+        "blocker",
+        "independent_from_manifest",
+        "trust_root"
+      ],
+      "properties": {
+        "record_schema": {
+          "const": "schemas/i0/derivation-record.schema.json"
+        },
+        "blocker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "independent_from_manifest": {
+          "const": true
+        },
+        "command_log_schema": {
+          "const": "schemas/i0/command-log.schema.json"
+        },
+        "trust_root": {
+          "const": "Git-controlled reference.lock.json lineage_lock"
+        }
+      }
+    },
+    "evidenceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "size",
+        "sha256",
+        "status",
+        "required_for",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": [
+            "present",
+            "absent"
+          ]
+        },
+        "required_for": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "BASE-01-source",
+              "BASE-02-source",
+              "BASE-02-gate"
+            ]
+          }
+        },
+        "kind": {
+          "enum": [
+            "reference-source",
+            "product-source",
+            "official-checkpoint",
+            "gguf-model"
+          ]
+        },
+        "blocker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_identity": {
+          "$ref": "#/$defs/sourceIdentity"
+        },
+        "artifact_kind": {
+          "enum": [
+            "GGUF_BF16",
+            "GGUF_Q8_0",
+            "GGUF_Q4_K_M"
+          ]
+        },
+        "identity_status": {
+          "const": "KNOWN_BYTES"
+        },
+        "lineage_status": {
+          "enum": [
+            "UNBOUND",
+            "BOUND"
+          ]
+        },
+        "derivation_requirement": {
+          "$ref": "#/$defs/derivationRequirement"
+        },
+        "lineage": {
+          "$ref": "#/$defs/checkpointLineage"
+        },
+        "lineage_lock": {
+          "$ref": "#/$defs/lineageLock"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {"status": {"const": "absent"}}
+          },
+          "then": {"required": ["blocker"]}
+        },
+        {
+          "if": {
+            "required": [
+              "lineage_lock"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "enum": [
+                  "gguf.bf16",
+                  "gguf.q8_0",
+                  "gguf.q4_k_m"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "pattern": "^gguf\\."
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "enum": [
+                  "gguf.bf16",
+                  "gguf.q8_0",
+                  "gguf.q4_k_m"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "pattern": "^gguf\\."
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "required": [
+              "artifact_kind",
+              "identity_status",
+              "lineage_status",
+              "derivation_requirement",
+              "lineage_lock"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "lineage_status": {
+                      "const": "UNBOUND"
+                    }
+                  },
+                  "required": [
+                    "lineage_status"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "lineage_lock": {
+                      "properties": {
+                        "status": {
+                          "const": "UNBOUND"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "lineage_status": {
+                      "const": "BOUND"
+                    }
+                  },
+                  "required": [
+                    "lineage_status"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "lineage_lock": {
+                      "properties": {
+                        "status": {
+                          "const": "BOUND"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "gguf.bf16"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "lineage_lock": {
+                "properties": {
+                  "record": {
+                    "properties": {
+                      "id": {
+                        "const": "gguf.bf16.derivation-record"
+                      }
+                    }
+                  },
+                  "command_log": {
+                    "properties": {
+                      "id": {
+                        "const": "gguf.bf16.command-log"
+                      }
+                    }
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "BOUND"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "derivation_id": {
+                          "type": "string",
+                          "pattern": "^gguf\\.bf16\\.[a-z0-9][a-z0-9._-]{0,116}$"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "artifact_kind": {
+                "const": "GGUF_BF16"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "gguf.q8_0"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "lineage_lock": {
+                "properties": {
+                  "record": {
+                    "properties": {
+                      "id": {
+                        "const": "gguf.q8_0.derivation-record"
+                      }
+                    }
+                  },
+                  "command_log": {
+                    "properties": {
+                      "id": {
+                        "const": "gguf.q8_0.command-log"
+                      }
+                    }
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "BOUND"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "derivation_id": {
+                          "type": "string",
+                          "pattern": "^gguf\\.q8_0\\.[a-z0-9][a-z0-9._-]{0,117}$"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "artifact_kind": {
+                "const": "GGUF_Q8_0"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "gguf.q4_k_m"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "lineage_lock": {
+                "properties": {
+                  "record": {
+                    "properties": {
+                      "id": {
+                        "const": "gguf.q4_k_m.derivation-record"
+                      }
+                    }
+                  },
+                  "command_log": {
+                    "properties": {
+                      "id": {
+                        "const": "gguf.q4_k_m.command-log"
+                      }
+                    }
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "BOUND"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "derivation_id": {
+                          "type": "string",
+                          "pattern": "^gguf\\.q4_k_m\\.[a-z0-9][a-z0-9._-]{0,115}$"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "artifact_kind": {
+                "const": "GGUF_Q4_K_M"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "checkpointLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "path"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "lineageDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "lineageRecordDescriptor": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/lineageDescriptor"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^gguf\\.(bf16|q8_0|q4_k_m)\\.derivation-record$"
+            }
+          }
+        }
+      ]
+    },
+    "lineageCommandLogDescriptor": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/lineageDescriptor"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^gguf\\.(bf16|q8_0|q4_k_m)\\.command-log$"
+            }
+          }
+        }
+      ]
+    },
+    "lineageLock": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "derivation_id",
+            "record",
+            "command_log"
+          ],
+          "properties": {
+            "status": {
+              "const": "UNBOUND"
+            },
+            "derivation_id": {
+              "type": "null"
+            },
+            "record": {
+              "type": "null"
+            },
+            "command_log": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "derivation_id",
+            "record",
+            "command_log"
+          ],
+          "properties": {
+            "status": {
+              "const": "BOUND"
+            },
+            "derivation_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "record": {
+              "$ref": "#/$defs/lineageRecordDescriptor"
+            },
+            "command_log": {
+              "$ref": "#/$defs/lineageCommandLogDescriptor"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:comfyui-diffusiongemma:dg-engine:i0:command-log-schema:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "kind",
+    "artifact_id",
+    "derivation_id",
+    "artifact_kind",
+    "official_checkpoint_inputs",
+    "additional_inputs",
+    "converter",
+    "conversion",
+    "tool_binary",
+    "quantization",
+    "output",
+    "completion"
+  ],
+  "properties": {
+    "artifact_id": {
+      "$ref": "#/$defs/artifactId"
+    },
+    "derivation_id": {
+      "$ref": "#/$defs/derivationId"
+    },
+    "artifact_kind": {
+      "$ref": "#/$defs/artifactKind"
+    },
+    "official_checkpoint_inputs": {
+      "$ref": "#/$defs/checkpointInputs"
+    },
+    "additional_inputs": {
+      "$ref": "#/$defs/additionalInputs"
+    },
+    "converter": {
+      "$ref": "#/$defs/converter"
+    },
+    "conversion": {
+      "$ref": "#/$defs/conversion"
+    },
+    "tool_binary": {
+      "$ref": "#/$defs/toolBinary"
+    },
+    "quantization": {
+      "$ref": "#/$defs/quantization"
+    },
+    "output": {
+      "$ref": "#/$defs/outputIdentity"
+    },
+    "$schema": {
+      "const": "urn:comfyui-diffusiongemma:dg-engine:i0:command-log:v1"
+    },
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "dg-engine-i0-command-log"
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "exit_code"
+      ],
+      "properties": {
+        "status": {
+          "const": "completed"
+        },
+        "exit_code": {
+          "const": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "blob": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "artifactId": {
+      "type": "string",
+      "pattern": "^gguf\\.(bf16|q8_0|q4_k_m)$"
+    },
+    "derivationId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "artifactKind": {
+      "enum": [
+        "GGUF_BF16",
+        "GGUF_Q8_0",
+        "GGUF_Q4_K_M"
+      ]
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*\\/$).+$"
+    },
+    "inputIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "checkpointInputs": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": {
+        "$ref": "#/$defs/inputIdentity"
+      }
+    },
+    "additionalInputs": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/inputIdentity"
+      }
+    },
+    "converter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "path",
+        "git_blob_sha1",
+        "sha256"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "git_blob_sha1": {
+          "$ref": "#/$defs/blob"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "stringMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "conversion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command_argv",
+        "configuration"
+      ],
+      "properties": {
+        "command_argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "configuration": {
+          "$ref": "#/$defs/stringMap"
+        }
+      }
+    },
+    "buildIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "build_id",
+        "compiler",
+        "compiler_version",
+        "build_type",
+        "options"
+      ],
+      "properties": {
+        "build_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "compiler": {
+          "type": "string",
+          "minLength": 1
+        },
+        "compiler_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "toolBinary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "repository",
+        "revision",
+        "source_tree_sha256",
+        "build",
+        "filename",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "converter-runtime",
+            "llama-quantize",
+            "quantizer"
+          ]
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "source_tree_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "build": {
+          "$ref": "#/$defs/buildIdentity"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "quantization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "parameters"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/artifactKind"
+        },
+        "parameters": {
+          "$ref": "#/$defs/stringMap"
+        }
+      }
+    },
+    "outputIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/artifactId"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "const": "gguf.bf16"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "derivation_id": {
+            "type": "string",
+            "pattern": "^gguf\\.bf16\\.[a-z0-9][a-z0-9._-]{0,116}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "const": "gguf.q8_0"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "derivation_id": {
+            "type": "string",
+            "pattern": "^gguf\\.q8_0\\.[a-z0-9][a-z0-9._-]{0,117}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "const": "gguf.q4_k_m"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "derivation_id": {
+            "type": "string",
+            "pattern": "^gguf\\.q4_k_m\\.[a-z0-9][a-z0-9._-]{0,115}$"
+          }
+        }
+      }
+    }
+  ]
+}

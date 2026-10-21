@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:comfyui-diffusiongemma:dg-engine:i0:baseline-defects-schema:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "kind",
+    "baseline",
+    "cases",
+    "schema_document"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "urn:comfyui-diffusiongemma:dg-engine:i0:baseline-defects:v1"
+    },
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "dg-engine-i0-baseline-defect-fixtures"
+    },
+    "baseline": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "source",
+          "reproduction",
+          "observed",
+          "classification",
+          "frozen_native_expectation"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reproduction": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed": {
+            "type": "string",
+            "minLength": 1
+          },
+          "classification": {
+            "enum": [
+              "defect-to-repair",
+              "defect-to-repair-with-supported-interim-rejection",
+              "declared-but-broken-mode"
+            ]
+          },
+          "frozen_native_expectation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "issue": {
+            "type": "string",
+            "format": "uri"
+          },
+          "asset": {
+            "type": "string",
+            "minLength": 1
+          },
+          "license_disposition": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "schema_document": {
+      "const": "schemas/i0/baseline-defects.schema.json"
+    }
+  }
+}

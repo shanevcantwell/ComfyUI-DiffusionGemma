@@ -1,0 +1,2495 @@
+{
+  "$schema": "urn:comfyui-diffusiongemma:dg-engine:i0:reference-lock:v1",
+  "schema": 1,
+  "kind": "dg-engine-i0-reference-lock",
+  "draft": false,
+  "gate_eligible": false,
+  "observed_date": "2026-10-19",
+  "product_baseline": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+  "i0_starting_commit": "7febb631a4e24173c8bd643e3ddbfa61dda078ef",
+  "source_baselines": [
+    {
+      "id": "CDG",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "revision_url": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/commit/fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "license": {
+        "spdx": "GPL-3.0",
+        "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+        "evidence": "LICENSE:1-3"
+      },
+      "role": "product baseline/current public node contract",
+      "baseline_delta": "No pre-existing tracked product path differs at the I0 starting commit."
+    },
+    {
+      "id": "LLAMA",
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "3bb63cbcbfb62056c84fe9e521b0f3d756d29c32",
+      "revision_url": "https://github.com/ggml-org/llama.cpp/commit/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32",
+      "license": {
+        "spdx": "MIT",
+        "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "evidence": {
+          "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/LICENSE",
+          "git_blob_sha1": "e7dca554bcb802f98408383a864404e3aa4eacca",
+          "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+        }
+      },
+      "role": "upstream architecture/idioms baseline"
+    },
+    {
+      "id": "DG23",
+      "repository": "https://github.com/danielhanchen/llama.cpp",
+      "revision": "dd7f73b19deb9e79dd441904cf0158af459cd034",
+      "revision_url": "https://github.com/danielhanchen/llama.cpp/commit/dd7f73b19deb9e79dd441904cf0158af459cd034",
+      "license": {
+        "spdx": "MIT",
+        "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "evidence": {
+          "url": "https://github.com/danielhanchen/llama.cpp/blob/dd7f73b19deb9e79dd441904cf0158af459cd034/LICENSE",
+          "git_blob_sha1": "e7dca554bcb802f98408383a864404e3aa4eacca",
+          "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+        }
+      },
+      "role": "donor/comparison only",
+      "pull_request": "https://github.com/ggml-org/llama.cpp/pull/24423",
+      "correctness_authority": false
+    },
+    {
+      "id": "DG27",
+      "repository": "https://github.com/lnigam/llama.cpp",
+      "revision": "dd0cf04459b0c4f43aa6667dbc0879ac0cd50323",
+      "revision_url": "https://github.com/lnigam/llama.cpp/commit/dd0cf04459b0c4f43aa6667dbc0879ac0cd50323",
+      "license": {
+        "spdx": "MIT",
+        "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "evidence": {
+          "url": "https://github.com/lnigam/llama.cpp/blob/dd0cf04459b0c4f43aa6667dbc0879ac0cd50323/LICENSE",
+          "git_blob_sha1": "e7dca554bcb802f98408383a864404e3aa4eacca",
+          "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+        }
+      },
+      "role": "donor/comparison only; historical accepted pin",
+      "pull_request": "https://github.com/ggml-org/llama.cpp/pull/24427",
+      "correctness_authority": false
+    }
+  ],
+  "oracle_hierarchy": [
+    "exact Hugging Face packages and official checkpoint",
+    "newly generated, independently authenticated selected-converter unquantized GGUF",
+    "authenticated same-derivation Q8_0",
+    "authenticated same-derivation Q4_K_M",
+    "donor arms for comparison only"
+  ],
+  "oracle_packages": [
+    {
+      "name": "transformers",
+      "version": "5.13.0",
+      "git_tag": "v5.13.0",
+      "git_commit": "6af945f436d85f2b0c5dff9b14feccd27b1d470b",
+      "repository": "https://github.com/huggingface/transformers",
+      "license": {
+        "spdx": "Apache-2.0",
+        "sha256": "77fd4710def9ec3c0f6225800e0235f15a425abd4a8b03559127fcd782612049"
+      },
+      "pypi": {
+        "wheel": {
+          "sha256": "8adbc1d20bd5463cd6876b2eb7cb31971e1065788e7dc6bc12bab597a7c504b7",
+          "size": 11503730
+        },
+        "sdist": {
+          "sha256": "940c1428e42a4238f9ccf0cd41e63c590701aa63c19fd2ce3d7d602222d68495",
+          "size": 9195801
+        }
+      },
+      "root_source": {
+        "path": "src/transformers/__init__.py",
+        "sha256": "b8d8f71a68be16a4ffed3bdda15075db9964ac4ca122d1863e2f4f09cdb4b636"
+      },
+      "files": [
+        {
+          "path": "src/transformers/models/diffusion_gemma/modeling_diffusion_gemma.py",
+          "git_blob_sha1": "d590561a754b86247067454d8584e7d8ed9618cc",
+          "sha256": "3a114c48ccd270577c6caf4f04009442f706aea4d5cb0a48f08beaa0c2b602ae"
+        },
+        {
+          "path": "src/transformers/models/diffusion_gemma/generation_diffusion_gemma.py",
+          "sha256": "0a4bf0c9fbcaef2cf86d3bb2177eb985bb83568af815a6812a4c8f7a1eeb71de"
+        },
+        {
+          "path": "src/transformers/models/diffusion_gemma/configuration_diffusion_gemma.py",
+          "sha256": "69131b618dcdf8e95b4b17fadf40c658c53cd3a4a7f4ae410b26673b7d552ec0"
+        },
+        {
+          "path": "src/transformers/models/auto/processing_auto.py",
+          "git_blob_sha1": "981fdad4cf63848f595ba73689e5ad41e57620ab",
+          "sha256": "930f2f50ffb26ff983daabb96754c24a027e69be520c79857c8316cb6ee31da5"
+        }
+      ]
+    },
+    {
+      "name": "diffusers",
+      "version": "0.39.0",
+      "git_tag": "v0.39.0",
+      "git_commit": "a3608b512ed7248499a44c61d954965ed9bdae4d",
+      "repository": "https://github.com/huggingface/diffusers",
+      "license": {
+        "spdx": "Apache-2.0",
+        "sha256": "f9e2070c247517b1ddf65f7b11b393484a18da91a958fd18a97bd0f241c3125c"
+      },
+      "pypi": {
+        "wheel": {
+          "sha256": "912aca51b5787365110806e984d5555735bf8a461073bb8459029d0bca7870ef",
+          "size": 5631176
+        },
+        "sdist": {
+          "sha256": "14bb1d98c85a0e463d734c99aaa73b480a7bc9bad22af30fbf730ef8f09c1d67",
+          "size": 4651240
+        }
+      },
+      "root_source": {
+        "path": "src/diffusers/__init__.py",
+        "sha256": "27b79203d8e25aa693aefceed1a03838b51cfe6359317e16cb50e941a79e2ac9"
+      },
+      "files": [
+        {
+          "path": "src/diffusers/schedulers/scheduling_entropy_bound.py",
+          "git_blob_sha1": "5382190ec6bf2374bab0932e1f08a0423160a543",
+          "sha256": "9e580aeff8d89c988d9796c66c263c141f80c77417ad9a99865c4b4458746e7a"
+        },
+        {
+          "path": "src/diffusers/pipelines/diffusion_gemma/pipeline_diffusion_gemma.py",
+          "sha256": "e162205b19add6766a19d659e1f4b586f5d33c2b0f13421dc89b170face35912"
+        }
+      ]
+    }
+  ],
+  "oracle_environment": {
+    "status": "PROVISIONED_SOURCE_ONLY_REAL_WEIGHT_EXECUTION_BLOCKED",
+    "python": "3.12.3",
+    "isolation": "venv with system site packages; exact oracle packages installed with --no-deps",
+    "path_contract": "build/i0-oracle-venv/bin/python",
+    "transformers_version": "5.13.0",
+    "diffusers_version": "0.39.0",
+    "wheel_sha256": {
+      "transformers-5.13.0-py3-none-any.whl": "8adbc1d20bd5463cd6876b2eb7cb31971e1065788e7dc6bc12bab597a7c504b7",
+      "diffusers-0.39.0-py3-none-any.whl": "912aca51b5787365110806e984d5555735bf8a461073bb8459029d0bca7870ef"
+    },
+    "installed_source_sha256": {
+      "transformers:modeling_diffusion_gemma.py": "3a114c48ccd270577c6caf4f04009442f706aea4d5cb0a48f08beaa0c2b602ae",
+      "transformers:generation_diffusion_gemma.py": "0a4bf0c9fbcaef2cf86d3bb2177eb985bb83568af815a6812a4c8f7a1eeb71de",
+      "transformers:configuration_diffusion_gemma.py": "69131b618dcdf8e95b4b17fadf40c658c53cd3a4a7f4ae410b26673b7d552ec0",
+      "transformers:processing_auto.py": "930f2f50ffb26ff983daabb96754c24a027e69be520c79857c8316cb6ee31da5",
+      "diffusers:scheduling_entropy_bound.py": "9e580aeff8d89c988d9796c66c263c141f80c77417ad9a99865c4b4458746e7a",
+      "diffusers:pipeline_diffusion_gemma.py": "e162205b19add6766a19d659e1f4b586f5d33c2b0f13421dc89b170face35912"
+    },
+    "forbidden_substitution": "Transformers 5.14.1 is not an oracle substitute."
+  },
+  "official_model": {
+    "repository": "google/diffusiongemma-26B-A4B-it",
+    "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+    "revision_url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/tree/f7f5b7f5fa82ffc52addd066915886d497f5517b",
+    "gated": false,
+    "private": false,
+    "license": {
+      "spdx": "Apache-2.0",
+      "authority": "Hugging Face cardData at exact revision"
+    },
+    "small_files": [
+      {
+        "path": "config.json",
+        "size": 3469,
+        "git_blob_sha1": "d609366b2563e13f39fbad6c6ee6f7d0231aa0d0",
+        "sha256": "13b11d2fe87302cc2332c64eb9eb4ac305d9b8a123ffe9c5cb5b1920fc70c506",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/config.json",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "generation_config.json",
+        "size": 357,
+        "git_blob_sha1": "73dcc9ff4ae4e0caa1301e1cc8f07ac6e2b317da",
+        "sha256": "99334f763c3dbe8b161aeaca1c150a05344299fda2d2e4a0e1d342c744461200",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/generation_config.json",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "tokenizer.json",
+        "size": 32169626,
+        "git_blob_sha1": "1ff9f3e3439a939b971f9919e821bf87e835a503",
+        "sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/tokenizer.json",
+        "git_blob_kind": "lfs-pointer"
+      },
+      {
+        "path": "tokenizer_config.json",
+        "size": 2741,
+        "git_blob_sha1": "af7f25861136b515f4bf64d9d0a6cf9875a6d508",
+        "sha256": "a284d1243b62be31faa9c13e1c28cece940c4abaa7bd9ad87b94f61b40687200",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/tokenizer_config.json",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "chat_template.jinja",
+        "size": 18575,
+        "git_blob_sha1": "8c09d23fb05c3d817d1a670fda35751f22443ffb",
+        "sha256": "9aeb7eac68ad87bba7567e9d4597ff203e5609f1b427d9e823437d0142cc61bf",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/chat_template.jinja",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "processor_config.json",
+        "size": 1689,
+        "git_blob_sha1": "5465974d23e1eca2c46c2809b26c997946ce0d90",
+        "sha256": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/processor_config.json",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "model.safetensors.index.json",
+        "size": 104650,
+        "git_blob_sha1": "c5c692dcc6f1cf0845a69d344d635b52d2d8b34b",
+        "sha256": "6e33e8465d55fe6c7bc0a5453c7a4b341e6467d032c6ded82aaf439f61dac69a",
+        "hash_authority": "locally recomputed SHA-256",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model.safetensors.index.json",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "scheduler/scheduler_config.json",
+        "size": 209,
+        "git_blob_sha1": "389d26ef7e903f189e1d9f7870ae5f2f9faabc8a",
+        "sha256": "5e5536ea036c284bcc09c7b08045868d741a41a3090069f6c035697bba31c6c7",
+        "hash_authority": "locally recomputed SHA-256 after exact-revision resolve",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/scheduler/scheduler_config.json",
+        "git_blob_kind": "content"
+      },
+      {
+        "path": "README.md",
+        "size": 19722,
+        "git_blob_sha1": "5e69c184a47d0e83d3cd46571c7dc5ce3bbdf75f",
+        "sha256": "3acbbf7e4c01297291113b1297732b6bcecf0d7769a2571fefeca4f0f5909747",
+        "hash_authority": "locally recomputed SHA-256 after exact-revision resolve",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/README.md",
+        "git_blob_kind": "content"
+      }
+    ],
+    "checkpoint_shards": [
+      {
+        "path": "model-00001-of-00011.safetensors",
+        "size": 4732780476,
+        "git_blob_sha1": "046416a47fa9b7fd23050afd8822a113d57d3a2f",
+        "lfs_sha256": "3efe137998af7d2bde4e3ab04ab3524823699a4ac3130adace5003ef40cceeb6",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00001-of-00011.safetensors"
+      },
+      {
+        "path": "model-00002-of-00011.safetensors",
+        "size": 4884578006,
+        "git_blob_sha1": "3eec2b08969f5687ba9d17f7ec329567a5b13640",
+        "lfs_sha256": "4a39d68c756fb26bbd2a54f2b8d550047ea98f3152f87ec75db825c8e17934a7",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00002-of-00011.safetensors"
+      },
+      {
+        "path": "model-00003-of-00011.safetensors",
+        "size": 4913414742,
+        "git_blob_sha1": "ff9827b63f4d2f2db11be8750269ce65368b5eb5",
+        "lfs_sha256": "ac6083e3489215ca032501714b78832e5cc4c945a8dbbb905b5292a4e95bc75e",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00003-of-00011.safetensors"
+      },
+      {
+        "path": "model-00004-of-00011.safetensors",
+        "size": 4884578030,
+        "git_blob_sha1": "4a4f16668f499364b68fee94ccc3d8e6c6c2b0ff",
+        "lfs_sha256": "865b66393de5a9c752e67beae1bd2c860c12786b72ad86ca9345c00b7b586e60",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00004-of-00011.safetensors"
+      },
+      {
+        "path": "model-00005-of-00011.safetensors",
+        "size": 4913414814,
+        "git_blob_sha1": "c0e34dceeea499b7afee776f4ab26195a17cb6f7",
+        "lfs_sha256": "a87e01bed77ad9d2234851267d99af583ff79c7a86d7494fe08ae0f9de9cd318",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00005-of-00011.safetensors"
+      },
+      {
+        "path": "model-00006-of-00011.safetensors",
+        "size": 4884578070,
+        "git_blob_sha1": "6f6d0f149a1e58aacf055f76fcf1b68d979e64c4",
+        "lfs_sha256": "077e841b3b138fbc38df2c36665abdaafa96b8c96f968e2263a7452afaa912ab",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00006-of-00011.safetensors"
+      },
+      {
+        "path": "model-00007-of-00011.safetensors",
+        "size": 4913414814,
+        "git_blob_sha1": "f7f2602b0901fa0f39410788accfb2076aa0ef43",
+        "lfs_sha256": "13a18b3c04a7f19a16385dd8a0d7fd0b9cc89ef131e4294a063c31c7d90c58ef",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00007-of-00011.safetensors"
+      },
+      {
+        "path": "model-00008-of-00011.safetensors",
+        "size": 4884578070,
+        "git_blob_sha1": "9a389ce62816fb27ff8d7a0b246f7df656537a40",
+        "lfs_sha256": "aca5d3bdfc84700bd55b475781cb46e5608104c4832d2abe111a119ddcb23ff7",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00008-of-00011.safetensors"
+      },
+      {
+        "path": "model-00009-of-00011.safetensors",
+        "size": 4913414814,
+        "git_blob_sha1": "1b6fe31a153c80ca78a22144ab3facc11231dcad",
+        "lfs_sha256": "8e2418867354e5cb356c0af8ccfdcc60bc363500674d6cf395991e7d6219eb29",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00009-of-00011.safetensors"
+      },
+      {
+        "path": "model-00010-of-00011.safetensors",
+        "size": 4884578070,
+        "git_blob_sha1": "0d386b7e1157bb06b8bfd6bbaf5d48b685700663",
+        "lfs_sha256": "93d564b7dd686464a5c068ff9665cd5d3bca399c2ce320aecd41bd011e3787d5",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00010-of-00011.safetensors"
+      },
+      {
+        "path": "model-00011-of-00011.safetensors",
+        "size": 2838371118,
+        "git_blob_sha1": "5203ed40af3c1dccac95686709e04a6e25bed16c",
+        "lfs_sha256": "afec047176bb2a05f078566576aec6bdb71ad4d041275d0d0c89473fda6d6d87",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/google/diffusiongemma-26B-A4B-it/resolve/f7f5b7f5fa82ffc52addd066915886d497f5517b/model-00011-of-00011.safetensors"
+      }
+    ],
+    "architecture_facts": {
+      "canvas_length": 256,
+      "vocab_size": 262144,
+      "dtype": "bfloat16",
+      "layers": 30,
+      "sliding_window": 1024,
+      "layer_pattern": "25 sliding_attention + 5 full_attention",
+      "evidence": "exact config.json:6,29-60,82,86"
+    },
+    "sampler_profile": {
+      "canvas_length": 256,
+      "vocab_size": 262144,
+      "num_inference_steps": 48,
+      "entropy_bound": 0.1,
+      "t_min": 0.4,
+      "t_max": 0.8,
+      "confidence_threshold": 0.005,
+      "stability_threshold": 1,
+      "self_conditioning": "full-softmax over temperature-shaped pred_logits",
+      "source_sha256": "99334f763c3dbe8b161aeaca1c150a05344299fda2d2e4a0e1d342c744461200"
+    },
+    "scheduler_subdir_delta": {
+      "class": "BlockRefinementScheduler",
+      "sha256": "5e5536ea036c284bcc09c7b08045868d741a41a3090069f6c035697bba31c6c7",
+      "disposition": "Not the CDG EntropyBound oracle profile; lock separately and do not substitute for generation_config.json."
+    }
+  },
+  "converter": {
+    "selection": "DG27",
+    "repository": "https://github.com/lnigam/llama.cpp",
+    "revision": "dd0cf04459b0c4f43aa6667dbc0879ac0cd50323",
+    "pull_request": "https://github.com/ggml-org/llama.cpp/pull/24427",
+    "path": "conversion/diffusion_gemma.py",
+    "git_blob_sha1": "6b85782653bf624c576952e5437928d1b75c145d",
+    "sha256": "dbab77e7951b5fd504f21940bee508ff1b868923055a45022910fccbc95a5aaf",
+    "license": {
+      "spdx": "MIT",
+      "license_sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    "selection_relation_to_adr_cdg_020": "consistent-with-accepted-pin",
+    "correctness_authority": false,
+    "rationale": "Exact converter from ADR-CDG-020 selected pin; its executable tensor mapping matches the DG23 candidate while avoiding a second source lineage. Correctness remains HF-original-first and requires generated-artifact comparison."
+  },
+  "gguf_remote_reference": {
+    "repository": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+    "revision": "f4183a2c7a354128d02545752303c4354d165bf0",
+    "revision_url": "https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF/tree/f4183a2c7a354128d02545752303c4354d165bf0",
+    "license": {
+      "spdx": "Apache-2.0",
+      "card_link": "https://ai.google.dev/gemma/docs/gemma_4_license"
+    },
+    "artifacts": [
+      {
+        "path": "diffusiongemma-26B-A4B-it-BF16.gguf",
+        "size": 50540834400,
+        "git_blob_sha1": "e478282ab59698f432ca0d7d050633b8e9bccaf1",
+        "lfs_sha256": "f2820bac05ab7e66836390afa575b2c8883cdb80804a52e3ed59b3e608713205",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF/resolve/f4183a2c7a354128d02545752303c4354d165bf0/diffusiongemma-26B-A4B-it-BF16.gguf",
+        "identity_status": "KNOWN_BYTES",
+        "lineage_status": "UNBOUND",
+        "lineage_claim": null
+      },
+      {
+        "path": "diffusiongemma-26B-A4B-it-Q8_0.gguf",
+        "size": 26878831200,
+        "git_blob_sha1": "d0eea599cc19e9fc2dc4f18e1c95b6f4088d3a65",
+        "lfs_sha256": "dd43baf2fb49a842ea7c106a7f3ce8d2e862e7d28d798d1d86bf94b48e50a607",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF/resolve/f4183a2c7a354128d02545752303c4354d165bf0/diffusiongemma-26B-A4B-it-Q8_0.gguf",
+        "identity_status": "KNOWN_BYTES",
+        "lineage_status": "UNBOUND",
+        "lineage_claim": null
+      },
+      {
+        "path": "diffusiongemma-26B-A4B-it-Q4_K_M.gguf",
+        "size": 16806810208,
+        "git_blob_sha1": "7bcc3ef53368a06a1d3bc0643f148fdceb2a24af",
+        "lfs_sha256": "24523b6c833c9ce9f5f34f9b333ab1517d73d6f1e76a103645353114c8028bc5",
+        "hash_authority": "Hugging Face revision API blobs=true",
+        "url": "https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF/resolve/f4183a2c7a354128d02545752303c4354d165bf0/diffusiongemma-26B-A4B-it-Q4_K_M.gguf",
+        "identity_status": "KNOWN_BYTES",
+        "lineage_status": "UNBOUND",
+        "lineage_claim": null
+      }
+    ],
+    "lineage_status": "UNBOUND",
+    "lineage_disposition": "Known remote LFS size/SHA-256 identities only; no selected-converter or official-checkpoint derivation is asserted."
+  },
+  "large_artifact_prerequisites": [
+    {
+      "format": "HF_SHARDED_BF16",
+      "repository": "google/diffusiongemma-26B-A4B-it",
+      "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+      "manifest": "official_model.checkpoint_shards",
+      "status": "BLOCKED_PENDING_EVIDENCE_STORE",
+      "requirement": "Readable exact shards, independently SHA-256 verified and recorded in the declared evidence store before real-weight oracle execution."
+    },
+    {
+      "format": "GGUF_BF16",
+      "repository": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "revision": "f4183a2c7a354128d02545752303c4354d165bf0",
+      "filename": "diffusiongemma-26B-A4B-it-BF16.gguf",
+      "size": 50540834400,
+      "sha256": "f2820bac05ab7e66836390afa575b2c8883cdb80804a52e3ed59b3e608713205",
+      "status": "BLOCKED_PENDING_EVIDENCE_STORE_AND_AUTHENTICATED_DERIVATION",
+      "requirement": "Must be bound to the selected converter and official checkpoint; compare HF original to this unquantized arm first. A separate authenticated derivation record and checksummed tool log are mandatory; byte identity alone cannot establish lineage.",
+      "lineage_status": "UNBOUND"
+    },
+    {
+      "format": "GGUF_Q8_0",
+      "repository": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "revision": "f4183a2c7a354128d02545752303c4354d165bf0",
+      "filename": "diffusiongemma-26B-A4B-it-Q8_0.gguf",
+      "size": 26878831200,
+      "sha256": "dd43baf2fb49a842ea7c106a7f3ce8d2e862e7d28d798d1d86bf94b48e50a607",
+      "status": "BLOCKED_PENDING_EVIDENCE_STORE_AND_AUTHENTICATED_DERIVATION",
+      "requirement": "Must share source checkpoint and converter lineage with the unquantized arm. A separate authenticated derivation record and checksummed tool log are mandatory; byte identity alone cannot establish lineage.",
+      "lineage_status": "UNBOUND"
+    },
+    {
+      "format": "GGUF_Q4_K_M",
+      "repository": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "revision": "f4183a2c7a354128d02545752303c4354d165bf0",
+      "filename": "diffusiongemma-26B-A4B-it-Q4_K_M.gguf",
+      "size": 16806810208,
+      "sha256": "24523b6c833c9ce9f5f34f9b333ab1517d73d6f1e76a103645353114c8028bc5",
+      "status": "BLOCKED_PENDING_EVIDENCE_STORE_AND_AUTHENTICATED_DERIVATION",
+      "requirement": "Must share source checkpoint and converter lineage with the unquantized arm. A separate authenticated derivation record and checksummed tool log are mandatory; byte identity alone cannot establish lineage.",
+      "lineage_status": "UNBOUND"
+    }
+  ],
+  "rejected_artifacts": [
+    {
+      "format": "GGUF_Q8_0",
+      "observed_size": 26878831328,
+      "observed_sha256": "fa5180660b80d52aae94ed814a6183af303841d8bb425a27f13ea27400a7b430",
+      "required_size": 26878831200,
+      "required_sha256": "dd43baf2fb49a842ea7c106a7f3ce8d2e862e7d28d798d1d86bf94b48e50a607",
+      "disposition": "REJECTED_AS_SUBSTITUTE",
+      "reason": "size differs by 128 bytes and SHA-256 differs; no provenance lineage was established"
+    }
+  ],
+  "autoround_derivative": {
+    "repository": "Intel/diffusiongemma-26B-A4B-it-int4-AutoRound",
+    "revision": "63a0dca884ce803e03567fd9d57359064104c471",
+    "license": {
+      "spdx": null,
+      "observed_statement": "README instructs users to follow the original model license; exact model API card has no license field"
+    },
+    "distribution_disposition": "EXCLUDED_FROM_NATIVE_ENGINE_DISTRIBUTION_AND_RELEASE_QUALIFICATION",
+    "mode_status": "declared-but-broken",
+    "role": "inventory-only current Transformers backend asset; never distributed by or relied on for native-engine release qualification, and never a GGUF oracle substitute",
+    "native_engine_distribution": {
+      "status": "EXCLUDED",
+      "artifact_inclusion": "FORBIDDEN",
+      "release_qualification": "NOT_RELIED_ON",
+      "evidence_artifact_ids": [],
+      "future_reentry_requirement": "EXPLICIT_SCOPE_AND_LICENSE_DECISION_REQUIRED"
+    }
+  },
+  "fixtures": [
+    {
+      "path": "fixtures/i0/semantics.json",
+      "sha256": "825e2820a6804fda18d0878f36f549870e447f7aff5f2f82605cc1fd88d8d0ec"
+    },
+    {
+      "path": "fixtures/i0/baseline-defects.json",
+      "sha256": "a61b1e26fe302b6eae87a8838f331d3d11f4c8ddd7ae4a6e5e916d9d02004701"
+    }
+  ],
+  "reconnaissance": {
+    "ten_current_model_reads": [
+      {
+        "path": "src/models/gemma.cpp",
+        "git_blob_sha1": "1da4ad81503316459f615b050b7e1f26186e6785",
+        "size": 4817,
+        "lines": 137,
+        "sha256": "3cc4452831d01e0255965e804e286969b63b6d7064aab2ab3edf8cf1cf46a87b",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/gemma.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.gemma.cpp"
+      },
+      {
+        "path": "src/models/gemma2.cpp",
+        "git_blob_sha1": "c405e6400f3ac0bc010afd79cbfe02feac597c67",
+        "size": 6676,
+        "lines": 173,
+        "sha256": "cfd2b4a3fd5081ed7f726002fe6133572c8910fda3edf72fa5770495345641cc",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/gemma2.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.gemma2.cpp"
+      },
+      {
+        "path": "src/models/gemma3.cpp",
+        "git_blob_sha1": "4c8183cce9049af62f1dcc10fafaf811be4797d3",
+        "size": 8553,
+        "lines": 219,
+        "sha256": "c2c620d079029a8a6e1fffbd81f36b3cfb2642aa9b68d8ca13b9a29be26655ef",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/gemma3.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.gemma3.cpp"
+      },
+      {
+        "path": "src/models/gemma3n.cpp",
+        "git_blob_sha1": "f2e5ae6c85b6cfd3a6474df1fe01306b4912bae8",
+        "size": 23874,
+        "lines": 461,
+        "sha256": "b0288e1166ab1eb2cb309569f1e0205a65f59504f0735796482c5d0e06aa8935",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/gemma3n.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.gemma3n.cpp"
+      },
+      {
+        "path": "src/models/gemma4.cpp",
+        "git_blob_sha1": "f4f80d39602ffeb5b6e7c04b89caefbf85f20e9c",
+        "size": 24538,
+        "lines": 534,
+        "sha256": "247d458f93ddace3091141d7d7e4da0c0b589bc843e5737d3b39f804eb889339",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/gemma4.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.gemma4.cpp"
+      },
+      {
+        "path": "src/models/gemma4-assistant.cpp",
+        "git_blob_sha1": "6ebc3c3e8e35a04a83d31aa55ce51ac9ad54c908",
+        "size": 8768,
+        "lines": 205,
+        "sha256": "e5fa0827eaae9652059a13d1d9da9affe49135daa37059d805104f8be2db2f1c",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/gemma4-assistant.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.gemma4-assistant.cpp"
+      },
+      {
+        "path": "src/models/dream.cpp",
+        "git_blob_sha1": "7d5ffa56a59ac471650f1bfa53ac7a1a50127e0c",
+        "size": 4910,
+        "lines": 136,
+        "sha256": "ba8d4b44787b1f710a74273cfeb01e3c3ccf144cecea51aba17d259ad8116109",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/dream.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.dream.cpp"
+      },
+      {
+        "path": "src/models/llada.cpp",
+        "git_blob_sha1": "1277e9dd7cbe77651115a4d51044af466577b58f",
+        "size": 5751,
+        "lines": 151,
+        "sha256": "8f95aa064ce08cc94b680f83fb2fd4d87cd1700e3d31d62037243656f5d195fd",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/llada.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.llada.cpp"
+      },
+      {
+        "path": "src/models/dflash.cpp",
+        "git_blob_sha1": "6f28d2f1db4cc74ccb0cf02a0f0a8cef7e0ce327",
+        "size": 70100,
+        "lines": 1295,
+        "sha256": "9bf7fee141396a7e488b0957eeb228e6e06f8dd5fb259a10feee597ffc981b8d",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/dflash.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.dflash.cpp"
+      },
+      {
+        "path": "src/models/qwen3.cpp",
+        "git_blob_sha1": "c01f8382921bd9df59583314872180031ef4dc37",
+        "size": 6284,
+        "lines": 167,
+        "sha256": "6018840e2d7e23340e2404aceb216e6afcedbd8ae24977a0df0eb878be9d0107",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/models/qwen3.cpp",
+        "read_in_full": true,
+        "artifact_id": "llama.model.qwen3.cpp"
+      }
+    ],
+    "three_recent_merged_model_additions": [
+      {
+        "pull_request": 30673,
+        "merge_commit": "62318cd57dc63900ecb153272c0b10f78550855d",
+        "path": "src/models/kolibri1.cpp",
+        "git_blob_sha1": "acc1dd159202678b8f56d401f6b592e6afb8b429",
+        "lines": 187,
+        "sha256": "6d2f5ad97687bb3b1f83ac9eb651852afaf7d9f1f8b2d853c6af08306d904cbe",
+        "read_in_full": true,
+        "pr_url": "https://github.com/ggml-org/llama.cpp/pull/30673",
+        "artifact_id": "llama.recent.kolibri1.cpp",
+        "size": 8488
+      },
+      {
+        "pull_request": 30670,
+        "merge_commit": "01fc3aae846caa644f0cee360f108d4c48e4aaa1",
+        "path": "src/models/beam.cpp",
+        "git_blob_sha1": "55817dd4839a85aa60e054ea487e0711a06b4db6",
+        "lines": 261,
+        "sha256": "2d0635220eafdee80171902ec890b8494ecb2dbf5e663648de061f1d590c7c26",
+        "read_in_full": true,
+        "pr_url": "https://github.com/ggml-org/llama.cpp/pull/30670",
+        "artifact_id": "llama.recent.beam.cpp",
+        "size": 11585
+      },
+      {
+        "pull_request": 30616,
+        "merge_commit": "ba3c05f71da85cd0439e84ba42b0478b24d5db16",
+        "path": "src/models/muse-spark.cpp",
+        "git_blob_sha1": "5842ecb98110925f1ab99a64d4706c2ce551a5b9",
+        "lines": 238,
+        "sha256": "e1019a52a82c9c710b9bf80577c63804a108389c13253b9e6a8ec7406507c708",
+        "read_in_full": true,
+        "pr_url": "https://github.com/ggml-org/llama.cpp/pull/30616",
+        "artifact_id": "llama.recent.muse-spark.cpp",
+        "size": 11165
+      }
+    ],
+    "developer_document_reads": [
+      {
+        "artifact_id": "llama.doc.AGENTS.md",
+        "path": "AGENTS.md",
+        "git_blob_sha1": "36390a6b4ad6dd96da2557d95bcde4141ea1f553",
+        "size": 11761,
+        "lines": 251,
+        "sha256": "67d92a8d2f75a85b640afcfcfb8f8f8d92c0e719f9587d9584f936860bf59c38",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/AGENTS.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.CONTRIBUTING.md",
+        "path": "CONTRIBUTING.md",
+        "git_blob_sha1": "59ec3f311b5d9de3d47db3369a9f1c779edab071",
+        "size": 12910,
+        "lines": 209,
+        "sha256": "cf80093cca52e66dc1592175c3a2bcb1acf6aec1e30adaf212c5bedf0967da0e",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/CONTRIBUTING.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.docs.development.HOWTO-add-model.md",
+        "path": "docs/development/HOWTO-add-model.md",
+        "git_blob_sha1": "abf6503f239b18583046b12cde252947700f1c96",
+        "size": 13824,
+        "lines": 213,
+        "sha256": "36d39ad26717e0d68c8ad9b0d95ed12dea3ef09f061bd5ba37991bb3f53e6f27",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/docs/development/HOWTO-add-model.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.skills.code-review.SKILL.md",
+        "path": "skills/code-review/SKILL.md",
+        "git_blob_sha1": "2b15d18c4e33c6d07a8635b3a1ec1dce55e2234b",
+        "size": 28762,
+        "lines": 243,
+        "sha256": "8f124c54e422ad2da5af61eeae901106bb00a51b6d0dd3701a9ec781a462474a",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/skills/code-review/SKILL.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.skills.add-new-model.SKILL.md",
+        "path": "skills/add-new-model/SKILL.md",
+        "git_blob_sha1": "710a1ebb4488ec6e9965e372e3acce0b75c23995",
+        "size": 12851,
+        "lines": 99,
+        "sha256": "f77f857fc8e2802f6eee331ea0b52986d7629f804b2f847b5e5c0c0396de4e02",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/skills/add-new-model/SKILL.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.examples.model-conversion.README.md",
+        "path": "examples/model-conversion/README.md",
+        "git_blob_sha1": "344f0ac94a93593811c2e43ff82ec60d50553f1d",
+        "size": 15752,
+        "lines": 408,
+        "sha256": "f62b2e18e9fe30e6afc15e89b9accf7b7d299e13e4d33bd646f6dff915fd570e",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/examples/model-conversion/README.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.ci.README.md",
+        "path": "ci/README.md",
+        "git_blob_sha1": "d25bdd26fe1c9fb05bb5e74fe7f9e794fdfda563",
+        "size": 1297,
+        "lines": 33,
+        "sha256": "e03667a5e63070b330eb1055d7a31ae51bac137254d96ea985593b4bb52e9692",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/ci/README.md",
+        "read_in_full": true
+      },
+      {
+        "artifact_id": "llama.doc.src.llama-ext.h",
+        "path": "src/llama-ext.h",
+        "git_blob_sha1": "8b3932bd7507876802c61176d412524e0df257d6",
+        "size": 7047,
+        "lines": 163,
+        "sha256": "0013af204a3cab5213812dde1cbb98b34f7f02c5c9f8da6c1349a4d2a61c7655",
+        "url": "https://github.com/ggml-org/llama.cpp/blob/3bb63cbcbfb62056c84fe9e521b0f3d756d29c32/src/llama-ext.h",
+        "read_in_full": true
+      }
+    ]
+  },
+  "unresolved_blockers": [
+    {
+      "id": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+      "classification": "evidence",
+      "reason": "Exact official checkpoint shard bytes are not provisioned through the declared evidence-root contract; remote LFS identities alone do not satisfy BASE-02."
+    },
+    {
+      "id": "I0-BLOCK-GGUF-EVIDENCE",
+      "classification": "evidence",
+      "reason": "Exact BF16, Q8_0 and Q4_K_M GGUF byte identities are known remotely but bytes are not provisioned; their selected DG27/official-checkpoint lineages are explicitly UNBOUND and require independent authenticated derivation records and tool logs."
+    },
+    {
+      "id": "I0-BLOCK-ADR-CDG-020",
+      "classification": "phase-policy",
+      "reason": "The accepted ADR forbids owned patches and limits GGUF to inference-only secondary, while the proposed engine design requires an owned patch series and fuller native capabilities. A future explicit amendment/supersession is required before I1 adopts that shape."
+    }
+  ],
+  "prohibited_claims": [
+    "donor readability proves correctness",
+    "the mismatched observed Q8 is valid",
+    "source-only synthetic tests are real-weight oracle evidence",
+    "this record is an I0 PASS receipt"
+  ],
+  "evidence_root_contract": {
+    "environment_variable": "DG_ENGINE_I0_EVIDENCE_ROOT",
+    "manifest": "i0-evidence.json",
+    "manifest_schema": "schemas/i0/evidence-manifest.schema.json",
+    "path_rule": "artifact paths are relative POSIX paths confined to the evidence root; no private path is stored in Git",
+    "artifact_set_sha256": "b66b5081df7e9a2ccc58dcdd00008e8a7c051021548fe76b7bd6f966426dbfbe",
+    "artifacts": [
+      {
+        "id": "comfy.server",
+        "path": "artifacts/comfy/server.py",
+        "size": 63361,
+        "sha256": "0831037168cef27fd0b8e495acc7e82a875f145e0410cf3df6b659d0f222687f",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "comfy.nodes",
+        "path": "artifacts/comfy/nodes.py",
+        "size": 106950,
+        "sha256": "b8dfdde1de8975be762b085048143cc2dda8fc9202695e460ecc2c8dfe44bc4b",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.license",
+        "path": "artifacts/llama/LICENSE",
+        "size": 1078,
+        "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "dg27.converter",
+        "path": "artifacts/dg27/conversion/diffusion_gemma.py",
+        "size": 4122,
+        "sha256": "dbab77e7951b5fd504f21940bee508ff1b868923055a45022910fccbc95a5aaf",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "dg27.model",
+        "path": "artifacts/dg27/src/models/diffusion-gemma.cpp",
+        "size": 23081,
+        "sha256": "ae88c1a7ec6b73a30fba7377516d2fea02bc55aa25b485bd52b0f57cdb29f167",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "dg27.cli",
+        "path": "artifacts/dg27/examples/diffusion-gemma-cli.cpp",
+        "size": 42166,
+        "sha256": "827d698edc87b70003a006822cec41fdc7823f6347a5c1bd3498c6fd4bdad833",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "dg23.model",
+        "path": "artifacts/dg23/src/models/diffusion-gemma.cpp",
+        "size": 43556,
+        "sha256": "759d223ff28d486ad0383d7a533c440ba3c14c6c773019c586b218391b41715e",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.AGENTS.md",
+        "path": "artifacts/llama/AGENTS.md",
+        "size": 11761,
+        "sha256": "67d92a8d2f75a85b640afcfcfb8f8f8d92c0e719f9587d9584f936860bf59c38",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.CONTRIBUTING.md",
+        "path": "artifacts/llama/CONTRIBUTING.md",
+        "size": 12910,
+        "sha256": "cf80093cca52e66dc1592175c3a2bcb1acf6aec1e30adaf212c5bedf0967da0e",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.docs.development.HOWTO-add-model.md",
+        "path": "artifacts/llama/docs/development/HOWTO-add-model.md",
+        "size": 13824,
+        "sha256": "36d39ad26717e0d68c8ad9b0d95ed12dea3ef09f061bd5ba37991bb3f53e6f27",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.skills.code-review.SKILL.md",
+        "path": "artifacts/llama/skills/code-review/SKILL.md",
+        "size": 28762,
+        "sha256": "8f124c54e422ad2da5af61eeae901106bb00a51b6d0dd3701a9ec781a462474a",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.skills.add-new-model.SKILL.md",
+        "path": "artifacts/llama/skills/add-new-model/SKILL.md",
+        "size": 12851,
+        "sha256": "f77f857fc8e2802f6eee331ea0b52986d7629f804b2f847b5e5c0c0396de4e02",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.examples.model-conversion.README.md",
+        "path": "artifacts/llama/examples/model-conversion/README.md",
+        "size": 15752,
+        "sha256": "f62b2e18e9fe30e6afc15e89b9accf7b7d299e13e4d33bd646f6dff915fd570e",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.ci.README.md",
+        "path": "artifacts/llama/ci/README.md",
+        "size": 1297,
+        "sha256": "e03667a5e63070b330eb1055d7a31ae51bac137254d96ea985593b4bb52e9692",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.doc.src.llama-ext.h",
+        "path": "artifacts/llama/src/llama-ext.h",
+        "size": 7047,
+        "sha256": "0013af204a3cab5213812dde1cbb98b34f7f02c5c9f8da6c1349a4d2a61c7655",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.gemma.cpp",
+        "path": "artifacts/llama/src/models/gemma.cpp",
+        "size": 4817,
+        "sha256": "3cc4452831d01e0255965e804e286969b63b6d7064aab2ab3edf8cf1cf46a87b",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.gemma2.cpp",
+        "path": "artifacts/llama/src/models/gemma2.cpp",
+        "size": 6676,
+        "sha256": "cfd2b4a3fd5081ed7f726002fe6133572c8910fda3edf72fa5770495345641cc",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.gemma3.cpp",
+        "path": "artifacts/llama/src/models/gemma3.cpp",
+        "size": 8553,
+        "sha256": "c2c620d079029a8a6e1fffbd81f36b3cfb2642aa9b68d8ca13b9a29be26655ef",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.gemma3n.cpp",
+        "path": "artifacts/llama/src/models/gemma3n.cpp",
+        "size": 23874,
+        "sha256": "b0288e1166ab1eb2cb309569f1e0205a65f59504f0735796482c5d0e06aa8935",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.gemma4.cpp",
+        "path": "artifacts/llama/src/models/gemma4.cpp",
+        "size": 24538,
+        "sha256": "247d458f93ddace3091141d7d7e4da0c0b589bc843e5737d3b39f804eb889339",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.gemma4-assistant.cpp",
+        "path": "artifacts/llama/src/models/gemma4-assistant.cpp",
+        "size": 8768,
+        "sha256": "e5fa0827eaae9652059a13d1d9da9affe49135daa37059d805104f8be2db2f1c",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.dream.cpp",
+        "path": "artifacts/llama/src/models/dream.cpp",
+        "size": 4910,
+        "sha256": "ba8d4b44787b1f710a74273cfeb01e3c3ccf144cecea51aba17d259ad8116109",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.llada.cpp",
+        "path": "artifacts/llama/src/models/llada.cpp",
+        "size": 5751,
+        "sha256": "8f95aa064ce08cc94b680f83fb2fd4d87cd1700e3d31d62037243656f5d195fd",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.dflash.cpp",
+        "path": "artifacts/llama/src/models/dflash.cpp",
+        "size": 70100,
+        "sha256": "9bf7fee141396a7e488b0957eeb228e6e06f8dd5fb259a10feee597ffc981b8d",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.model.qwen3.cpp",
+        "path": "artifacts/llama/src/models/qwen3.cpp",
+        "size": 6284,
+        "sha256": "6018840e2d7e23340e2404aceb216e6afcedbd8ae24977a0df0eb878be9d0107",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.recent.kolibri1.cpp",
+        "path": "artifacts/llama/recent/kolibri1.cpp",
+        "size": 8488,
+        "sha256": "6d2f5ad97687bb3b1f83ac9eb651852afaf7d9f1f8b2d853c6af08306d904cbe",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.recent.beam.cpp",
+        "path": "artifacts/llama/recent/beam.cpp",
+        "size": 11585,
+        "sha256": "2d0635220eafdee80171902ec890b8494ecb2dbf5e663648de061f1d590c7c26",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "llama.recent.muse-spark.cpp",
+        "path": "artifacts/llama/recent/muse-spark.cpp",
+        "size": 11165,
+        "sha256": "e1019a52a82c9c710b9bf80577c63804a108389c13253b9e6a8ec7406507c708",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.config.json",
+        "path": "artifacts/official/config.json",
+        "size": 3469,
+        "sha256": "13b11d2fe87302cc2332c64eb9eb4ac305d9b8a123ffe9c5cb5b1920fc70c506",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.generation_config.json",
+        "path": "artifacts/official/generation_config.json",
+        "size": 357,
+        "sha256": "99334f763c3dbe8b161aeaca1c150a05344299fda2d2e4a0e1d342c744461200",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.tokenizer.json",
+        "path": "artifacts/official/tokenizer.json",
+        "size": 32169626,
+        "sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.tokenizer_config.json",
+        "path": "artifacts/official/tokenizer_config.json",
+        "size": 2741,
+        "sha256": "a284d1243b62be31faa9c13e1c28cece940c4abaa7bd9ad87b94f61b40687200",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.chat_template.jinja",
+        "path": "artifacts/official/chat_template.jinja",
+        "size": 18575,
+        "sha256": "9aeb7eac68ad87bba7567e9d4597ff203e5609f1b427d9e823437d0142cc61bf",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.processor_config.json",
+        "path": "artifacts/official/processor_config.json",
+        "size": 1689,
+        "sha256": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.model.safetensors.index.json",
+        "path": "artifacts/official/model.safetensors.index.json",
+        "size": 104650,
+        "sha256": "6e33e8465d55fe6c7bc0a5453c7a4b341e6467d032c6ded82aaf439f61dac69a",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.scheduler.scheduler_config.json",
+        "path": "artifacts/official/scheduler/scheduler_config.json",
+        "size": 209,
+        "sha256": "5e5536ea036c284bcc09c7b08045868d741a41a3090069f6c035697bba31c6c7",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.README.md",
+        "path": "artifacts/official/README.md",
+        "size": 19722,
+        "sha256": "3acbbf7e4c01297291113b1297732b6bcecf0d7769a2571fefeca4f0f5909747",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "package.transformers.modeling_diffusion_gemma.py",
+        "path": "artifacts/packages/transformers/models/diffusion_gemma/modeling_diffusion_gemma.py",
+        "size": 79361,
+        "sha256": "3a114c48ccd270577c6caf4f04009442f706aea4d5cb0a48f08beaa0c2b602ae",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "package.transformers.generation_diffusion_gemma.py",
+        "path": "artifacts/packages/transformers/models/diffusion_gemma/generation_diffusion_gemma.py",
+        "size": 63545,
+        "sha256": "0a4bf0c9fbcaef2cf86d3bb2177eb985bb83568af815a6812a4c8f7a1eeb71de",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "package.transformers.configuration_diffusion_gemma.py",
+        "path": "artifacts/packages/transformers/models/diffusion_gemma/configuration_diffusion_gemma.py",
+        "size": 9399,
+        "sha256": "69131b618dcdf8e95b4b17fadf40c658c53cd3a4a7f4ae410b26673b7d552ec0",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "package.transformers.processing_auto.py",
+        "path": "artifacts/packages/transformers/models/auto/processing_auto.py",
+        "size": 17960,
+        "sha256": "930f2f50ffb26ff983daabb96754c24a027e69be520c79857c8316cb6ee31da5",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "package.diffusers.scheduling_entropy_bound.py",
+        "path": "artifacts/packages/diffusers/schedulers/scheduling_entropy_bound.py",
+        "size": 8597,
+        "sha256": "9e580aeff8d89c988d9796c66c263c141f80c77417ad9a99865c4b4458746e7a",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "package.diffusers.pipeline_diffusion_gemma.py",
+        "path": "artifacts/packages/diffusers/pipelines/diffusion_gemma/pipeline_diffusion_gemma.py",
+        "size": 24912,
+        "sha256": "e162205b19add6766a19d659e1f4b586f5d33c2b0f13421dc89b170face35912",
+        "status": "present",
+        "required_for": [
+          "BASE-02-source"
+        ],
+        "kind": "reference-source"
+      },
+      {
+        "id": "official.checkpoint.00001-of-00011",
+        "path": "artifacts/official/model-00001-of-00011.safetensors",
+        "size": 4732780476,
+        "sha256": "3efe137998af7d2bde4e3ab04ab3524823699a4ac3130adace5003ef40cceeb6",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00001-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00002-of-00011",
+        "path": "artifacts/official/model-00002-of-00011.safetensors",
+        "size": 4884578006,
+        "sha256": "4a39d68c756fb26bbd2a54f2b8d550047ea98f3152f87ec75db825c8e17934a7",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00002-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00003-of-00011",
+        "path": "artifacts/official/model-00003-of-00011.safetensors",
+        "size": 4913414742,
+        "sha256": "ac6083e3489215ca032501714b78832e5cc4c945a8dbbb905b5292a4e95bc75e",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00003-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00004-of-00011",
+        "path": "artifacts/official/model-00004-of-00011.safetensors",
+        "size": 4884578030,
+        "sha256": "865b66393de5a9c752e67beae1bd2c860c12786b72ad86ca9345c00b7b586e60",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00004-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00005-of-00011",
+        "path": "artifacts/official/model-00005-of-00011.safetensors",
+        "size": 4913414814,
+        "sha256": "a87e01bed77ad9d2234851267d99af583ff79c7a86d7494fe08ae0f9de9cd318",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00005-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00006-of-00011",
+        "path": "artifacts/official/model-00006-of-00011.safetensors",
+        "size": 4884578070,
+        "sha256": "077e841b3b138fbc38df2c36665abdaafa96b8c96f968e2263a7452afaa912ab",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00006-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00007-of-00011",
+        "path": "artifacts/official/model-00007-of-00011.safetensors",
+        "size": 4913414814,
+        "sha256": "13a18b3c04a7f19a16385dd8a0d7fd0b9cc89ef131e4294a063c31c7d90c58ef",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00007-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00008-of-00011",
+        "path": "artifacts/official/model-00008-of-00011.safetensors",
+        "size": 4884578070,
+        "sha256": "aca5d3bdfc84700bd55b475781cb46e5608104c4832d2abe111a119ddcb23ff7",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00008-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00009-of-00011",
+        "path": "artifacts/official/model-00009-of-00011.safetensors",
+        "size": 4913414814,
+        "sha256": "8e2418867354e5cb356c0af8ccfdcc60bc363500674d6cf395991e7d6219eb29",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00009-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00010-of-00011",
+        "path": "artifacts/official/model-00010-of-00011.safetensors",
+        "size": 4884578070,
+        "sha256": "93d564b7dd686464a5c068ff9665cd5d3bca399c2ce320aecd41bd011e3787d5",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00010-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "official.checkpoint.00011-of-00011",
+        "path": "artifacts/official/model-00011-of-00011.safetensors",
+        "size": 2838371118,
+        "sha256": "afec047176bb2a05f078566576aec6bdb71ad4d041275d0d0c89473fda6d6d87",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "official-checkpoint",
+        "blocker": "I0-BLOCK-CHECKPOINT-EVIDENCE",
+        "lineage": {
+          "repository": "google/diffusiongemma-26B-A4B-it",
+          "revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+          "path": "model-00011-of-00011.safetensors"
+        }
+      },
+      {
+        "id": "gguf.bf16",
+        "path": "artifacts/gguf/diffusiongemma-26B-A4B-it-BF16.gguf",
+        "size": 50540834400,
+        "sha256": "f2820bac05ab7e66836390afa575b2c8883cdb80804a52e3ed59b3e608713205",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "gguf-model",
+        "blocker": "I0-BLOCK-GGUF-EVIDENCE",
+        "artifact_kind": "GGUF_BF16",
+        "identity_status": "KNOWN_BYTES",
+        "lineage_status": "UNBOUND",
+        "derivation_requirement": {
+          "record_schema": "schemas/i0/derivation-record.schema.json",
+          "blocker": "I0-BLOCK-GGUF-LINEAGE-BF16",
+          "independent_from_manifest": true,
+          "command_log_schema": "schemas/i0/command-log.schema.json",
+          "trust_root": "Git-controlled reference.lock.json lineage_lock"
+        },
+        "lineage_lock": {
+          "status": "UNBOUND",
+          "derivation_id": null,
+          "record": null,
+          "command_log": null
+        }
+      },
+      {
+        "id": "gguf.q8_0",
+        "path": "artifacts/gguf/diffusiongemma-26B-A4B-it-Q8_0.gguf",
+        "size": 26878831200,
+        "sha256": "dd43baf2fb49a842ea7c106a7f3ce8d2e862e7d28d798d1d86bf94b48e50a607",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "gguf-model",
+        "blocker": "I0-BLOCK-GGUF-EVIDENCE",
+        "artifact_kind": "GGUF_Q8_0",
+        "identity_status": "KNOWN_BYTES",
+        "lineage_status": "UNBOUND",
+        "derivation_requirement": {
+          "record_schema": "schemas/i0/derivation-record.schema.json",
+          "blocker": "I0-BLOCK-GGUF-LINEAGE-Q8-0",
+          "independent_from_manifest": true,
+          "command_log_schema": "schemas/i0/command-log.schema.json",
+          "trust_root": "Git-controlled reference.lock.json lineage_lock"
+        },
+        "lineage_lock": {
+          "status": "UNBOUND",
+          "derivation_id": null,
+          "record": null,
+          "command_log": null
+        }
+      },
+      {
+        "id": "gguf.q4_k_m",
+        "path": "artifacts/gguf/diffusiongemma-26B-A4B-it-Q4_K_M.gguf",
+        "size": 16806810208,
+        "sha256": "24523b6c833c9ce9f5f34f9b333ab1517d73d6f1e76a103645353114c8028bc5",
+        "status": "absent",
+        "required_for": [
+          "BASE-02-gate"
+        ],
+        "kind": "gguf-model",
+        "blocker": "I0-BLOCK-GGUF-EVIDENCE",
+        "artifact_kind": "GGUF_Q4_K_M",
+        "identity_status": "KNOWN_BYTES",
+        "lineage_status": "UNBOUND",
+        "derivation_requirement": {
+          "record_schema": "schemas/i0/derivation-record.schema.json",
+          "blocker": "I0-BLOCK-GGUF-LINEAGE-Q4-K-M",
+          "independent_from_manifest": true,
+          "command_log_schema": "schemas/i0/command-log.schema.json",
+          "trust_root": "Git-controlled reference.lock.json lineage_lock"
+        },
+        "lineage_lock": {
+          "status": "UNBOUND",
+          "derivation_id": null,
+          "record": null,
+          "command_log": null
+        }
+      },
+      {
+        "id": "cdg.source.init.py",
+        "path": "artifacts/cdg/__init__.py.source",
+        "size": 5460,
+        "sha256": "c4855b4bf9a03b3df81019ad42404127624d30393e81dded4052e9ac8e6f88b6",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "__init__.py",
+          "git_blob_sha1": "2034a703a405b15c08d2be047cc6f05f5e2fb1be"
+        }
+      },
+      {
+        "id": "cdg.source.consumers.init.py",
+        "path": "artifacts/cdg/consumers/__init__.py.source",
+        "size": 781,
+        "sha256": "38bfdc14aa0f6f3485a87832f936b8b345391f64533c4feaebad0d3b0153c9b2",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "consumers/__init__.py",
+          "git_blob_sha1": "68a38bda8d61137d1827a06dcfb6653e316e8eae"
+        }
+      },
+      {
+        "id": "cdg.source.consumers.analysis.py",
+        "path": "artifacts/cdg/consumers/analysis.py.source",
+        "size": 16131,
+        "sha256": "f6c51825c93cb5c2cd969bb883b6c65b4bf889f0193f7710eef03316ee5ac6e0",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "consumers/analysis.py",
+          "git_blob_sha1": "98f38e7e60787a05e9986c30930549feeb8fd06f"
+        }
+      },
+      {
+        "id": "cdg.source.consumers.run_log.py",
+        "path": "artifacts/cdg/consumers/run_log.py.source",
+        "size": 13582,
+        "sha256": "8fb9027b711386bc1c8b232f84bdc308c68ec393d501b4b3b369f6d09ee945a3",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "consumers/run_log.py",
+          "git_blob_sha1": "e6b2a183aae36ae4eb30f261f07c5bfb17dd95c8"
+        }
+      },
+      {
+        "id": "cdg.source.consumers.tally_audit.py",
+        "path": "artifacts/cdg/consumers/tally_audit.py.source",
+        "size": 28750,
+        "sha256": "ea57034c5c7eb030d3a1ff15c26ab7c6f96134d790e0f61d4cef998a06890867",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "consumers/tally_audit.py",
+          "git_blob_sha1": "a483f6d3fbd5e30637a870d763834b5eaa3423c0"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.init.py",
+        "path": "artifacts/cdg/dgemma/__init__.py.source",
+        "size": 1824,
+        "sha256": "89b32214e45205f582c2cf911d3d9724a35e8dd425b27c0aa87910009a5d0033",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/__init__.py",
+          "git_blob_sha1": "aa46a228b5acc5e04f1459d6e2cbc8e91575d654"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.capture.py",
+        "path": "artifacts/cdg/dgemma/capture.py.source",
+        "size": 23847,
+        "sha256": "8053b0e62d353ceb0fef1b1ccaa5f53a3a547b2ae13ea443764de1589ae1f76f",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/capture.py",
+          "git_blob_sha1": "68bd54e68d4578a753f4c6366ac43c79f786981f"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.compat.py",
+        "path": "artifacts/cdg/dgemma/compat.py.source",
+        "size": 13921,
+        "sha256": "525880eaf4858b0cd0024f6e4abb8de9c4b0aa49ee50f3cb03776f23ca96f8a4",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/compat.py",
+          "git_blob_sha1": "a22de73bd8f4ba6b15e795c60349338313d79f9e"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.composite.py",
+        "path": "artifacts/cdg/dgemma/composite.py.source",
+        "size": 13885,
+        "sha256": "8beb485277c740996e1ed9a716383b7381d0ad7be13cfdb83313df8d2c458a83",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/composite.py",
+          "git_blob_sha1": "999a9fa20a2b5b870126e81b620da74d851d71e4"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.config.py",
+        "path": "artifacts/cdg/dgemma/config.py.source",
+        "size": 8811,
+        "sha256": "731e457ca237c22a612b459bb3c6a8167bfb55109bf020048b5d207bec46e250",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/config.py",
+          "git_blob_sha1": "808211995d9960852f91adafdce5534d121ea9a6"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.constraints_hook.py",
+        "path": "artifacts/cdg/dgemma/constraints_hook.py.source",
+        "size": 5341,
+        "sha256": "ca8673fffd516254769747d8dc80645aca08cd0e6e7b148a30f2ec58668881f9",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/constraints_hook.py",
+          "git_blob_sha1": "3018f67ccf727b598030226f55ee858ec90d93fb"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.excision.py",
+        "path": "artifacts/cdg/dgemma/excision.py.source",
+        "size": 14870,
+        "sha256": "5aa81dd2aca6dd8e21ab66bdeb0034f2d4deca9bebc4a993876e0f1d57736db8",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/excision.py",
+          "git_blob_sha1": "23fb7463604e97e605c92fc0e6ead8ae0a1c2f57"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.hooks.py",
+        "path": "artifacts/cdg/dgemma/hooks.py.source",
+        "size": 5250,
+        "sha256": "ae7a33061fd954173f7813235da201cf2185c4956e1a03322d5aff8e59f59b07",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/hooks.py",
+          "git_blob_sha1": "d8b887b5eb3d6d74fc632242e53a838a1790d567"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.ingress.py",
+        "path": "artifacts/cdg/dgemma/ingress.py.source",
+        "size": 21093,
+        "sha256": "7987d0a0959de9b13bbc9de95556962d67f3ec8fd8aea9fabd014854edd7b663",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/ingress.py",
+          "git_blob_sha1": "e6697989eee542f2eee8c69fda74cc62a73f6a1b"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.kv_cache.py",
+        "path": "artifacts/cdg/dgemma/kv_cache.py.source",
+        "size": 33234,
+        "sha256": "20e4d13185efa10316315e6f849895ea8f59d249aeb01f60371ead7b16b565a5",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/kv_cache.py",
+          "git_blob_sha1": "39fd28ceb8f5b9e529516216c153829d14f59dfd"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.loop.py",
+        "path": "artifacts/cdg/dgemma/loop.py.source",
+        "size": 57559,
+        "sha256": "c9307d003e97ba3bd51be7239841f9e58ace80eef7843b1c1bb93b783ea34bc4",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/loop.py",
+          "git_blob_sha1": "a2b556d84b1083e82119b84754580ca8de3b8d3f"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.model.py",
+        "path": "artifacts/cdg/dgemma/model.py.source",
+        "size": 57384,
+        "sha256": "f03e4d992e7758691b56aa3bc4c83a1f8b9ae497a2879425ad5ab5bc52ebf9ce",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/model.py",
+          "git_blob_sha1": "ee3c6bba4208cc067d2f07d9acaa6b2fef90972d"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.participants.py",
+        "path": "artifacts/cdg/dgemma/participants.py.source",
+        "size": 12730,
+        "sha256": "57f412b9379e1264b4f25ea602d92860866f705ad1303420aae32802187ab665",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/participants.py",
+          "git_blob_sha1": "8b3d895994badcabc974bc38150d1571219a00ac"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.payloads.py",
+        "path": "artifacts/cdg/dgemma/payloads.py.source",
+        "size": 9169,
+        "sha256": "5a3c25d58410562ce8d67a281a6208e0689db47a5155559830ce777f8bfa3ce2",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/payloads.py",
+          "git_blob_sha1": "40c8a560353c9f8d65fc12200679d17e666a3b81"
+        }
+      },
+      {
+        "id": "cdg.source.dgemma.types.py",
+        "path": "artifacts/cdg/dgemma/types.py.source",
+        "size": 30654,
+        "sha256": "28e6186ab4592373144ed283d72a6e94a5e967d7623e97f17c934d913138ccef",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "dgemma/types.py",
+          "git_blob_sha1": "cc31234ac5333cc64427fdb650d2e75cc18f2636"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.init.py",
+        "path": "artifacts/cdg/surfaces/__init__.py.source",
+        "size": 433,
+        "sha256": "67d4e4924ab384ed202af5a9ccf033df97a56e3c9353085fd3191bc74b09bd1b",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/__init__.py",
+          "git_blob_sha1": "9d169cfb9932ec40fad0211929b0ec3796033e21"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.init.py",
+        "path": "artifacts/cdg/surfaces/comfyui/__init__.py.source",
+        "size": 1137,
+        "sha256": "2d58fdef276164e011c0f88d069a9cb56a1f2ffddc38848ac742ed22e3f63a2e",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/__init__.py",
+          "git_blob_sha1": "e07a77d6774c382d9d3471eebac2e5b4894e6824"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.denoise.py",
+        "path": "artifacts/cdg/surfaces/comfyui/denoise.py.source",
+        "size": 17528,
+        "sha256": "a6b89324599042ac1af00e4a3fd44abb7ae7da34fa9276cdad8021a88c9bb0d1",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/denoise.py",
+          "git_blob_sha1": "5eeb18d6ee5463c1c06424f9c6f423b7cfe291a6"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.emission.py",
+        "path": "artifacts/cdg/surfaces/comfyui/emission.py.source",
+        "size": 7329,
+        "sha256": "1fc265f182a1b347913f8ad22dba9ac85b13dcea6f1ed80f2ef6bae1a32f0214",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/emission.py",
+          "git_blob_sha1": "cab8c7d3b8c4895c945b8ce62a188e7b4d43c34f"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.encode.py",
+        "path": "artifacts/cdg/surfaces/comfyui/encode.py.source",
+        "size": 5524,
+        "sha256": "ddac40328ae9a8c4b1602cc5a324cd611df059b0db895bed5c9120e5a8e801b3",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/encode.py",
+          "git_blob_sha1": "3e039e9c21432f093cc61a1381dd5f2bfa00dde3"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.frames_image.py",
+        "path": "artifacts/cdg/surfaces/comfyui/frames_image.py.source",
+        "size": 15763,
+        "sha256": "ad34db13d69c6bbe91db206f8cd0ab6c6b1c4642b273a08732cd4bc7bdbf3a05",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/frames_image.py",
+          "git_blob_sha1": "bfde4c651e790425bd6a0b78fb71f77d8d47cc6c"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.live_view.py",
+        "path": "artifacts/cdg/surfaces/comfyui/live_view.py.source",
+        "size": 6525,
+        "sha256": "4b2efb2e8b8e1f9069b8f79e60335b4d36b3ac83a204cc354a7d2b79de12d23d",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/live_view.py",
+          "git_blob_sha1": "15062362d022a17e5c24316e774393af6e6d36ae"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.loader.py",
+        "path": "artifacts/cdg/surfaces/comfyui/loader.py.source",
+        "size": 18166,
+        "sha256": "666e68391ca1347087b67cd1f37364c70191d1dd58a172b7ec24c3c02f2ae5ca",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/loader.py",
+          "git_blob_sha1": "fb58a14a16111aeeb5cf3b533ba49ef6e8c6ef2f"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.run_log_writer.py",
+        "path": "artifacts/cdg/surfaces/comfyui/run_log_writer.py.source",
+        "size": 12719,
+        "sha256": "80a7ea13cf260dfd8387e1ece2d6f8b4032b70ff42c12fa4301cb2e93dd383f6",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/run_log_writer.py",
+          "git_blob_sha1": "d65d97a36097e51921283b738dc143b44f04c0b2"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.sampler.py",
+        "path": "artifacts/cdg/surfaces/comfyui/sampler.py.source",
+        "size": 20403,
+        "sha256": "0eb2e432733f8628adb24ad8b80dd4f7c605c0c921305fe8c4b767c7a7013688",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/sampler.py",
+          "git_blob_sha1": "50e67d953654330aecd7dcdc24d69d30937d5876"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.socket_types.py",
+        "path": "artifacts/cdg/surfaces/comfyui/socket_types.py.source",
+        "size": 2619,
+        "sha256": "d013df89dd2faf85c4c18f4f5bafb9080a84f2f8fd6db1c10cc4baf7493ef815",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/socket_types.py",
+          "git_blob_sha1": "8aac31fe0e288c90f94d7c27cb6256982384042a"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.tally_audit.py",
+        "path": "artifacts/cdg/surfaces/comfyui/tally_audit.py.source",
+        "size": 5150,
+        "sha256": "d7a74a3988ed794a1c8eca202f96683fd050699342f473082f8675a0bc7af7d9",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/tally_audit.py",
+          "git_blob_sha1": "faa742b2d6b535618350047daf378659bef69724"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.token_trace.py",
+        "path": "artifacts/cdg/surfaces/comfyui/token_trace.py.source",
+        "size": 3965,
+        "sha256": "e5c852db3cf35831b64fadb594a5cbb8bfb0dd0d68b3d9da126a392cafdf79f1",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/token_trace.py",
+          "git_blob_sha1": "6d44239c83e877e7e7da149efa9f200bb1230856"
+        }
+      },
+      {
+        "id": "cdg.source.surfaces.comfyui.trace.py",
+        "path": "artifacts/cdg/surfaces/comfyui/trace.py.source",
+        "size": 12085,
+        "sha256": "beea0fad7f4e27d5aff7278b9dd14c39a4509b0e869fb01d1fca51c66766a789",
+        "status": "present",
+        "required_for": [
+          "BASE-01-source",
+          "BASE-02-source"
+        ],
+        "kind": "product-source",
+        "source_identity": {
+          "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+          "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+          "path": "surfaces/comfyui/trace.py",
+          "git_blob_sha1": "b7cc23bdb6567f09145216952ccf0a1877876150"
+        }
+      }
+    ],
+    "required_gate_categories": {
+      "checkpoint_identity": {
+        "expected": 11,
+        "id_prefix": "official.checkpoint."
+      },
+      "gguf_identity": {
+        "expected": 3,
+        "id_prefix": "gguf."
+      },
+      "gguf_authenticated_lineage": {
+        "expected": 3,
+        "id_prefix": "gguf."
+      }
+    }
+  },
+  "phase_scope_note": "I0 locks and authenticates source, artifact identity, and derivation evidence. Real numerical parity is deferred to I2 GRAPH-04; no source-only or identity-only I0 result claims parity.",
+  "schema_document": "schemas/i0/reference-lock.schema.json",
+  "cdg_source_identities": [
+    {
+      "artifact_id": "cdg.source.init.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "__init__.py",
+      "git_blob_sha1": "2034a703a405b15c08d2be047cc6f05f5e2fb1be",
+      "size": 5460,
+      "sha256": "c4855b4bf9a03b3df81019ad42404127624d30393e81dded4052e9ac8e6f88b6"
+    },
+    {
+      "artifact_id": "cdg.source.consumers.init.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "consumers/__init__.py",
+      "git_blob_sha1": "68a38bda8d61137d1827a06dcfb6653e316e8eae",
+      "size": 781,
+      "sha256": "38bfdc14aa0f6f3485a87832f936b8b345391f64533c4feaebad0d3b0153c9b2"
+    },
+    {
+      "artifact_id": "cdg.source.consumers.analysis.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "consumers/analysis.py",
+      "git_blob_sha1": "98f38e7e60787a05e9986c30930549feeb8fd06f",
+      "size": 16131,
+      "sha256": "f6c51825c93cb5c2cd969bb883b6c65b4bf889f0193f7710eef03316ee5ac6e0"
+    },
+    {
+      "artifact_id": "cdg.source.consumers.run_log.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "consumers/run_log.py",
+      "git_blob_sha1": "e6b2a183aae36ae4eb30f261f07c5bfb17dd95c8",
+      "size": 13582,
+      "sha256": "8fb9027b711386bc1c8b232f84bdc308c68ec393d501b4b3b369f6d09ee945a3"
+    },
+    {
+      "artifact_id": "cdg.source.consumers.tally_audit.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "consumers/tally_audit.py",
+      "git_blob_sha1": "a483f6d3fbd5e30637a870d763834b5eaa3423c0",
+      "size": 28750,
+      "sha256": "ea57034c5c7eb030d3a1ff15c26ab7c6f96134d790e0f61d4cef998a06890867"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.init.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/__init__.py",
+      "git_blob_sha1": "aa46a228b5acc5e04f1459d6e2cbc8e91575d654",
+      "size": 1824,
+      "sha256": "89b32214e45205f582c2cf911d3d9724a35e8dd425b27c0aa87910009a5d0033"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.capture.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/capture.py",
+      "git_blob_sha1": "68bd54e68d4578a753f4c6366ac43c79f786981f",
+      "size": 23847,
+      "sha256": "8053b0e62d353ceb0fef1b1ccaa5f53a3a547b2ae13ea443764de1589ae1f76f"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.compat.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/compat.py",
+      "git_blob_sha1": "a22de73bd8f4ba6b15e795c60349338313d79f9e",
+      "size": 13921,
+      "sha256": "525880eaf4858b0cd0024f6e4abb8de9c4b0aa49ee50f3cb03776f23ca96f8a4"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.composite.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/composite.py",
+      "git_blob_sha1": "999a9fa20a2b5b870126e81b620da74d851d71e4",
+      "size": 13885,
+      "sha256": "8beb485277c740996e1ed9a716383b7381d0ad7be13cfdb83313df8d2c458a83"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.config.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/config.py",
+      "git_blob_sha1": "808211995d9960852f91adafdce5534d121ea9a6",
+      "size": 8811,
+      "sha256": "731e457ca237c22a612b459bb3c6a8167bfb55109bf020048b5d207bec46e250"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.constraints_hook.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/constraints_hook.py",
+      "git_blob_sha1": "3018f67ccf727b598030226f55ee858ec90d93fb",
+      "size": 5341,
+      "sha256": "ca8673fffd516254769747d8dc80645aca08cd0e6e7b148a30f2ec58668881f9"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.excision.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/excision.py",
+      "git_blob_sha1": "23fb7463604e97e605c92fc0e6ead8ae0a1c2f57",
+      "size": 14870,
+      "sha256": "5aa81dd2aca6dd8e21ab66bdeb0034f2d4deca9bebc4a993876e0f1d57736db8"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.hooks.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/hooks.py",
+      "git_blob_sha1": "d8b887b5eb3d6d74fc632242e53a838a1790d567",
+      "size": 5250,
+      "sha256": "ae7a33061fd954173f7813235da201cf2185c4956e1a03322d5aff8e59f59b07"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.ingress.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/ingress.py",
+      "git_blob_sha1": "e6697989eee542f2eee8c69fda74cc62a73f6a1b",
+      "size": 21093,
+      "sha256": "7987d0a0959de9b13bbc9de95556962d67f3ec8fd8aea9fabd014854edd7b663"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.kv_cache.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/kv_cache.py",
+      "git_blob_sha1": "39fd28ceb8f5b9e529516216c153829d14f59dfd",
+      "size": 33234,
+      "sha256": "20e4d13185efa10316315e6f849895ea8f59d249aeb01f60371ead7b16b565a5"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.loop.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/loop.py",
+      "git_blob_sha1": "a2b556d84b1083e82119b84754580ca8de3b8d3f",
+      "size": 57559,
+      "sha256": "c9307d003e97ba3bd51be7239841f9e58ace80eef7843b1c1bb93b783ea34bc4"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.model.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/model.py",
+      "git_blob_sha1": "ee3c6bba4208cc067d2f07d9acaa6b2fef90972d",
+      "size": 57384,
+      "sha256": "f03e4d992e7758691b56aa3bc4c83a1f8b9ae497a2879425ad5ab5bc52ebf9ce"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.participants.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/participants.py",
+      "git_blob_sha1": "8b3d895994badcabc974bc38150d1571219a00ac",
+      "size": 12730,
+      "sha256": "57f412b9379e1264b4f25ea602d92860866f705ad1303420aae32802187ab665"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.payloads.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/payloads.py",
+      "git_blob_sha1": "40c8a560353c9f8d65fc12200679d17e666a3b81",
+      "size": 9169,
+      "sha256": "5a3c25d58410562ce8d67a281a6208e0689db47a5155559830ce777f8bfa3ce2"
+    },
+    {
+      "artifact_id": "cdg.source.dgemma.types.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "dgemma/types.py",
+      "git_blob_sha1": "cc31234ac5333cc64427fdb650d2e75cc18f2636",
+      "size": 30654,
+      "sha256": "28e6186ab4592373144ed283d72a6e94a5e967d7623e97f17c934d913138ccef"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.init.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/__init__.py",
+      "git_blob_sha1": "9d169cfb9932ec40fad0211929b0ec3796033e21",
+      "size": 433,
+      "sha256": "67d4e4924ab384ed202af5a9ccf033df97a56e3c9353085fd3191bc74b09bd1b"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.init.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/__init__.py",
+      "git_blob_sha1": "e07a77d6774c382d9d3471eebac2e5b4894e6824",
+      "size": 1137,
+      "sha256": "2d58fdef276164e011c0f88d069a9cb56a1f2ffddc38848ac742ed22e3f63a2e"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.denoise.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/denoise.py",
+      "git_blob_sha1": "5eeb18d6ee5463c1c06424f9c6f423b7cfe291a6",
+      "size": 17528,
+      "sha256": "a6b89324599042ac1af00e4a3fd44abb7ae7da34fa9276cdad8021a88c9bb0d1"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.emission.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/emission.py",
+      "git_blob_sha1": "cab8c7d3b8c4895c945b8ce62a188e7b4d43c34f",
+      "size": 7329,
+      "sha256": "1fc265f182a1b347913f8ad22dba9ac85b13dcea6f1ed80f2ef6bae1a32f0214"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.encode.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/encode.py",
+      "git_blob_sha1": "3e039e9c21432f093cc61a1381dd5f2bfa00dde3",
+      "size": 5524,
+      "sha256": "ddac40328ae9a8c4b1602cc5a324cd611df059b0db895bed5c9120e5a8e801b3"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.frames_image.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/frames_image.py",
+      "git_blob_sha1": "bfde4c651e790425bd6a0b78fb71f77d8d47cc6c",
+      "size": 15763,
+      "sha256": "ad34db13d69c6bbe91db206f8cd0ab6c6b1c4642b273a08732cd4bc7bdbf3a05"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.live_view.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/live_view.py",
+      "git_blob_sha1": "15062362d022a17e5c24316e774393af6e6d36ae",
+      "size": 6525,
+      "sha256": "4b2efb2e8b8e1f9069b8f79e60335b4d36b3ac83a204cc354a7d2b79de12d23d"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.loader.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/loader.py",
+      "git_blob_sha1": "fb58a14a16111aeeb5cf3b533ba49ef6e8c6ef2f",
+      "size": 18166,
+      "sha256": "666e68391ca1347087b67cd1f37364c70191d1dd58a172b7ec24c3c02f2ae5ca"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.run_log_writer.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/run_log_writer.py",
+      "git_blob_sha1": "d65d97a36097e51921283b738dc143b44f04c0b2",
+      "size": 12719,
+      "sha256": "80a7ea13cf260dfd8387e1ece2d6f8b4032b70ff42c12fa4301cb2e93dd383f6"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.sampler.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/sampler.py",
+      "git_blob_sha1": "50e67d953654330aecd7dcdc24d69d30937d5876",
+      "size": 20403,
+      "sha256": "0eb2e432733f8628adb24ad8b80dd4f7c605c0c921305fe8c4b767c7a7013688"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.socket_types.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/socket_types.py",
+      "git_blob_sha1": "8aac31fe0e288c90f94d7c27cb6256982384042a",
+      "size": 2619,
+      "sha256": "d013df89dd2faf85c4c18f4f5bafb9080a84f2f8fd6db1c10cc4baf7493ef815"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.tally_audit.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/tally_audit.py",
+      "git_blob_sha1": "faa742b2d6b535618350047daf378659bef69724",
+      "size": 5150,
+      "sha256": "d7a74a3988ed794a1c8eca202f96683fd050699342f473082f8675a0bc7af7d9"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.token_trace.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/token_trace.py",
+      "git_blob_sha1": "6d44239c83e877e7e7da149efa9f200bb1230856",
+      "size": 3965,
+      "sha256": "e5c852db3cf35831b64fadb594a5cbb8bfb0dd0d68b3d9da126a392cafdf79f1"
+    },
+    {
+      "artifact_id": "cdg.source.surfaces.comfyui.trace.py",
+      "repository": "https://github.com/shanevcantwell/ComfyUI-DiffusionGemma",
+      "revision": "fed377afc7b54f03cb7faa4dd798c80c15279d8a",
+      "path": "surfaces/comfyui/trace.py",
+      "git_blob_sha1": "b7cc23bdb6567f09145216952ccf0a1877876150",
+      "size": 12085,
+      "sha256": "beea0fad7f4e27d5aff7278b9dd14c39a4509b0e869fb01d1fca51c66766a789"
+    }
+  ],
+  "gguf_lineage_policy": {
+    "status": "UNBOUND",
+    "gate_rule": "Each GGUF byte artifact and its derivation record/tool log are separate mandatory evidence. Prospective lineage PASS requires exactly three bound lineages with globally unique BF16/Q8_0/Q4_K_M derivation IDs and globally unique artifact- and role-qualified record/log descriptor IDs. Non-null anchors live in this Git-controlled lock; mutable manifest descriptors and authenticated bytes must match those anchors exactly, while all evidence paths and inodes remain pairwise distinct.",
+    "required_record_fields": [
+      "artifact and derivation IDs",
+      "exact official checkpoint input identities and digests in order",
+      "additional input identities and digests in order",
+      "selected converter repository/revision/path/Git blob/SHA-256",
+      "full conversion command argv and configuration",
+      "exact tool repository/revision/source-tree digest/binary SHA-256 and size/build identity/options",
+      "quantization type and parameters",
+      "output ID, size and SHA-256",
+      "structured completion status and exit code in the command log",
+      "globally unique artifact- and role-qualified Git-lock record/log IDs, sizes and SHA-256 anchors"
+    ],
+    "numerical_parity_phase": "I2 GRAPH-04"
+  }
+}

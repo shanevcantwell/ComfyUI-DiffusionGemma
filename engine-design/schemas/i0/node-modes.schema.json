@@ -1,0 +1,549 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:comfyui-diffusiongemma:dg-engine:i0:node-modes-schema:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "kind",
+    "draft",
+    "gate_eligible",
+    "baseline",
+    "observed_worktree",
+    "baseline_delta",
+    "registered_node_count",
+    "object_info_contract",
+    "nodes",
+    "confirmed_deltas_and_defects",
+    "schema_document",
+    "registered_mapping_evidence"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "urn:comfyui-diffusiongemma:dg-engine:i0:node-modes:v1"
+    },
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "dg-engine-i0-node-modes"
+    },
+    "draft": {
+      "type": "boolean"
+    },
+    "gate_eligible": {
+      "type": "boolean"
+    },
+    "baseline": {
+      "$ref": "#/$defs/commit"
+    },
+    "observed_worktree": {
+      "$ref": "#/$defs/commit"
+    },
+    "baseline_delta": {
+      "type": "object",
+      "required": [
+        "status",
+        "changed_preexisting_paths",
+        "note"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "changed_preexisting_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "registered_node_count": {
+      "const": 8
+    },
+    "object_info_contract": {
+      "type": "object",
+      "required": [
+        "comfyui_repository",
+        "comfyui_revision",
+        "source",
+        "endpoints",
+        "always_present",
+        "conditional",
+        "python_module",
+        "outer_shape",
+        "input_encoding",
+        "runtime_variability",
+        "double_evaluation"
+      ],
+      "properties": {
+        "comfyui_revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "server.py",
+            "nodes.py"
+          ],
+          "properties": {
+            "server.py": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "lines",
+                "sha256",
+                "artifact_id",
+                "url"
+              ],
+              "properties": {
+                "lines": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "artifact_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            },
+            "nodes.py": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "lines",
+                "sha256",
+                "artifact_id",
+                "url"
+              ],
+              "properties": {
+                "lines": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "artifact_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "always_present": {
+          "type": "array",
+          "minItems": 14,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "conditional": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "python_module": {
+          "type": "string"
+        },
+        "comfyui_repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "outer_shape": {
+          "type": "string"
+        },
+        "input_encoding": {
+          "type": "string"
+        },
+        "runtime_variability": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "double_evaluation": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "mapping_key",
+          "registered_class",
+          "display_name",
+          "source",
+          "function",
+          "category",
+          "description",
+          "input_is_list",
+          "output_node",
+          "modes",
+          "backend_modes",
+          "cancellation",
+          "capabilities",
+          "fail_loud",
+          "object_info_projection",
+          "source_sha256",
+          "baseline_git_blob_sha1",
+          "source_range",
+          "call_topology"
+        ],
+        "properties": {
+          "mapping_key": {
+            "type": "string"
+          },
+          "registered_class": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "function": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "input_is_list": {
+            "type": "boolean"
+          },
+          "output_node": {
+            "type": "boolean"
+          },
+          "modes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "minProperties": 2
+            }
+          },
+          "backend_modes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "cancellation": {
+            "type": "object",
+            "minProperties": 2
+          },
+          "capabilities": {
+            "type": "object",
+            "minProperties": 1
+          },
+          "fail_loud": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "object_info_projection": {
+            "$ref": "#/$defs/objectInfo"
+          },
+          "source_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "baseline_git_blob_sha1": {
+            "$ref": "#/$defs/blob"
+          },
+          "source_range": {
+            "type": "string",
+            "minLength": 1
+          },
+          "call_topology": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "confirmed_deltas_and_defects": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "fact",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fact": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "schema_document": {
+      "const": "schemas/i0/node-modes.schema.json"
+    },
+    "registered_mapping_evidence": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "blob": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "objectInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "input_order",
+        "is_input_list",
+        "output",
+        "output_is_list",
+        "output_name",
+        "name",
+        "display_name",
+        "description",
+        "python_module",
+        "category",
+        "output_node",
+        "has_intermediate_output",
+        "search_aliases"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "required": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/inputDescriptor"
+              }
+            },
+            "optional": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/inputDescriptor"
+              }
+            },
+            "hidden": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/inputDescriptor"
+              }
+            }
+          }
+        },
+        "input_order": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "optional": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "hidden": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "is_input_list": {
+          "type": "boolean"
+        },
+        "output": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "output_is_list": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "output_name": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "python_module": {
+          "const": "custom_nodes.ComfyUI-DiffusionGemma"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_node": {
+          "type": "boolean"
+        },
+        "has_intermediate_output": {
+          "type": "boolean"
+        },
+        "search_aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "output_tooltips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deprecated": {
+          "const": true
+        },
+        "experimental": {
+          "const": true
+        },
+        "dev_only": {
+          "const": true
+        },
+        "api_node": {},
+        "essentials_category": {}
+      }
+    },
+    "inputDescriptor": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
+            },
+            {
+              "type": "object"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

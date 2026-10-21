@@ -1,0 +1,751 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "kind",
+    "schema_document",
+    "oracle_profile",
+    "phase_scalars",
+    "mask_cache",
+    "trace",
+    "entropy_bound",
+    "common_draws",
+    "lengths",
+    "distribution_budget"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "urn:comfyui-diffusiongemma:dg-engine:i0:semantic-fixtures:v1"
+    },
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "dg-engine-i0-semantic-fixtures"
+    },
+    "schema_document": {
+      "const": "schemas/i0/semantics.schema.json"
+    },
+    "oracle_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canvas_length",
+        "vocab_size",
+        "num_inference_steps",
+        "entropy_bound",
+        "t_min",
+        "t_max",
+        "confidence_threshold",
+        "stability_threshold",
+        "self_conditioning"
+      ],
+      "properties": {
+        "canvas_length": {
+          "type": "integer"
+        },
+        "vocab_size": {
+          "type": "integer"
+        },
+        "num_inference_steps": {
+          "type": "integer"
+        },
+        "entropy_bound": {
+          "type": "number"
+        },
+        "t_min": {
+          "type": "number"
+        },
+        "t_max": {
+          "type": "number"
+        },
+        "confidence_threshold": {
+          "type": "number"
+        },
+        "stability_threshold": {
+          "type": "integer"
+        },
+        "self_conditioning": {
+          "type": "string"
+        }
+      }
+    },
+    "phase_scalars": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "encoder_scalar",
+        "decoder_scalar",
+        "encoder_expected",
+        "decoder_expected",
+        "missing_tensor_disposition"
+      ],
+      "properties": {
+        "input": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "encoder_scalar": {
+          "type": "number"
+        },
+        "decoder_scalar": {
+          "type": "number"
+        },
+        "encoder_expected": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "decoder_expected": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "missing_tensor_disposition": {
+          "type": "string"
+        }
+      }
+    },
+    "mask_cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "small_window",
+        "prefix_lengths",
+        "canvas_lengths",
+        "sliding_prefix_rule",
+        "full_rule",
+        "canvas_visibility",
+        "absolute_positions",
+        "rollback",
+        "eviction_examples"
+      ],
+      "properties": {
+        "small_window": {
+          "type": "integer"
+        },
+        "prefix_lengths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "canvas_lengths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "sliding_prefix_rule": {
+          "type": "string"
+        },
+        "full_rule": {
+          "type": "string"
+        },
+        "canvas_visibility": {
+          "type": "string"
+        },
+        "absolute_positions": {
+          "type": "string"
+        },
+        "rollback": {
+          "type": "string"
+        },
+        "eviction_examples": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "prefix_length",
+              "retained_prefix"
+            ],
+            "properties": {
+              "prefix_length": {
+                "type": "integer"
+              },
+              "retained_prefix": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage_order",
+        "legacy_cdg_stage",
+        "temperature",
+        "top_k",
+        "model_output",
+        "pins",
+        "constraint_output",
+        "null_logit_meaning",
+        "sampler_input",
+        "top_k_weights_meaning",
+        "retained_mass_meaning",
+        "absent_optional_field"
+      ],
+      "properties": {
+        "stage_order": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "legacy_cdg_stage": {
+          "type": "string"
+        },
+        "temperature": {
+          "type": "number"
+        },
+        "top_k": {
+          "type": "integer"
+        },
+        "model_output": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "pins": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position",
+              "token_id"
+            ],
+            "properties": {
+              "position": {
+                "type": "integer"
+              },
+              "token_id": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "constraint_output": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "number"
+                }
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "null_logit_meaning": {
+          "type": "string"
+        },
+        "sampler_input": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "number"
+                }
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "top_k_weights_meaning": {
+          "type": "string"
+        },
+        "retained_mass_meaning": {
+          "type": "string"
+        },
+        "absent_optional_field": {
+          "type": "null"
+        }
+      }
+    },
+    "entropy_bound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule",
+        "cases",
+        "threshold_margin",
+        "invalid_entropies",
+        "decommit_fixture",
+        "temperature_schedules"
+      ],
+      "properties": {
+        "rule": {
+          "type": "string"
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "entropies",
+              "bound",
+              "accepted_positions"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "entropies": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "number"
+                }
+              },
+              "bound": {
+                "type": "number"
+              },
+              "accepted_positions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "threshold_margin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entropies",
+            "boundary",
+            "below",
+            "at",
+            "above",
+            "second_position_expected"
+          ],
+          "properties": {
+            "entropies": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "number"
+              }
+            },
+            "boundary": {
+              "type": "number"
+            },
+            "below": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            },
+            "above": {
+              "type": "string"
+            },
+            "second_position_expected": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "invalid_entropies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "decommit_fixture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "step_0_entropies",
+            "step_1_entropies",
+            "bound",
+            "meaning"
+          ],
+          "properties": {
+            "step_0_entropies": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "number"
+              }
+            },
+            "step_1_entropies": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "number"
+              }
+            },
+            "bound": {
+              "type": "number"
+            },
+            "meaning": {
+              "type": "string"
+            }
+          }
+        },
+        "temperature_schedules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "steps",
+                  "temperatures"
+                ],
+                "properties": {
+                  "steps": {
+                    "type": "integer"
+                  },
+                  "temperatures": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "steps",
+                  "first",
+                  "last"
+                ],
+                "properties": {
+                  "steps": {
+                    "type": "integer"
+                  },
+                  "first": {
+                    "type": "number"
+                  },
+                  "last": {
+                    "type": "number"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "common_draws": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vocab_size",
+        "initial_canvas_token_draws",
+        "steps",
+        "consumption_order",
+        "early_stop",
+        "error"
+      ],
+      "properties": {
+        "vocab_size": {
+          "type": "integer"
+        },
+        "initial_canvas_token_draws": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "step",
+              "categorical_uniforms",
+              "categorical_probabilities",
+              "categorical_expected",
+              "uniform_renoise_token_draws",
+              "accepted_mask",
+              "next_canvas_expected"
+            ],
+            "properties": {
+              "step": {
+                "type": "integer"
+              },
+              "categorical_uniforms": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "number"
+                }
+              },
+              "categorical_probabilities": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              },
+              "categorical_expected": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "uniform_renoise_token_draws": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "accepted_mask": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "boolean"
+                }
+              },
+              "next_canvas_expected": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "consumption_order": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "early_stop": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "lengths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trained_canvas_width",
+        "eos_absent",
+        "requested_length_role",
+        "returned_padding",
+        "eos",
+        "eos_trim_cases",
+        "thought_excision",
+        "logical_positions"
+      ],
+      "properties": {
+        "trained_canvas_width": {
+          "type": "integer"
+        },
+        "eos_absent": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requested",
+              "executed_blocks",
+              "raw_returned_width"
+            ],
+            "properties": {
+              "requested": {
+                "type": "integer"
+              },
+              "executed_blocks": {
+                "type": "integer"
+              },
+              "raw_returned_width": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "requested_length_role": {
+          "type": "string"
+        },
+        "returned_padding": {
+          "type": "string"
+        },
+        "eos": {
+          "type": "string"
+        },
+        "eos_trim_cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "raw",
+              "eos_id",
+              "decode",
+              "position"
+            ],
+            "properties": {
+              "raw": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "eos_id": {
+                "type": "integer"
+              },
+              "decode": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "position": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "thought_excision": {
+          "type": "string"
+        },
+        "logical_positions": {
+          "type": "string"
+        }
+      }
+    },
+    "distribution_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shape",
+        "dtype",
+        "element_bytes",
+        "elements",
+        "bytes",
+        "mib",
+        "allocation_rule"
+      ],
+      "properties": {
+        "shape": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "dtype": {
+          "type": "string"
+        },
+        "element_bytes": {
+          "type": "integer"
+        },
+        "elements": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "mib": {
+          "type": "integer"
+        },
+        "allocation_rule": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:comfyui-diffusiongemma:dg-engine:i0:semantics-schema:v1"
+}

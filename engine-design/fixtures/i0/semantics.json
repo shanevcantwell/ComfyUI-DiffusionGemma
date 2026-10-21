@@ -1,0 +1,142 @@
+{
+  "$schema": "urn:comfyui-diffusiongemma:dg-engine:i0:semantic-fixtures:v1",
+  "schema": 1,
+  "kind": "dg-engine-i0-semantic-fixtures",
+  "schema_document": "schemas/i0/semantics.schema.json",
+  "oracle_profile": {
+    "canvas_length": 256,
+    "vocab_size": 262144,
+    "num_inference_steps": 48,
+    "entropy_bound": 0.1,
+    "t_min": 0.4,
+    "t_max": 0.8,
+    "confidence_threshold": 0.005,
+    "stability_threshold": 1,
+    "self_conditioning": "full-softmax over temperature-shaped pred_logits"
+  },
+  "phase_scalars": {
+    "input": [1.0, -2.0, 0.5],
+    "encoder_scalar": 2.0,
+    "decoder_scalar": 3.0,
+    "encoder_expected": [2.0, -4.0, 1.0],
+    "decoder_expected": [3.0, -6.0, 1.5],
+    "missing_tensor_disposition": "reject-load"
+  },
+  "mask_cache": {
+    "small_window": 4,
+    "prefix_lengths": [0, 1, 3, 4, 5, 9],
+    "canvas_lengths": [1, 256],
+    "sliding_prefix_rule": "logical positions max(0,P-W+1) through P-1, then every canvas position P through P+C-1",
+    "full_rule": "every valid prefix position 0 through P-1, then every canvas position P through P+C-1",
+    "canvas_visibility": "every decoder canvas query sees the same full canvas key set, including far-left to far-right and far-right to far-left",
+    "absolute_positions": "logical positions do not renumber when a sliding prefix evicts stored keys",
+    "rollback": "denoise scratch and failed operations leave borrowed prefix bytes, digest, logical range, and length unchanged",
+    "eviction_examples": [
+      {"prefix_length": 3, "retained_prefix": [0, 1, 2]},
+      {"prefix_length": 4, "retained_prefix": [1, 2, 3]},
+      {"prefix_length": 5, "retained_prefix": [2, 3, 4]},
+      {"prefix_length": 9, "retained_prefix": [6, 7, 8]}
+    ]
+  },
+  "trace": {
+    "stage_order": ["model_output", "constraint_output", "sampler_input", "sample", "capture", "cancellation", "beta_rebuild", "pin", "walker"],
+    "legacy_cdg_stage": "constraint_output",
+    "temperature": 0.5,
+    "top_k": 2,
+    "model_output": [[2.0, 1.0, 0.0], [0.0, 1.0, 2.0]],
+    "pins": [{"position": 1, "token_id": 0}],
+    "constraint_output": [[2.0, 1.0, 0.0], [4.0, null, null]],
+    "null_logit_meaning": "negative infinity",
+    "sampler_input": [[4.0, 2.0, 0.0], [8.0, null, null]],
+    "top_k_weights_meaning": "conditional probability renormalized over retained k",
+    "retained_mass_meaning": "sum of full-softmax probability at the retained top-k token ids",
+    "absent_optional_field": null
+  },
+  "entropy_bound": {
+    "rule": "stable-sort by (entropy, logical_position); accept sorted j when sum(h[0:j+1])-h[j] <= bound; scatter to logical positions; recompute every step",
+    "cases": [
+      {"id": "bound-zero", "entropies": [0.0, 0.2, 0.4], "bound": 0.0, "accepted_positions": [0, 1]},
+      {"id": "cumulative-not-independent", "entropies": [0.1, 0.2, 0.9], "bound": 0.15, "accepted_positions": [0, 1]},
+      {"id": "all-equal-tie", "entropies": [0.25, 0.25, 0.25, 0.25], "bound": 0.5, "accepted_positions": [0, 1, 2]},
+      {"id": "tie-logical-order", "entropies": [0.3, 0.1, 0.1, 0.8], "bound": 0.1, "accepted_positions": [1, 2]},
+      {"id": "highly-skewed", "entropies": [0.0001, 0.0002, 8.0], "bound": 0.00011, "accepted_positions": [0, 1]}
+    ],
+    "threshold_margin": {
+      "entropies": [0.125, 0.25],
+      "boundary": 0.125,
+      "below": "nextafter(boundary,-infinity)",
+      "at": "boundary",
+      "above": "nextafter(boundary,+infinity)",
+      "second_position_expected": [false, true, true]
+    },
+    "invalid_entropies": ["NaN", "+Infinity", "-Infinity"],
+    "decommit_fixture": {
+      "step_0_entropies": [0.01, 0.8],
+      "step_1_entropies": [0.8, 0.01],
+      "bound": 0.0,
+      "meaning": "accepted masks are independently recomputed; a position accepted at step 0 may be rejected at step 1"
+    },
+    "temperature_schedules": [
+      {"steps": 1, "temperatures": [0.8]},
+      {"steps": 2, "temperatures": [0.8, 0.6000000000000001]},
+      {"steps": 48, "first": 0.8, "last": 0.4083333333333334}
+    ]
+  },
+  "common_draws": {
+    "vocab_size": 8,
+    "initial_canvas_token_draws": [6, 0, 7, 3],
+    "steps": [
+      {
+        "step": 0,
+        "categorical_uniforms": [0.05, 0.60, 0.95, 0.25],
+        "categorical_probabilities": [[0.1, 0.2, 0.3, 0.4], [0.7, 0.1, 0.1, 0.1], [0.25, 0.25, 0.25, 0.25], [0.0, 0.5, 0.5, 0.0]],
+        "categorical_expected": [0, 0, 3, 1],
+        "uniform_renoise_token_draws": [5, 1, 7, 0],
+        "accepted_mask": [true, true, false, false],
+        "next_canvas_expected": [0, 0, 7, 0]
+      },
+      {
+        "step": 1,
+        "categorical_uniforms": [0.40, 0.79, 0.01, 0.99],
+        "categorical_probabilities": [[0.5, 0.5], [0.2, 0.8], [0.9, 0.1], [0.99, 0.01]],
+        "categorical_expected": [0, 1, 0, 1],
+        "uniform_renoise_token_draws": [2, 4, 6, 1],
+        "accepted_mask": [false, true, true, false],
+        "next_canvas_expected": [2, 1, 0, 1]
+      }
+    ],
+    "consumption_order": ["initial_canvas_token_draws", "step.categorical_uniforms for every position", "step.uniform_renoise_token_draws for every position"],
+    "early_stop": "after a step is entered, all categorical and all uniform-renoise draws for that step are consumed; no later-step draws are consumed",
+    "error": "an ingress error consumes no draws; an error after step RNG records the consumed prefix as evidence"
+  },
+  "lengths": {
+    "trained_canvas_width": 256,
+    "eos_absent": [
+      {"requested": 1, "executed_blocks": 1, "raw_returned_width": 256},
+      {"requested": 255, "executed_blocks": 1, "raw_returned_width": 256},
+      {"requested": 256, "executed_blocks": 1, "raw_returned_width": 256},
+      {"requested": 257, "executed_blocks": 2, "raw_returned_width": 512},
+      {"requested": 512, "executed_blocks": 2, "raw_returned_width": 512}
+    ],
+    "requested_length_role": "block-budget selector via ceil(requested/256), not a partial canvas width",
+    "returned_padding": "none is inserted to satisfy requested length; complete trained-width blocks are returned",
+    "eos": "generation stops only after completing the block containing EOS; raw block IDs remain complete while decode input trims after and includes first EOS",
+    "eos_trim_cases": [
+      {"raw": [9, 2, 3, 4], "eos_id": 9, "decode": [9], "position": "first"},
+      {"raw": [1, 2, 9, 4], "eos_id": 9, "decode": [1, 2, 9], "position": "middle"},
+      {"raw": [1, 2, 3, 9], "eos_id": 9, "decode": [1, 2, 3, 9], "position": "last"},
+      {"raw": [1, 2, 3, 4], "eos_id": 9, "decode": [1, 2, 3, 4], "position": "absent"}
+    ],
+    "thought_excision": "applies after raw IDs are retained and is separate from EOS decode trimming",
+    "logical_positions": "block b occupies prefix_end+b*256 through prefix_end+(b+1)*256-1"
+  },
+  "distribution_budget": {
+    "shape": [256, 262144],
+    "dtype": "float32",
+    "element_bytes": 4,
+    "elements": 67108864,
+    "bytes": 268435456,
+    "mib": 256,
+    "allocation_rule": "checked dimension product and byte multiplication before allocation; reject overflow, budget excess, and OOM"
+  }
+}

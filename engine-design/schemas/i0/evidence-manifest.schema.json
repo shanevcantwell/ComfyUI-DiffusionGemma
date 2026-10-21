@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:comfyui-diffusiongemma:dg-engine:i0:evidence-manifest-schema:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema",
+    "kind",
+    "contract_artifact_set_sha256",
+    "artifacts"
+  ],
+  "properties": {
+    "$schema": {"const": "urn:comfyui-diffusiongemma:dg-engine:i0:evidence-manifest:v1"},
+    "schema": {"const": 1},
+    "kind": {"const": "dg-engine-i0-evidence-manifest"},
+    "contract_artifact_set_sha256": {
+      "const": "b66b5081df7e9a2ccc58dcdd00008e8a7c051021548fe76b7bd6f966426dbfbe"
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 91,
+      "maxItems": 91,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/presentDescriptor"},
+          {"$ref": "#/$defs/absentDescriptor"}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*\\/$).+$"
+    },
+    "requiredFor": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["BASE-01-source", "BASE-02-source", "BASE-02-gate"]
+      }
+    },
+    "artifactKind": {
+      "enum": ["reference-source", "product-source", "official-checkpoint", "gguf-model"]
+    },
+    "descriptorProperties": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "required_for": {"$ref": "#/$defs/requiredFor"},
+        "kind": {"$ref": "#/$defs/artifactKind"},
+        "blocker": {"type": "string", "minLength": 1}
+      }
+    },
+    "presentDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "path", "size", "sha256", "required_for", "kind"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"const": "present"},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "required_for": {"$ref": "#/$defs/requiredFor"},
+        "kind": {"$ref": "#/$defs/artifactKind"},
+        "blocker": {"type": "string", "minLength": 1},
+        "derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["record", "command_log"],
+          "properties": {
+            "record": {"$ref": "#/$defs/recordDescriptor"},
+            "command_log": {"$ref": "#/$defs/commandLogDescriptor"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"id": {"pattern": "^gguf\\."}}, "required": ["id"]},
+          "then": {"required": ["derivation"]},
+          "else": {"not": {"required": ["derivation"]}}
+        },
+        {
+          "if": {"properties": {"id": {"const": "gguf.bf16"}}, "required": ["id"]},
+          "then": {"properties": {"derivation": {"properties": {
+            "record": {"properties": {"id": {"const": "gguf.bf16.derivation-record"}}},
+            "command_log": {"properties": {"id": {"const": "gguf.bf16.command-log"}}}
+          }}}}
+        },
+        {
+          "if": {"properties": {"id": {"const": "gguf.q8_0"}}, "required": ["id"]},
+          "then": {"properties": {"derivation": {"properties": {
+            "record": {"properties": {"id": {"const": "gguf.q8_0.derivation-record"}}},
+            "command_log": {"properties": {"id": {"const": "gguf.q8_0.command-log"}}}
+          }}}}
+        },
+        {
+          "if": {"properties": {"id": {"const": "gguf.q4_k_m"}}, "required": ["id"]},
+          "then": {"properties": {"derivation": {"properties": {
+            "record": {"properties": {"id": {"const": "gguf.q4_k_m.derivation-record"}}},
+            "command_log": {"properties": {"id": {"const": "gguf.q4_k_m.command-log"}}}
+          }}}}
+        }
+      ]
+    },
+    "absentDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "status", "path", "size", "sha256", "required_for", "kind", "blocker"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"const": "absent"},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "required_for": {"$ref": "#/$defs/requiredFor"},
+        "kind": {"$ref": "#/$defs/artifactKind"},
+        "blocker": {"type": "string", "minLength": 1}
+      }
+    },
+    "fileDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "size", "sha256"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "recordDescriptor": {
+      "allOf": [
+        {"$ref": "#/$defs/fileDescriptor"},
+        {"properties": {"id": {"type": "string", "pattern": "^gguf\\.(bf16|q8_0|q4_k_m)\\.derivation-record$"}}}
+      ]
+    },
+    "commandLogDescriptor": {
+      "allOf": [
+        {"$ref": "#/$defs/fileDescriptor"},
+        {"properties": {"id": {"type": "string", "pattern": "^gguf\\.(bf16|q8_0|q4_k_m)\\.command-log$"}}}
+      ]
+    }
+  }
+}
