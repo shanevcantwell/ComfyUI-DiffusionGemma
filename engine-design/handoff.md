@@ -1,54 +1,125 @@
-# Code-harness handoff: start here
+# DiffusionGemma native-engine handoff
 
-Implement the text engine described in this package, using the phase workflow below. Do not replace the work with another plan-only pass: I0 completes the explicitly missing source/fixture work, then I1 starts the implementation. The user authorized staged implementation and technical gates without making the user the C++ reviewer. The operator's early hands-on checkpoints are I2 and I3; public distribution waits for all current nodes and I5 qualification.
+## Status
 
-## Retrieve the isolated branch
+- **Overall:** BLOCKED before I1.
+- **Native engine:** not implemented.
+- **I1:** not started.
+- **Validated capability:** no real-weight parity, CUDA, ComfyUI integration, release, or phase PASS.
+- **Image lane:** disabled.
 
-From the user's existing CDG repository, inspect `git status --short` and `git worktree list --porcelain` first. Do not reset, stash, clean, merge or modify other work. Fetch only the new branch:
+## Authority and seat
 
-    git fetch origin refs/heads/design/dg-engine-20261019:refs/remotes/origin/design/dg-engine-20261019
+- **Repository:** `https://github.com/shanevcantwell/ComfyUI-DiffusionGemma`
+- **Branch:** `design/dg-engine-20261019`
+- **Active worktree:** `~/worktrees/ComfyUI-DiffusionGemma-dg-engine`
+- **Workflow ledger:** [issue #312](https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/312)
+- **Canonical Ground Physics:** `~/github/shanevcantwell/operating-doctrine/ground-physics/GROUND_PHYSICS.md`
+- Do not work from the detached repository root or the dirty main worktree.
 
-If the local branch does not exist and the destination path is unused:
+## Durable branch state
 
-    git worktree add --track -b design/dg-engine-20261019 ../CDG-dg-engine origin/design/dg-engine-20261019
+Facts:
 
-If the branch already exists, use its existing worktree or add it without `-b` at a fresh path after checking it is not checked out elsewhere. A detached worktree is not permission to create another integration branch. Do not force a branch reset to match remote. Compare any local divergence and record its disposition before writing.
+- `acdbdaa` is the blocked I0 evidence-contract checkpoint.
+- `3299ceb` is a non-authoritative worker-harness bootstrap. It is not an I0 PASS or an implementation base to promote by default.
+- Local and upstream branch tips are both `3299ceb27b835a85f7da6a5f49d730b57b2f6429`.
+- The branch was clean at task entry; this handoff replacement is the only intended uncommitted path.
+- No implementation phase tag, receipt, release artifact, or implementation claim exists.
 
-The chat's local package-only worktree is not a full clone. Fetching the remote branch is the normal handoff path; every original CDG file remains in its base tree. All changes from this design are under `engine-design/` plus `.github/workflows/dg-engine-design.yml`.
+## Scope correction
 
-## Verify the tooling, then dispatch I0
+Use the threat model of reviewed maintainer code running in ordinary trusted CI.
 
-Run from the resulting worktree root:
+In scope:
 
-    cmake -S engine-design -B ../dg-engine-design-checks
-    cmake --build ../dg-engine-design-checks
-    ctest --test-dir ../dg-engine-design-checks --output-on-failure --no-tests=error
-    python engine-design/tools/workflow.py plan text
-    python engine-design/tools/workflow.py packet text I0
+- detect source or artifact drift;
+- reject missing, stale, or malformed evidence;
+- surface test failures;
+- prevent accidental process leaks and bound worker resources.
 
-Read `sources.md`, `requirements.json`, `architecture.md`, `protocol.md`, `decisions.md`, `verification.md`, `workflows/README.md` and `workflows/phase-scope.md`. Give Explore the missing-source inventory, not an unbounded repository search. Its durable output is the source lock, all-node-mode inventory and conflict dispositions. Assign a separate verifier and fresh model and systems/security reviewers. They must inspect source and evidence, not merely paraphrase this design.
+Out of scope:
 
-The C header is a proposed facade with declarations only. Implement the smallest source-correct native model/step core first. Finalize export visibility, error ownership, allocation/fault semantics and exact phase transitions in the I1 contract review. Do not assume a header compiling proves an implementation can link or run. Do not mistake `src/llama-ext.h` for a stable stock-llama plugin ABI.
+- malicious candidate code;
+- hostile same-UID processes;
+- root or kernel compromise;
+- malicious CI or reviewer infrastructure;
+- candidate-independent trust roots, CI root rotation, and recursive attestation.
 
-## Execute and promote each implementation phase
+The worker subprocess is for fault and resource isolation. It is not a security sandbox. Do not continue hostile-candidate sandboxing, external-root/fix23 work, or bespoke attestation in CDG.
 
-Use the cumulative test IDs in text.json and the concrete cases in verification.md plus phase-scope.md. Implement tests before claiming the corresponding capability. Bank raw failed and passing results with the actual code, model, tokenizer, converter, binary, backend and device identities. Match measurements to the exact candidate commit and a clean source worktree. Large traces use checksummed evidence-store pointers; do not inflate the Git repository with model weights or leave irreplaceable evidence only in a console.
+## Retain from I0
 
-After separate verifier/reviewer sessions complete, create a receipt following workflows/README.md and run:
+These artifacts remain useful:
 
-    python engine-design/tools/workflow.py hashes text
-    python engine-design/tools/workflow.py check text I0 /path/to/bank/I0.json --evidence-dir /path/to/bank --commit <tested-commit-sha>
+- `engine-design/reference.lock.json`;
+- `engine-design/node-modes.json`;
+- `engine-design/source-conflicts.md`;
+- semantic fixtures and baseline-defect fixtures;
+- schemas required by those records;
+- ordinary fail-closed BASE tests;
+- exact artifact and lineage blockers;
+- AutoRound exclusion from native-engine distribution and release evidence.
 
-The harness obtains the tested SHA from Git, not from the receipt. It checks that prerequisite candidate SHAs are ancestors and that report identities are genuine separate sessions. Every later gate reruns all cumulative required groups at its own candidate. Missing weights, busy GPUs, zero collection, skips, failed review or unavailable evidence remain BLOCKED, not PASS. Rework within scope belongs to the technical roles; changes to product intent return as a documented scope question, not a C++ quiz.
+## Do not promote
 
-A GPU lease is required before a real-weight run. Do not kill or displace unrelated work. The initial numerical oracle is the exact HF reference, compared with unquantized GGUF before Q8/Q4. The draft PR implementations are comparison/donor arms, not correctness authorities. Preserve raw failures and calibrate error tolerances before testing candidate changes.
+- Do not treat the `3299ceb` harness as an authority.
+- Do not merge or promote the external-root/fix23 plan.
+- Do not turn reusable import-attestation or security-platform machinery into CDG product scope.
+- Preserve this history for diagnosis. Reuse requires a separately approved scope.
 
-After a gate passes, bank its evidence pointer and create an immutable annotated implementation tag. Distinguish the tested candidate from a later evidence-only commit: bind the receipt to the candidate SHA, tag that candidate, and identify the evidence-only descendant explicitly. Do not claim a newly changed source commit was tested under its parent's SHA. Push only this branch and the exact phase tags; never `--tags`, force-push or overwrite existing tags. Use `Assisted-by: GPT-6 Astra Pro` when this design/code materially contributed, alongside the executing harness's actual identity.
+## Current blockers
 
-## Image lane and upstream lane
+- `/mnt/storage` is mounted read-only.
+- `build/evidence` is a dangling link to the intended evidence store.
+- Eleven official checkpoint shard objects are not provisioned in the evidence store; cached model bytes do not satisfy that gate.
+- The selected-lineage BF16, Q8_0, and Q4_K_M GGUF artifacts are not provisioned.
+- Three GGUF derivation records and their command/tool evidence are absent.
+- ADR-CDG-020 requires an explicit sourcing and ownership decision before owned-patch or native-graph work.
+- The observed local Q8 differs from the selected remote identity by 128 bytes and SHA-256; do not substitute it.
+- AutoRound is excluded from distribution and is not a blocker.
 
-    python engine-design/tools/workflow.py packet image M0
+External prerequisites keep the bracket BLOCKED. More gate machinery does not resolve them.
 
-This is planning only. Image gate checking refuses because the workflow is disabled. Do not add image inference code without a later scope change. Text adapters must leave a path for libmtmd/Gemma4 image preprocessing and encoder inputs without implementing it now.
+## Worktree safety
 
-A distributable CDG engine and an upstream-acceptable patch set are separate deliverables. Keep model/conversion changes, minimal step APIs, controller/example and backend optimizations reviewable separately. Existing ADR-CDG-020 restrictions need explicit amendment/supersession when implementation adopts owned patches or a full native backend. Do not silently reinterpret that ADR. No upstream PR, issue/comment on the user's behalf, public binary release or license change is authorized by this handoff. Upstream contribution needs a qualified human owner; that role need not be the operator.
+- **Active design worktree:** `~/worktrees/ComfyUI-DiffusionGemma-dg-engine` — use this seat only.
+- **Detached rescue/root checkout:** `~/github/shanevcantwell/ComfyUI-DiffusionGemma` — no touch.
+- **Dirty main experiment worktree:** `~/worktrees/ComfyUI-DiffusionGemma-main` — no touch.
+- **Separate docs worktree:** `~/worktrees/ComfyUI-DiffusionGemma-cdg-026-027` — do not mix with engine work.
+
+Before any write, verify the active branch, HEAD, upstream, worktree status, and path allowlist. Never reset, clean, stash, or reconcile another worktree.
+
+## Next bounded bracket
+
+Recommendations, in order:
+
+1. Make the evidence store writable and provenance-bearing.
+2. Decide whether ADR-CDG-020 is amended or superseded; update both decision directions.
+3. Choose a clean implementation branch strategy. Recommended: create a new branch from D3 `7febb63` and curate only the useful I0 artifacts. Do not merge the non-authoritative harness wholesale.
+4. Generate or acquire the exact checkpoint/GGUF artifacts and three derivation records. Close the minimal I0 contract using standard trusted CI and maintainer review.
+5. Begin I1 with the smallest product proof: model metadata/load, one forward graph, and one authoritative reference vector.
+
+Do not add generic enforcement mechanisms unless separately requested and scoped.
+
+## Closure rules
+
+- Allow at most two review-repair rounds before a frame review.
+- Every review finding must receive one disposition:
+  - `FIX_EXISTING_REQUIREMENT`
+  - `WITHDRAW_CLAIM`
+  - `TRACK_RISK`
+  - `REQUEST_SCOPE_CHANGE`
+- An external BLOCKED prerequisite stops the bracket.
+- Commit blocked checkpoints early and label them accurately.
+- Do not apply a phase label when its semantic scope has changed. Rename or re-review the phase instead.
+- A gate certifies only its declared axis; source/synthetic checks are not real-weight or runtime validation.
+
+## Pointers
+
+- Workflow ledger: https://github.com/shanevcantwell/ComfyUI-DiffusionGemma/issues/312
+- Current branch worktree: `~/worktrees/ComfyUI-DiffusionGemma-dg-engine`
+- Canonical Ground Physics: `~/github/shanevcantwell/operating-doctrine/ground-physics/GROUND_PHYSICS.md`
+- Durable forensic analysis: `~/forensic-runs/implement-llama-cpp-dg-engine--analysis--20261024/`
+
+Do not use `/tmp` material as authority. Temporary copies may be verification evidence only.
